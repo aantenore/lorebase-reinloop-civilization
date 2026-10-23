@@ -676,7 +676,7 @@ export class Game {
     if (g.memory.length > this.game.decisions.memoryItems) g.memory.splice(0, g.memory.length - this.game.decisions.memoryItems);
     const now = Date.now();
     this.broadcastGroup(g);
-    this.broadcast({ type: 'plan', id: g.id, scope: 'group', steps: plan.steps, current: 0, reason: plan.summary, createdAt: now });
+    this.broadcastPlan({ type: 'plan', id: g.id, scope: 'group', steps: plan.steps, current: 0, reason: plan.summary, createdAt: now });
     for (const id of g.members) {
       const m = this.world.entities.get(id);
       if (!m || !m.alive) continue;
@@ -692,7 +692,7 @@ export class Game {
     const plan: Plan = { id: e.id, scope, steps, current: 0, reason, createdAt: Date.now() };
     e.plan = plan;
     e.activity = undefined;
-    this.broadcast({ type: 'plan', id: e.id, scope, steps, current: 0, reason, createdAt: plan.createdAt });
+    this.broadcastPlan({ type: 'plan', id: e.id, scope, steps, current: 0, reason, createdAt: plan.createdAt });
   }
 
   // ---- groups (agent tools) ------------------------------------------------------
@@ -892,6 +892,20 @@ export class Game {
   /** Whether a connection may see god-mode content (always, when no token is configured). */
   private privileged(conn: Conn): boolean {
     return !this.cfg.apiToken || conn.authorized;
+  }
+
+  /** A plan: its reason (the agent's reasoning) only to privileged connections; others get `reason: ''`. */
+  private broadcastPlan(msg: Msg): void {
+    if (!this.cfg.apiToken) return this.broadcast(msg);
+    const open: Msg = { ...msg, reason: '' };
+    for (const pc of this.conns.values()) pc.conn.send(pc.conn.authorized ? msg : open);
+    for (const fn of this.listeners) {
+      try {
+        fn(msg);
+      } catch {
+        // a broken listener never stops the world
+      }
+    }
   }
 
   /** A group update: the deliberation trace only to privileged connections. */
