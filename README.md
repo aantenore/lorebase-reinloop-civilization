@@ -102,13 +102,13 @@ points `package.json` at it and runs `npm install`; delete the old tgz and commi
 
 ```bash
 npm install
-npm run lorebase:up        # Postgres + Keeper on 127.0.0.1:8180 (deploy/lorebase.env generated)
+npm run lorebase:up        # Postgres + Keeper on 127.0.0.1:8180 (images rebuilt; deploy/lorebase.env secrets generated)
 npm run lorebase:seed      # Domain, schema, laws and roles merged into main via a Proposal
 (cd services/mnemo && npm install)   # mnemo's own dependency (transformers.js), once
 npm run game               # ONE command: Herald (docker, if not up) + mnemo (:4410) + real-time world (:4400)
 npm run game:mock          # same, offline mock provider
 npm run game:server        # the game server alone (no Herald/mnemo management)
-npm run herald:up          # Herald alone, the Lorebase MCP server, on 127.0.0.1:8190/mcp
+npm run herald:up          # Herald alone (compose profile mcp), the Lorebase MCP server, on 127.0.0.1:8190/mcp
 npm run dev                # legacy tick dashboard (v1) on the same port
 npm run sim:mock           # legacy dashboard, offline mock agents
 npm test                   # unit tests (engine, plans, pathfinding, votes, barter, society, request guards)
@@ -126,13 +126,17 @@ Env overrides: `PORT`, `SIM_TICK_MS`, `SIM_SEED`, `SIM_LANGUAGE`, `SIM_MAX_TURNS
 `SIM_MODEL_OVERRIDE` (a tier or a model id for every agent, for cheap runs), `SIM_MODEL_OPUS|SONNET|HAIKU`,
 `LOREBASE_URL`, `LOREBASE_DOMAIN`, `LOREBASE_BRANCH`, `SIM_ROSTER_FILE`, `SIM_HOST`, `SIM_API_TOKEN`.
 Real-time world: `GAME_CONFIG` (default `config/game.json`), `GAME_CROWD` (extras), `GAME_GROUPS=0`
-(no seeded groups), `GAME_CHRONICLE=0`, `HERALD_URL` (empty: no Lorebase tools), `HERALD_API_KEY`;
+(no seeded groups), `GAME_CHRONICLE=0`, `HERALD_URL` (empty: no Lorebase tools), `HERALD_API_KEY` (sent as bearer
+when set; locally Herald forwards credential-less calls);
 `--seconds N` stops the server after N seconds; `GAME_TIME_SCALE` (game time multiplier, config
 `loop.timeScale`), `GAME_FLOWS_MS`, `MNEMO_URL` (empty: no private memory), `MNEMO_PORT`, `MNEMO_DB`,
 `MNEMO_CONFIG`, `MNEMO_COMPACT_MS`, `MNEMO_EMBEDDER`, `MNEMO_LLM` (`anthropic`|`heuristic`).
 The web UI (in `web/`) is served from `web/dist` when built; in development it runs on :5173.
 
-Stop Lorebase: `bash scripts/lorebase-up.sh down` (keeps data) or `destroy` (drops the volume).
+Lorebase runs from the upstream compose file with two env files: `deploy/lorebase.settings.env` (committed demo
+settings: self approval, direct commits on `main`, CORS origins, Herald port/domain) and `deploy/lorebase.env`
+(git-ignored; ports and secrets, missing secrets such as `LOREBASE_WEBHOOK_KEY` are appended on `up`).
+Stop Lorebase: `bash scripts/lorebase-up.sh down` (keeps data, Herald included) or `destroy` (drops the volume).
 
 ## Try changing the laws
 
