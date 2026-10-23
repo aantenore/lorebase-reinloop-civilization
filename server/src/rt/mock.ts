@@ -1,0 +1,142 @@
+// Offline fallback (mock provider): plans derived from role, tier and the person's own state,
+// so `npm run game:mock` runs without a model. Not how real agents are prompted (see
+// docs/prompts.md): real agents get no tasks; this heuristic only stands in for a model.
+import type { Translate } from '../i18n.ts';
+import { createRng } from '../world/rng.ts';
+import type { PlanStep } from './plan.ts';
+import { tileOf } from './plan.ts';
+import type { Point } from './path.ts';
+import type { RtEntity, RtWorld } from './world.ts';
+
+const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+export interface MockPlan {
+  steps: PlanStep[];
+  reason: string;
+}
+
+/** Plans `count` steps for one person by simulating its position and inventory forward. */
+export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: number; max: number }, wanderRadius: number): MockPlan {
+  const rng = createRng(hash(`${e.id}:${Math.floor(w.clock)}`));
+  const steps: PlanStep[] = [];
+  let pos: Point = tileOf(e);
+  let food = e.inventory.food;
+  let wood = e.inventory.wood;
+  let hunger = e.hunger;
+  let reason = '';
+  const L = (key: string, vars: Record<string, string | number> = {}) => t(`rt.mock.label.${key}`, vars);
+  const radius = Math.max(2, Math.floor(w.r('vision_radius')) * 2);
+  const crit = w.r('critical_hunger');
+  const cost = w.r('shelter_wood_cost');
+  const gatherFood = Math.max(1, Math.floor(w.r('gather_food_yield')));
+  const gatherWood = Math.max(1, Math.floor(w.r('gather_wood_yield')));
+  const hungerPerStep = w.r('food_per_tick') / Math.max(1, w.r('turn_minutes')) * w.r('gather_minutes');
+  const dist = (a: Point) => Math.max(Math.abs(a.x - pos.x), Math.abs(a.y - pos.y));
+  const nearest = (pred: (x: { food: number; wood: number; shelter: number }) => boolean) =>
+    w.tiles.filter((x) => pred(x) && w.walkable(x.x, x.y) && dist(x) <= radius).sort((a, b) => dist(a) - dist(b) + (rng.next() - 0.5))[0];
+  const push = (s: PlanStep) => {
+    if (steps.length < count.max) steps.push(s);
+  };
+  const go = (p: Point) => {
+    if (p.x === pos.x && p.y === pos.y) return;
+    push({ action: 'move_to', args: { x: p.x, y: p.y }, label: L('move', p) });
+    pos = { x: p.x, y: p.y };
+  };
+  const why = (key: string) => (reason ||= t(`rt.mock.reason.${key}`));
+
+  // Talking: planners greet the nearest person now and then.
+  const other = w.living().filter((b) => b.id !== e.id && Math.hypot(b.x - e.x, b.y - e.y) <= w.r('speech_radius'))[0];
+  if (other && e.tier !== 'haiku' && rng.next() < 0.35) push({ action: 'say', args: { to: other.name, text: t('rt.mock.say.greet', { name: other.name }) }, label: L('say') });
+
+  for (let guard = 0; steps.length < count.min && guard < count.max * 3; guard++) {
+    hunger += hungerPerStep;
+    if (w.isNight() && !(w.tile(pos.x, pos.y)?.shelter ?? 0)) {
+      const sh = nearest((x) => x.shelter > 0);
+      if (sh) {
+        why('shelter');
+        go(sh);
+        push({ action: 'sleep', args: { minutes: 20 }, label: L('sleep') });
+        continue;
+      }
+    }
+    if (hunger >= crit - 1 && food >= 1) {
+      why('eat');
+      push({ action: 'eat', args: {}, label: L('eat') });
+      food -= Math.min(food, Math.ceil(hunger));
+      hunger = 0;
+      continue;
+    }
+    if (food < 2 || (e.role === 'gatherer' && food < 6)) {
+      const f = nearest((x) => x.food >= 1);
+      if (f) {
+        why('food');
+        go(f);
+        push({ action: 'gather', args: { resource: 'food' }, label: L('gatherFood') });
+        push({ action: 'gather', args: { resource: 'food' }, label: L('gatherFood') });
+        food += 2 * gatherFood;
+        continue;
+      }
+    }
+    const caring = (e.role === 'healer' || e.role === 'elder') && food >= 2 && w.r('sharing_allowed') >= 1;
+    const needy = caring ? w.living().find((b) => b.id !== e.id && b.hunger >= crit && b.inventory.food < 1) : undefined;
+    if (needy && rng.next() < 0.6) {
+      why('care');
+      push({ action: 'approach', args: { to: needy.name }, label: L('approach', { name: needy.name }) });
+      push({ action: 'give', args: { to: needy.name, resource: 'food', amount: 1 }, label: L('give', { name: needy.name }) });
+      push({ action: 'say', args: { to: needy.name, text: t('rt.mock.say.help', { name: needy.name }) }, label: L('say') });
+      food -= 1;
+      pos = tileOf(needy);
+      continue;
+    }
+    if (e.role === 'builder' || (w.season() === 'autumn' && e.tier !== 'haiku')) {
+      if (wood >= cost) {
+        why('build');
+        push({ action: 'build', args: {}, label: L('build') });
+        wood -= cost;
+        continue;
+      }
+      const f = nearest((x) => x.wood >= 1);
+      if (f) {
+        why('wood');
+        go(f);
+        for (let i = 0; i < 3; i++) push({ action: 'gather', args: { resource: 'wood' }, label: L('gatherWood') });
+        wood += 3 * gatherWood;
+        continue;
+      }
+    }
+    if (e.role === 'explorer' || rng.next() < 0.25) {
+      const tx = pos.x + Math.round((rng.next() * 2 - 1) * wanderRadius);
+      const ty = pos.y + Math.round((rng.next() * 2 - 1) * wanderRadius);
+      if (w.walkable(tx, ty)) {
+        why('explore');
+        go({ x: tx, y: ty });
+        push({ action: 'wait', args: { minutes: 2 }, label: L('wait') });
+        continue;
+      }
+    }
+    const here = w.tile(pos.x, pos.y);
+    if (here && here.food >= 1) {
+      why('idle');
+      push({ action: 'gather', args: { resource: 'food' }, label: L('gatherFood') });
+      food += gatherFood;
+    } else push({ action: 'rest', args: { minutes: 3 }, label: L('rest') });
+  }
+  return { steps, reason: reason || t('rt.mock.reason.idle') };
+}
+
+/** A joint plan: each member's own mock plan, tagged with `who`. */
+export function mockGroupPlan(t: Translate, w: RtWorld, members: RtEntity[], count: { min: number; max: number }, wanderRadius: number): { summary: string; steps: PlanStep[] } {
+  const parts: string[] = [];
+  const steps: PlanStep[] = [];
+  for (const m of members) {
+    const p = mockSteps(t, w, m, count, wanderRadius);
+    parts.push(t('rt.mock.part', { name: m.name, label: p.steps[0]?.label ?? t('rt.mock.label.wait') }));
+    for (const s of p.steps) steps.push({ ...s, args: { ...s.args, who: m.id } });
+  }
+  return { summary: t('rt.mock.summary', { parts: parts.join('; ') }), steps };
+}
+
+/** Flattens steps to the shape a model writes (`{who?, action, ...args, label}`). */
+export function flatSteps(steps: PlanStep[]): Array<Record<string, unknown>> {
+  return steps.map((s) => ({ action: s.action, ...s.args, label: s.label }));
+}

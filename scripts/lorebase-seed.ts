@@ -32,9 +32,15 @@ try {
 
 const existing = await loadRules(client, cfg.lorebase, branch).catch(() => ({ revision: '', rules: [], roles: [] }));
 const haveRules = new Set(existing.rules.map((r) => r.key));
-const haveRoles = new Set(existing.roles.map((r) => r.key));
+const haveRoles = new Map(existing.roles.map((r) => [r.key, r]));
+// A role is (re)written when missing, or when the seed adds speed factors the stored record lacks.
+const roleOutdated = (r: Record<string, unknown>) => {
+  const have = haveRoles.get(String(r.code));
+  if (!have) return true;
+  return (r.move_factor !== undefined && have.moveFactor === undefined) || (r.work_factor !== undefined && have.workFactor === undefined);
+};
 const rows = seed.rules.filter((r) => reset || !haveRules.has(String(r.code)));
-const roleRows = (seed.roles ?? []).filter((r) => reset || !haveRoles.has(String(r.code)));
+const roleRows = (seed.roles ?? []).filter((r) => reset || roleOutdated(r));
 
 const work = `seed/${Date.now().toString(36)}`;
 await client.createBranch(work, branch);

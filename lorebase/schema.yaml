@@ -32,7 +32,7 @@ kinds:
         searchable: true
       category:
         description: Area of life the rule governs.
-        type: {enum: [survival, economy, climate, society]}
+        type: {enum: [survival, economy, climate, society, time]}
         required: true
         indexed: true
       unit:
@@ -58,8 +58,191 @@ kinds:
         description: What holding this role means in society, as people read it.
         type: text
         required: true
+      move_factor:
+        description: Multiplier of the base walking speed for people holding this role (real-time world).
+        type: decimal(6,3)
+      work_factor:
+        description: Multiplier of the base working speed for people holding this role (real-time world).
+        type: decimal(6,3)
+
+  Chronicle:
+    description: One notable event in the history of the civilization (deaths, births, groups, laws), appended by the real-time world.
+    primary_key: [code]
+    title_attribute: text
+    attributes:
+      code:
+        description: Unique id of the entry, minted by the world (session, day, minute and sequence).
+        type: string
+        required: true
+      session:
+        description: Id of the world run the entry belongs to.
+        type: string
+        required: true
+        indexed: true
+      day:
+        description: Day of the world on which the event happened.
+        type: integer
+        required: true
+      minute:
+        description: Minute of the day (0-1439) at which the event happened.
+        type: integer
+        required: true
+      event:
+        description: What kind of event this is.
+        type: {enum: [birth, death, arrival, departure, group_formed, group_dissolved, laws_changed]}
+        required: true
+        indexed: true
+      text:
+        description: The event as people of the world would tell it.
+        type: text
+        required: true
+        searchable: true
+      actors:
+        description: Names of the people involved, comma separated.
+        type: string
+
+  Insight:
+    description: A piece of the shared consciousness of a social role - something people holding that role came to believe about the world, accepted by a peer of the same role.
+    primary_key: [code]
+    title_attribute: text
+    attributes:
+      code:
+        description: Unique id of the insight, minted by the world.
+        type: string
+        required: true
+      role:
+        description: Code of the role whose shared consciousness this belongs to.
+        type: string
+        required: true
+        indexed: true
+      text:
+        description: The insight, as its author wrote it (Italian).
+        type: text
+        required: true
+        searchable: true
+      confidence:
+        description: How sure the author is, from 0 to 1.
+        type: decimal(4,3)
+        required: true
+      author:
+        description: Name of the person who shared it.
+        type: string
+        required: true
+      reviewer:
+        description: Name of the peer who accepted or rejected it.
+        type: string
+      day:
+        description: Day of the world on which it was shared.
+        type: integer
+        required: true
+      evidence:
+        description: What the author saw or lived that supports it.
+        type: text
+        searchable: true
+      status:
+        description: proposed (waiting for a peer), accepted (part of the role's consciousness), retired (no longer held).
+        type: {enum: [proposed, accepted, retired]}
+        required: true
+        indexed: true
+
+relations:
+  held_by_role:
+    inverse_api_name: insights
+    description: The social role whose shared consciousness an insight belongs to.
+    from_kind: Insight
+    to_kind: Role
+    cardinality: many_to_one
 
 operations:
+  enact_rule:
+    description: Enact a brand-new law directly on the live branch (no review).
+    parameters:
+      - name: code
+        type: string
+        required: true
+        description: Stable identifier of the new law, snake_case.
+      - name: value
+        type: decimal(12,4)
+        required: true
+        description: Numeric value (1 for a law that only has a wording).
+      - name: text
+        type: text
+        required: true
+        description: Wording of the law as people read it.
+      - name: category
+        type: {enum: [survival, economy, climate, society, time]}
+        required: true
+        description: Area of life the law governs.
+      - name: unit
+        type: string
+        required: false
+        description: Unit of the value, for display.
+    steps:
+      - step: create_record
+        kind: Rule
+        values:
+          code: params.code
+          value: params.value
+          text: params.text
+          category: params.category
+          unit: params.unit
+    review_policy:
+      mode: never
+
+  share_insight:
+    description: Record an insight of a social role (on a role/ branch; it reaches main through a peer-reviewed Proposal).
+    parameters:
+      - name: code
+        type: string
+        required: true
+        description: Unique id of the insight.
+      - name: role
+        type: ref(Role)
+        required: true
+        description: The role whose shared consciousness it belongs to.
+      - name: role_code
+        type: string
+        required: true
+        description: Code of that role.
+      - name: text
+        type: text
+        required: true
+        description: The insight.
+      - name: confidence
+        type: decimal(4,3)
+        required: true
+        description: How sure the author is, 0 to 1.
+      - name: author
+        type: string
+        required: true
+        description: Name of the author.
+      - name: day
+        type: integer
+        required: true
+        description: Day of the world.
+      - name: evidence
+        type: text
+        required: false
+        description: What supports it.
+    steps:
+      - step: create_record
+        kind: Insight
+        values:
+          code: params.code
+          role: params.role_code
+          text: params.text
+          confidence: params.confidence
+          author: params.author
+          day: params.day
+          evidence: params.evidence
+          status: '"proposed"'
+      - step: create_link
+        relation: held_by_role
+        from: $step[0]
+        to: params.role
+    review_policy:
+      mode: never
+
   set_rule:
     description: Change the value of one law directly on the live branch (no review).
     parameters:

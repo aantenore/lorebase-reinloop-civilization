@@ -36,9 +36,9 @@ sim.subscribe((ev) => {
 });
 
 const server = createHttpServer(sim);
-server.listen(cfg.http.port, () => {
+server.listen(cfg.http.port, cfg.http.host, () => {
   const s = sim.status();
-  console.log(`civilization server on http://localhost:${cfg.http.port} (provider ${s.provider}${cfg.modelOverride ? `, all agents on ${cfg.modelOverride}` : ''})`);
+  console.log(`civilization server on http://${cfg.http.host}:${cfg.http.port} (provider ${s.provider}${cfg.modelOverride ? `, all agents on ${cfg.modelOverride}` : ''})`);
 });
 
 function stop(): void {

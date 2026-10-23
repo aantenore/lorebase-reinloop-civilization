@@ -1,8 +1,7 @@
 // The simulation: reads the rules snapshot kept by the Lorebase watcher, runs every living
 // person's reinloop agent concurrently each tick, resolves the world and publishes events.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { ROOT, type RosterEntry, type SimConfig } from '../config.ts';
+import { cleanEntry, loadRosterFile, saveRosterFile, validateEntry, validateRoster } from '../roster.ts';
 import { loadTemplates, type Translate, translator } from '../i18n.ts';
 import { AgentRegistry, type RegisteredAgent } from '../agents/registry.ts';
 import { observation } from '../agents/prompt.ts';
@@ -10,7 +9,7 @@ import { LorebaseClient } from '../lorebase/client.ts';
 import { diffRules, type Role, type RoleChange, type Rule, type RuleChange, ruleValues } from '../lorebase/rules.ts';
 import { RuleWatcher } from '../lorebase/watcher.ts';
 import { missingRules, seasonOf, World } from '../world/engine.ts';
-import { type ActionResult, type AgentState, type Rules, type Stats, TIERS, type Tile, type WorldEvent } from '../world/types.ts';
+import { type ActionResult, type AgentState, type Rules, type Stats, type Tile, type WorldEvent } from '../world/types.ts';
 
 export interface SimStatus {
   running: boolean;
@@ -210,34 +209,20 @@ export class Simulation {
     return state;
   }
 
+  private roleKeys(): string[] {
+    return this.roles.map((r) => r.key);
+  }
+
   validateRoster(entries: unknown): string | undefined {
-    if (!Array.isArray(entries)) return 'agents must be an array';
-    const { minRoster, maxRoster } = this.cfg.agents;
-    if (entries.length < minRoster || entries.length > maxRoster) return `between ${minRoster} and ${maxRoster} agents are allowed`;
-    const names = new Set<string>();
-    for (const [i, e] of entries.entries()) {
-      const err = this.validateEntry(e);
-      if (err) return `agents[${i}]: ${err}`;
-      const n = (e as RosterEntry).name.trim().toLowerCase();
-      if (names.has(n)) return `duplicate name "${(e as RosterEntry).name}"`;
-      names.add(n);
-    }
-    return undefined;
+    return validateRoster(entries, this.roleKeys(), this.cfg);
   }
 
   validateEntry(e: unknown): string | undefined {
-    if (!e || typeof e !== 'object') return 'must be an object';
-    const r = e as Record<string, unknown>;
-    if (typeof r.name !== 'string' || !r.name.trim() || r.name.length > 40) return 'name must be 1-40 characters';
-    if (typeof r.role !== 'string' || !this.roles.some((x) => x.key === r.role)) return `role must be one of ${this.roles.map((x) => x.key).join(', ')}`;
-    if (!TIERS.includes(r.tier as never)) return `tier must be one of ${TIERS.join(', ')}`;
-    if (r.model !== undefined && (typeof r.model !== 'string' || !r.model.includes('/'))) return 'model must look like "provider/model"';
-    if (r.personality !== undefined && typeof r.personality !== 'string') return 'personality must be a string';
-    return undefined;
+    return validateEntry(e, this.roleKeys(), this.cfg);
   }
 
   private clean(e: RosterEntry): RosterEntry {
-    return { ...(e.id ? { id: e.id } : {}), name: e.name.trim(), role: e.role, tier: e.tier, ...(e.model ? { model: e.model } : {}), ...(e.personality ? { personality: e.personality } : {}) };
+    return cleanEntry(e);
   }
 
   async setRoster(entries: RosterEntry[]): Promise<string | undefined> {
@@ -272,25 +257,11 @@ export class Simulation {
   }
 
   private loadRoster(): RosterEntry[] {
-    try {
-      if (existsSync(this.cfg.rosterFile)) {
-        const saved = JSON.parse(readFileSync(this.cfg.rosterFile, 'utf8')) as RosterEntry[];
-        if (!this.validateRoster(saved)) return saved;
-        console.warn(`ignoring invalid ${this.cfg.rosterFile}`);
-      }
-    } catch (err) {
-      console.warn(`cannot read ${this.cfg.rosterFile}: ${err instanceof Error ? err.message : err}`);
-    }
-    return this.cfg.roster;
+    return loadRosterFile(this.cfg, this.roleKeys());
   }
 
   private saveRoster(): void {
-    try {
-      mkdirSync(dirname(this.cfg.rosterFile), { recursive: true });
-      writeFileSync(this.cfg.rosterFile, `${JSON.stringify(this.roster, null, 2)}\n`);
-    } catch (err) {
-      console.warn(`cannot save roster: ${err instanceof Error ? err.message : err}`);
-    }
+    saveRosterFile(this.cfg, this.roster);
   }
 
   // ---- tick -----------------------------------------------------------------

@@ -1,0 +1,584 @@
+// Real-time world: a tile map with elevation, people with float positions executing plans at
+// their own speed, a clock in game minutes, and the laws (Lorebase Rule values) applied per
+// game minute. No IO: everything that happens is reported through `onEvent`.
+import type { Role } from '../lorebase/rules.ts';
+import { seasonOf } from '../world/engine.ts';
+import { createRng, type Rng, valueNoise } from '../world/rng.ts';
+import type { Rules, Season } from '../world/types.ts';
+import { findPath, nearestWalkable, type Point } from './path.ts';
+import { type Activity, advance, type Anim, type Dir, type ExecContext, type Plan, prepareStep, tileOf } from './plan.ts';
+
+export type Biome = 'grass' | 'forest' | 'water' | 'rock' | 'sand';
+export type EntityTier = 'opus' | 'sonnet' | 'haiku' | 'human';
+export type EntityKind = 'agent' | 'player' | 'crowd';
+export type Resource = 'food' | 'wood';
+
+/** Rule keys the real-time world reads (values only in Lorebase). */
+export const RT_RULE_KEYS = [
+  'max_hp', 'food_per_tick', 'starvation_threshold', 'starvation_damage', 'rest_heal', 'gather_food_yield', 'gather_wood_yield',
+  'regrowth_per_tick', 'shelter_wood_cost', 'winter_every_ticks', 'winter_length_ticks', 'winter_food_yield_multiplier',
+  'cold_damage_unsheltered', 'birth_food_cost', 'sharing_allowed', 'vision_radius', 'game_minutes_per_real_second', 'turn_minutes',
+  'dawn_minute', 'dusk_minute', 'plan_horizon_minutes', 'replan_cooldown_minutes', 'base_move_speed', 'base_work_speed',
+  'gather_minutes', 'build_minutes', 'eat_minutes', 'weak_speed_factor', 'critical_hunger', 'critical_hp_fraction', 'speech_radius',
+  'max_shelter_level',
+] as const;
+export type RtRuleKey = (typeof RT_RULE_KEYS)[number];
+
+export const DAY_MINUTES = 1440;
+
+export function missingRtRules(rules: Rules): string[] {
+  return RT_RULE_KEYS.filter((k) => typeof rules[k] !== 'number' || !Number.isFinite(rules[k]));
+}
+
+export interface RtTile {
+  x: number;
+  y: number;
+  biome: Biome;
+  elev: number;
+  food: number;
+  wood: number;
+  shelter: number;
+}
+
+export interface MapConfig {
+  width: number;
+  height: number;
+  noiseScale: number;
+  waterBelow: number;
+  sandBelow: number;
+  rockAbove: number;
+  forestAbove: number;
+  elevationSteps: number;
+  capacity: Record<Biome, { food: number; wood: number }>;
+  blocked: Biome[];
+  initialFill: [number, number];
+  spawnRadius: number;
+  maxPopulation: number;
+}
+
+export interface MovementConfig {
+  arriveEpsilon: number;
+  interactRange: number;
+  maxPathNodes: number;
+  diagonal: boolean;
+}
+
+export interface InboxItem {
+  from: string;
+  fromName: string;
+  to: string;
+  text: string;
+  day: number;
+  minute: number;
+}
+
+export interface RtEntity {
+  id: string;
+  name: string;
+  role: string;
+  tier: EntityTier;
+  model: string;
+  kind: EntityKind;
+  personality: string;
+  groupId: string | null;
+  x: number;
+  y: number;
+  dir: Dir;
+  anim: Anim;
+  hp: number;
+  maxHp: number;
+  hunger: number;
+  inventory: { food: number; wood: number };
+  alive: boolean;
+  plan?: Plan;
+  activity?: Activity;
+  /** Player movement vector (tile space, length <= 1). */
+  input: { dx: number; dy: number };
+  /** What this person lived through, newest last (own memory, read back when deciding). */
+  memory: string[];
+  inbox: InboxItem[];
+  lastBirthTurn: number;
+  diedAtMs?: number;
+  /** Players: brief work animation after an act. */
+  busyUntilMinute?: number;
+}
+
+export type WorldEvent =
+  | { type: 'step'; id: string; current: number }
+  | { type: 'step_failed'; id: string; step: number; reason: string }
+  | { type: 'plan_done'; id: string }
+  | { type: 'say'; from: string; to: string; text: string; hearers: string[] }
+  | { type: 'tile'; tile: RtTile }
+  | { type: 'death'; id: string; cause: 'starved' | 'frozen' | 'other' }
+  | { type: 'birth'; child: RtEntity; parents: [string, string] }
+  | { type: 'build'; id: string; x: number; y: number; level: number }
+  | { type: 'gave'; from: string; to: string; resource: Resource; amount: number }
+  | { type: 'critical'; id: string; what: 'hunger' | 'hp' }
+  | { type: 'season'; season: Season }
+  | { type: 'night'; night: boolean };
+
+export interface ActResult {
+  ok: boolean;
+  /** Stable reason code when not ok (translated by the caller). */
+  reason?: string;
+  amount?: number;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+export class RtWorld {
+  readonly map: MapConfig;
+  readonly move: MovementConfig;
+  readonly width: number;
+  readonly height: number;
+  tiles: RtTile[] = [];
+  entities = new Map<string, RtEntity>();
+  /** Total game minutes since day 1 00:00. */
+  clock: number;
+  /** Clock value at which the world began: turns (and so seasons) count from here. */
+  epoch: number;
+  rules: Rules = {};
+  roleOf: (code: string) => Role | undefined = () => undefined;
+  onEvent: (ev: WorldEvent) => void = () => undefined;
+  namePool: string[];
+  memoryItems: number;
+  inboxItems: number;
+  private rng: Rng;
+  private nextId = 1;
+  private lastSeason: Season | undefined;
+  private lastNight: boolean | undefined;
+  private lastTurn = -1;
+  private namesUsed = new Set<string>();
+
+  constructor(map: MapConfig, move: MovementConfig, seed: number, startMinute: number, opts: { namePool: string[]; memoryItems: number; inboxItems: number }) {
+    this.map = map;
+    this.move = move;
+    this.width = map.width;
+    this.height = map.height;
+    this.rng = createRng(seed);
+    this.clock = startMinute;
+    this.epoch = startMinute;
+    this.namePool = opts.namePool;
+    this.memoryItems = opts.memoryItems;
+    this.inboxItems = opts.inboxItems;
+    this.generate();
+  }
+
+  // ---- rules & time -------------------------------------------------------
+
+  r(key: RtRuleKey): number {
+    const v = this.rules[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`rule "${key}" is missing or not a number`);
+    return v;
+  }
+
+  get day(): number {
+    return Math.floor(this.clock / DAY_MINUTES) + 1;
+  }
+
+  get minute(): number {
+    return Math.floor(this.clock % DAY_MINUTES);
+  }
+
+  get turn(): number {
+    return Math.floor((this.clock - this.epoch) / Math.max(1, this.r('turn_minutes')));
+  }
+
+  season(): Season {
+    return seasonOf(this.turn, this.rules);
+  }
+
+  isNight(): boolean {
+    const m = this.minute;
+    const dawn = this.r('dawn_minute');
+    const dusk = this.r('dusk_minute');
+    return dawn <= dusk ? m >= dusk || m < dawn : m >= dusk && m < dawn;
+  }
+
+  // ---- map ----------------------------------------------------------------
+
+  private generate(): void {
+    const m = this.map;
+    const elevation = valueNoise(this.rng, m.width, m.height, m.noiseScale);
+    const moisture = valueNoise(this.rng, m.width, m.height, m.noiseScale);
+    for (let y = 0; y < m.height; y++) {
+      for (let x = 0; x < m.width; x++) {
+        const e = elevation[y]![x]!;
+        const biome: Biome = e < m.waterBelow ? 'water' : e > m.rockAbove ? 'rock' : e < m.sandBelow ? 'sand' : moisture[y]![x]! > m.forestAbove ? 'forest' : 'grass';
+        const elev = biome === 'water' ? 0 : 1 + Math.floor(clamp((e - m.waterBelow) / (1 - m.waterBelow), 0, 0.999) * m.elevationSteps);
+        const fill = m.initialFill[0] + this.rng.next() * (m.initialFill[1] - m.initialFill[0]);
+        const cap = m.capacity[biome];
+        this.tiles.push({ x, y, biome, elev, food: round2(cap.food * fill), wood: round2(cap.wood * fill), shelter: 0 });
+      }
+    }
+  }
+
+  tile(x: number, y: number): RtTile | undefined {
+    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return undefined;
+    return this.tiles[y * this.width + x];
+  }
+
+  walkable = (x: number, y: number): boolean => {
+    const t = this.tile(x, y);
+    return !!t && !this.map.blocked.includes(t.biome);
+  };
+
+  path(from: Point, to: Point): Point[] | undefined {
+    return findPath(this.width, this.height, this.walkable, from, to, { diagonal: this.move.diagonal, maxNodes: this.move.maxPathNodes });
+  }
+
+  // ---- people -------------------------------------------------------------
+
+  living(): RtEntity[] {
+    return [...this.entities.values()].filter((e) => e.alive);
+  }
+
+  find(ref: string): RtEntity | undefined {
+    const r = ref.trim().toLowerCase();
+    return this.entities.get(ref) ?? [...this.entities.values()].find((e) => e.alive && (e.name.toLowerCase() === r || e.id.toLowerCase() === r));
+  }
+
+  nameTaken(name: string): boolean {
+    return this.living().some((e) => e.name.toLowerCase() === name.trim().toLowerCase());
+  }
+
+  private spawnPoint(near?: Point): Point {
+    const cx = near?.x ?? Math.floor(this.width / 2);
+    const cy = near?.y ?? Math.floor(this.height / 2);
+    const radius = near ? 1 : this.map.spawnRadius;
+    const pool = this.tiles.filter((t) => Math.max(Math.abs(t.x - cx), Math.abs(t.y - cy)) <= radius && this.walkable(t.x, t.y));
+    if (pool.length) {
+      const t = this.rng.pick(pool);
+      return { x: t.x, y: t.y };
+    }
+    const p = nearestWalkable(this.width, this.height, this.walkable, { x: cx, y: cy });
+    if (!p) throw new Error('no walkable tile in the world');
+    return p;
+  }
+
+  spawn(spec: { id?: string; name: string; role: string; tier: EntityTier; model: string; kind: EntityKind; personality?: string }, near?: Point): RtEntity {
+    let id = spec.id && !this.entities.has(spec.id) ? spec.id : `${spec.kind === 'player' ? 'p' : spec.kind === 'crowd' ? 'c' : 'a'}${this.nextId++}`;
+    while (this.entities.has(id)) id = `e${this.nextId++}`;
+    const at = this.spawnPoint(near);
+    const maxHp = this.r('max_hp');
+    const e: RtEntity = {
+      id, name: spec.name, role: spec.role, tier: spec.tier, model: spec.model, kind: spec.kind, personality: spec.personality ?? '',
+      groupId: null, x: at.x, y: at.y, dir: 's', anim: 'idle', hp: maxHp, maxHp, hunger: 0, inventory: { food: 0, wood: 0 },
+      alive: true, input: { dx: 0, dy: 0 }, memory: [], inbox: [], lastBirthTurn: this.turn,
+    };
+    this.entities.set(id, e);
+    this.namesUsed.add(spec.name);
+    return e;
+  }
+
+  remember(e: RtEntity, text: string): void {
+    e.memory.push(`[g${this.day} ${this.clockText()}] ${text}`);
+    if (e.memory.length > this.memoryItems) e.memory.splice(0, e.memory.length - this.memoryItems);
+  }
+
+  clockText(): string {
+    const m = this.minute;
+    return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  }
+
+  kill(id: string, cause: 'starved' | 'frozen' | 'other', nowMs: number): boolean {
+    const e = this.entities.get(id);
+    if (!e || !e.alive) return false;
+    e.alive = false;
+    e.hp = 0;
+    e.anim = 'idle';
+    e.plan = undefined;
+    e.activity = undefined;
+    e.diedAtMs = nowMs;
+    this.onEvent({ type: 'death', id, cause });
+    return true;
+  }
+
+  isSheltered(e: { x: number; y: number }): boolean {
+    const t = tileOf(e);
+    return (this.tile(t.x, t.y)?.shelter ?? 0) > 0;
+  }
+
+  /** Health factor in [weak_speed_factor, 1]. */
+  private vigor(e: RtEntity): number {
+    const weak = clamp(this.r('weak_speed_factor'), 0, 1);
+    return weak + (1 - weak) * clamp(e.hp / Math.max(1e-9, e.maxHp), 0, 1);
+  }
+
+  /** Walking speed in tiles per real second. */
+  speedOf(e: RtEntity): number {
+    const role = this.roleOf(e.role)?.moveFactor ?? 1;
+    return round2(this.r('base_move_speed') * this.r('game_minutes_per_real_second') * role * this.vigor(e));
+  }
+
+  workSpeedOf(e: RtEntity): number {
+    return this.r('base_work_speed') * (this.roleOf(e.role)?.workFactor ?? 1) * this.vigor(e);
+  }
+
+  private execContext(): ExecContext {
+    return {
+      path: (from, to) => this.path(from, to),
+      locate: (who) => {
+        const t = this.find(who);
+        return t && t.alive ? tileOf(t) : undefined;
+      },
+      durations: { gather: this.r('gather_minutes'), build: this.r('build_minutes'), eat: this.r('eat_minutes') },
+      maxWaitMinutes: Math.max(1, this.r('plan_horizon_minutes')),
+    };
+  }
+
+  // ---- actions (instant effects) ----------------------------------------------
+
+  private winterFactor(): number {
+    return this.season() === 'winter' ? this.r('winter_food_yield_multiplier') : 1;
+  }
+
+  gather(e: RtEntity, resource: Resource, at: Point = tileOf(e)): ActResult {
+    const t = this.tile(at.x, at.y);
+    if (!t) return { ok: false, reason: 'outside' };
+    const base = this.r(resource === 'food' ? 'gather_food_yield' : 'gather_wood_yield');
+    const amount = Math.floor(Math.min(base * this.winterFactor(), t[resource]));
+    if (amount < 1) return { ok: false, reason: 'not_enough' };
+    t[resource] = round2(t[resource] - amount);
+    e.inventory[resource] += amount;
+    this.onEvent({ type: 'tile', tile: t });
+    return { ok: true, amount };
+  }
+
+  eat(e: RtEntity, amount?: number): ActResult {
+    if (e.hunger <= 0) return { ok: false, reason: 'not_hungry' };
+    if (e.inventory.food < 1) return { ok: false, reason: 'no_food' };
+    const want = Math.max(1, Math.floor(amount ?? Math.ceil(e.hunger)));
+    const n = Math.min(want, e.inventory.food, Math.ceil(e.hunger));
+    e.inventory.food -= n;
+    e.hunger = round2(Math.max(0, e.hunger - n));
+    return { ok: true, amount: n };
+  }
+
+  build(e: RtEntity, at: Point = tileOf(e)): ActResult {
+    const t = this.tile(at.x, at.y);
+    if (!t || !this.walkable(t.x, t.y)) return { ok: false, reason: 'cannot_build_here' };
+    if (t.shelter >= this.r('max_shelter_level')) return { ok: false, reason: 'shelter_max' };
+    const cost = this.r('shelter_wood_cost');
+    if (e.inventory.wood < cost) return { ok: false, reason: 'not_enough_wood' };
+    e.inventory.wood = round2(e.inventory.wood - cost);
+    t.shelter++;
+    this.onEvent({ type: 'tile', tile: t });
+    this.onEvent({ type: 'build', id: e.id, x: t.x, y: t.y, level: t.shelter });
+    return { ok: true, amount: t.shelter };
+  }
+
+  give(e: RtEntity, to: string, resource: Resource, amount: number): ActResult {
+    if (this.r('sharing_allowed') < 1) return { ok: false, reason: 'giving_forbidden' };
+    const b = this.find(to);
+    if (!b || !b.alive || b.id === e.id) return { ok: false, reason: 'no_such_person' };
+    if (Math.hypot(b.x - e.x, b.y - e.y) > this.move.interactRange) return { ok: false, reason: 'too_far' };
+    const n = Math.floor(Math.min(amount, e.inventory[resource]));
+    if (n < 1) return { ok: false, reason: 'nothing_to_give' };
+    e.inventory[resource] -= n;
+    b.inventory[resource] += n;
+    this.onEvent({ type: 'gave', from: e.id, to: b.id, resource, amount: n });
+    return { ok: true, amount: n };
+  }
+
+  /** Speech reaches everyone within speech_radius. A named listener must be in range. */
+  say(e: RtEntity, to: string, text: string): ActResult {
+    const radius = this.r('speech_radius');
+    const near = this.living().filter((b) => b.id !== e.id && Math.hypot(b.x - e.x, b.y - e.y) <= radius);
+    const all = !to || to.trim().toLowerCase() === 'all';
+    const target = all ? undefined : this.find(to);
+    if (!all && (!target || !target.alive)) return { ok: false, reason: 'no_such_person' };
+    if (target && !near.includes(target)) return { ok: false, reason: 'too_far' };
+    const item: InboxItem = { from: e.id, fromName: e.name, to: target?.id ?? 'all', text, day: this.day, minute: this.minute };
+    for (const b of near) {
+      b.inbox.push(item);
+      if (b.inbox.length > this.inboxItems) b.inbox.splice(0, b.inbox.length - this.inboxItems);
+    }
+    this.onEvent({ type: 'say', from: e.id, to: item.to, text, hearers: near.map((b) => b.id) });
+    return { ok: true };
+  }
+
+  // ---- simulation step ----------------------------------------------------------
+
+  /** Advances the world by `dtSeconds` of real time. */
+  step(dtSeconds: number, nowMs: number): void {
+    const minutes = dtSeconds * Math.max(0, this.r('game_minutes_per_real_second'));
+    this.clock += minutes;
+    this.calendar();
+    const ctx = this.execContext();
+    for (const e of this.living()) {
+      if (e.kind === 'player') this.movePlayer(e, dtSeconds);
+      else this.runPlan(e, dtSeconds, minutes, ctx);
+      this.body(e, minutes, nowMs);
+    }
+  }
+
+  private calendar(): void {
+    const season = this.season();
+    if (season !== this.lastSeason) {
+      if (this.lastSeason) this.onEvent({ type: 'season', season });
+      this.lastSeason = season;
+    }
+    const night = this.isNight();
+    if (night !== this.lastNight) {
+      if (this.lastNight !== undefined) this.onEvent({ type: 'night', night });
+      this.lastNight = night;
+    }
+    const turn = this.turn;
+    if (this.lastTurn < 0) this.lastTurn = turn;
+    while (this.lastTurn < turn) {
+      this.lastTurn++;
+      this.regrow();
+      this.births();
+    }
+  }
+
+  private movePlayer(e: RtEntity, dt: number): void {
+    if (e.busyUntilMinute !== undefined && this.clock < e.busyUntilMinute) return;
+    e.busyUntilMinute = undefined;
+    const { dx, dy } = e.input;
+    if (!dx && !dy) {
+      if (e.anim === 'walk' || e.anim === 'work' || e.anim === 'eat') e.anim = 'idle';
+      return;
+    }
+    const step = this.speedOf(e) * dt;
+    const nx = clamp(e.x + dx * step, 0, this.width - 1);
+    const ny = clamp(e.y + dy * step, 0, this.height - 1);
+    if (this.walkable(Math.round(nx), Math.round(e.y))) e.x = nx;
+    if (this.walkable(Math.round(e.x), Math.round(ny))) e.y = ny;
+    e.anim = 'walk';
+    e.dir = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'e' : 'w') : dy > 0 ? 's' : 'n';
+  }
+
+  private runPlan(e: RtEntity, dt: number, minutes: number, ctx: ExecContext): void {
+    const plan = e.plan;
+    if (!plan || plan.current >= plan.steps.length) {
+      if (e.anim !== 'sleep') e.anim = 'idle';
+      return;
+    }
+    const step = plan.steps[plan.current]!;
+    if (!e.activity) {
+      const prepared = prepareStep(step, e, ctx);
+      if ('error' in prepared) return this.failStep(e, prepared.error);
+      e.activity = prepared.activity;
+    }
+    if (!advance(e.activity, e, dt, this.speedOf(e), minutes, this.workSpeedOf(e), this.move.arriveEpsilon)) return;
+    e.activity = undefined;
+    const out = this.complete(e, step.action, step.args);
+    if (!out.ok) return this.failStep(e, out.reason ?? 'failed');
+    this.nextStep(e);
+  }
+
+  private complete(e: RtEntity, action: string, args: Record<string, unknown>): ActResult {
+    switch (action) {
+      case 'gather':
+        return this.gather(e, args.resource === 'wood' ? 'wood' : 'food');
+      case 'eat':
+        return this.eat(e, typeof args.amount === 'number' ? args.amount : undefined);
+      case 'build':
+        return this.build(e);
+      case 'give':
+        return this.give(e, String(args.to), args.resource === 'wood' ? 'wood' : 'food', Number(args.amount));
+      case 'say':
+        return this.say(e, String(args.to ?? 'all'), String(args.text ?? ''));
+      default:
+        return { ok: true };
+    }
+  }
+
+  private nextStep(e: RtEntity): void {
+    const plan = e.plan!;
+    plan.current++;
+    this.onEvent({ type: 'step', id: e.id, current: plan.current });
+    if (plan.current >= plan.steps.length) {
+      e.anim = 'idle';
+      this.onEvent({ type: 'plan_done', id: e.id });
+    }
+  }
+
+  private failStep(e: RtEntity, reason: string): void {
+    const plan = e.plan!;
+    e.activity = undefined;
+    this.onEvent({ type: 'step_failed', id: e.id, step: plan.current, reason });
+    this.nextStep(e);
+  }
+
+  private body(e: RtEntity, minutes: number, nowMs: number): void {
+    if (!e.alive || minutes <= 0) return;
+    const perTurn = minutes / Math.max(1e-9, this.r('turn_minutes'));
+    const threshold = this.r('starvation_threshold');
+    const critHunger = this.r('critical_hunger');
+    const critHp = this.r('critical_hp_fraction') * e.maxHp;
+    const hungerBefore = e.hunger;
+    const hpBefore = e.hp;
+    e.maxHp = this.r('max_hp');
+    e.hunger = round2(e.hunger + this.r('food_per_tick') * perTurn);
+    let cause: 'starved' | 'frozen' | undefined;
+    if (e.hunger > threshold) {
+      e.hp -= this.r('starvation_damage') * perTurn;
+      cause = 'starved';
+    }
+    if (this.season() === 'winter' && !this.isSheltered(e)) {
+      const dmg = this.r('cold_damage_unsheltered') * perTurn;
+      if (dmg > 0) {
+        e.hp -= dmg;
+        cause ??= 'frozen';
+      }
+    }
+    const resting = e.anim === 'sleep' || (e.plan && ['rest', 'sleep'].includes(e.plan.steps[e.plan.current]?.action ?? ''));
+    if (resting && e.hunger <= threshold) e.hp += this.r('rest_heal') * perTurn;
+    e.hp = clamp(e.hp, 0, e.maxHp);
+    if (e.hp <= 0) {
+      this.kill(e.id, cause ?? 'other', nowMs);
+      return;
+    }
+    if (hungerBefore < critHunger && e.hunger >= critHunger) this.onEvent({ type: 'critical', id: e.id, what: 'hunger' });
+    if (hpBefore >= critHp && e.hp < critHp) this.onEvent({ type: 'critical', id: e.id, what: 'hp' });
+  }
+
+  private regrow(): void {
+    const rate = this.r('regrowth_per_tick') * this.winterFactor();
+    if (rate <= 0) return;
+    for (const t of this.tiles) {
+      const cap = this.map.capacity[t.biome];
+      const food = round2(Math.min(cap.food, t.food + cap.food * rate));
+      const wood = round2(Math.min(cap.wood, t.wood + cap.wood * rate));
+      if (food !== t.food || wood !== t.wood) {
+        t.food = food;
+        t.wood = wood;
+        this.onEvent({ type: 'tile', tile: t });
+      }
+    }
+  }
+
+  private births(): void {
+    const cost = this.r('birth_food_cost');
+    const threshold = this.r('starvation_threshold');
+    const year = Math.max(1, Math.round(this.r('winter_every_ticks')));
+    const turn = this.lastTurn;
+    const ready = this.living().filter((a) => a.kind !== 'player' && a.hunger <= threshold && turn - a.lastBirthTurn >= year && this.isSheltered(a));
+    const used = new Set<string>();
+    for (const a of ready) {
+      if (used.has(a.id)) continue;
+      const ta = tileOf(a);
+      const b = ready.find((p) => p.id !== a.id && !used.has(p.id) && tileOf(p).x === ta.x && tileOf(p).y === ta.y && a.inventory.food + p.inventory.food >= cost);
+      if (!b) continue;
+      if (this.living().length >= this.map.maxPopulation) return;
+      const fromA = Math.min(a.inventory.food, Math.max(cost / 2, cost - b.inventory.food));
+      a.inventory.food = round2(a.inventory.food - fromA);
+      b.inventory.food = round2(b.inventory.food - (cost - fromA));
+      a.lastBirthTurn = b.lastBirthTurn = turn;
+      used.add(a.id).add(b.id);
+      const parent = this.rng.next() < 0.5 ? a : b;
+      const child = this.spawn({ name: this.childName(), role: parent.role, tier: parent.tier, model: parent.model, kind: parent.kind }, ta);
+      child.lastBirthTurn = turn;
+      this.onEvent({ type: 'birth', child, parents: [a.id, b.id] });
+    }
+  }
+
+  private childName(): string {
+    const free = this.namePool.filter((n) => !this.namesUsed.has(n) && !this.nameTaken(n));
+    return free.length ? this.rng.pick(free) : `${this.namePool[0] ?? 'N'}${this.nextId}`;
+  }
+}

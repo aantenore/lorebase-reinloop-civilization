@@ -1,5 +1,61 @@
 # Prompts
 
+Two modes: the real-time world (`npm run game`, v2, below first) and the legacy tick dashboard
+(`npm run dev`, v1, further down).
+
+## Real-time world (v2)
+
+The prompt is minimal: no laws, no tasks, no goals, no strategy, no advice on when to consult.
+
+| Part | Source |
+|------|--------|
+| Instructions (system) | `config/i18n/<lang>.rt.json` → `instructions`: name, personality, role code and title (Lorebase `Role`), the faculties (a mind connected to Lorebase through the `lorebase_*` tools: laws, the role's shared consciousness, the chronicle; a private memory `remember`/`recall`) and the plan interface (`commit_plan`, step counts and horizon of the tier) |
+| Observation (user message, at each decision) | `rt.observation.*`, `rt.look.*`: time and season, the person's body and position, group, current step, why it is thinking again (a fact: plan finished, step failed, spoken to, ...), what it perceives within `vision_radius`, what was said to it, what it lived (last `memoryItems`), and which law keys changed since it last thought |
+| Tools | `commit_plan`, `say`, `form_group`, `join_group`, `leave_group`, `share_insight`, `review_insights`, `judge_insight` (`rt.tools.*`); Lorebase read tools from Herald (`lorebase_get`, `lorebase_query`, `lorebase_search`, `lorebase_history`, `lorebase_diff`, `lorebase_changes`, `lorebase_schema`, `lorebase_context`; descriptions `rt.mcp.*`); private memory `remember`/`recall` (reinloop memory tools, one file per person under `data/minds`) |
+| Spoken reply | same instructions + `rt.replyInstructions`; short observation without laws; optional `rethink` tool |
+| Group members | `rt.memberInstructions` + the group situation (`rt.group.*`: members, perception of the leader, what was said, group memory, the JSON shape of a joint plan); pattern texts `rt.group.tpl.*` replace reinloop's English harness templates |
+
+Rendered example (Ilse, opus, at the start of a mock world):
+
+```text
+Sei Ilse. Il tuo carattere: Calma, lungimirante; parla poco ma con chiarezza.
+Il tuo ruolo nella società: Anziano (elder).
+La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).
+Il tempo scorre senza pause. Quando ti fermi a pensare fissi con commit_plan ciò che farai nei prossimi minuti, da 50 a 100 passi per circa 60 minuti; mentre pensi continui a fare ciò che stavi facendo.
+Pensi e parli in italiano.
+```
+
+```text
+GIORNO 1, ORE 06:00 (giorno). Stagione: primavera; l'inverno arriva tra 360 minuti.
+
+TU: salute 10/10, fame 0, porti 0 cibo e 0 legna; sei in (21,12); non sei al riparo; cammini a 1.2 caselle al minuto e lavori a rapidità 0.9.
+
+IL TUO GRUPPO: nessuno.
+
+STAVI FACENDO: niente.
+
+PERCHÉ CI RIPENSI: ti guardi intorno per la prima volta.
+
+CIÒ CHE PERCEPISCI:
+Sei in (21,12) su bosco, altitudine 1: cibo 1.53, legna 6.11.
+Il mondo misura 40x30 caselle; x cresce verso est, y verso sud. Acqua e roccia non si attraversano.
+Caselle con risorse entro 3: (21,11) bosco cibo 1.5 legna 6; (22,11) bosco cibo 1.84 legna 7.36; ...
+Persone in vista: Tomas [Costruttore] in (20,12) salute 10 fame 0 cibo 0; Rudi [Costruttore] in (20,13) ...
+Rifugio più vicino: nessun rifugio esiste.
+Gruppi qui intorno: nessuno.
+
+CIÒ CHE TI È STATO DETTO:
+- niente
+
+CIÒ CHE RICORDI:
+- niente
+```
+
+In a live check the agents consulted Lorebase on their own, e.g. `lorebase_search "rifugio inverno legna costruire"`,
+`lorebase_query {"kind":"Rule"}`, `lorebase_context "leggi del mondo, ruolo Esploratore, rifugio, inverno"`.
+
+## Legacy tick dashboard (v1)
+
 Everything a person reads comes from three places, and nothing else:
 
 | Part | Source |

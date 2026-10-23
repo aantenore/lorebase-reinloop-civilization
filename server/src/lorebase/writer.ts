@@ -8,6 +8,44 @@ export interface WriterConfig {
   directOperation: string;
   updateOperation: string;
   proposalBranchPrefix: string;
+  /** Operation creating a new law directly on the live branch (review policy never). */
+  enactOperation: string;
+  /** Built-in create Operation of the Rule Kind, used on proposal branches. */
+  createOperation: string;
+}
+
+export interface NewRule {
+  key: string;
+  value: number;
+  text: string;
+  category: string;
+  unit?: string;
+}
+
+export const RULE_KEY = /^[a-z][a-z0-9_]*$/;
+
+/** Creates a brand-new law: directly (`enact_rule`) or through branch -> Proposal -> merge. */
+export async function createRule(client: LorebaseClient, cfg: WriterConfig, rule: NewRule, mode: WriteMode, message: string): Promise<WriteResult> {
+  if (!RULE_KEY.test(rule.key)) return { ok: false, error: 'key must be snake_case' };
+  if (!Number.isFinite(rule.value)) return { ok: false, error: 'value is not a number' };
+  if (!rule.text.trim()) return { ok: false, error: 'text is required' };
+  const params = { code: rule.key, value: rule.value, text: rule.text.trim(), category: rule.category, ...(rule.unit ? { unit: rule.unit } : {}) };
+  try {
+    if (mode === 'direct') {
+      const out = await client.execute(cfg.enactOperation, params, { branch: cfg.branch, message });
+      return { ok: true, revision: out.revision ?? out.head };
+    }
+    const branch = `${cfg.proposalBranchPrefix}${slug(`new-${rule.key}`)}-${Date.now().toString(36)}`;
+    await client.createBranch(branch, cfg.branch);
+    await client.execute(cfg.createOperation, params, { branch, message: `New law ${rule.key}` });
+    const proposal = await client.createProposal(branch, cfg.branch, message, message);
+    await client.review(proposal.id, 'approve', 'Approved from the civilization console');
+    const merged = await client.merge(proposal.id, message);
+    await client.deleteBranch(branch).catch(() => undefined);
+    return { ok: true, revision: merged.revision, proposalId: proposal.id, branch };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export type WriteMode = 'direct' | 'proposal';

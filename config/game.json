@@ -1,0 +1,240 @@
+{
+  "ws": {
+    "path": "/ws",
+    "maxPayloadBytes": 16384
+  },
+  "loop": {
+    "tickHz": 20,
+    "stateHz": 10,
+    "timeBroadcastMs": 1000,
+    "deadLingerMs": 8000,
+    "statusLogMs": 15000
+  },
+  "map": {
+    "width": 40,
+    "height": 30,
+    "noiseScale": 6,
+    "waterBelow": 0.26,
+    "sandBelow": 0.32,
+    "rockAbove": 0.8,
+    "forestAbove": 0.56,
+    "elevationSteps": 4,
+    "capacity": {
+      "grass": {
+        "food": 6,
+        "wood": 0
+      },
+      "forest": {
+        "food": 2,
+        "wood": 8
+      },
+      "sand": {
+        "food": 1,
+        "wood": 0
+      },
+      "water": {
+        "food": 0,
+        "wood": 0
+      },
+      "rock": {
+        "food": 0,
+        "wood": 1
+      }
+    },
+    "blocked": [
+      "water",
+      "rock"
+    ],
+    "initialFill": [
+      0.5,
+      1
+    ],
+    "spawnRadius": 3,
+    "maxPopulation": 40
+  },
+  "movement": {
+    "arriveEpsilon": 0.05,
+    "interactRange": 1.6,
+    "maxPathNodes": 4000,
+    "diagonal": true
+  },
+  "decisions": {
+    "tiers": {
+      "haiku": {
+        "minSteps": 20,
+        "maxSteps": 35,
+        "horizonFactor": 0.5,
+        "cooldownFactor": 0.5,
+        "maxTurns": 5,
+        "maxOutputTokens": 3000,
+        "maxConsults": 2
+      },
+      "sonnet": {
+        "minSteps": 30,
+        "maxSteps": 60,
+        "horizonFactor": 1,
+        "cooldownFactor": 1,
+        "maxTurns": 6,
+        "maxOutputTokens": 5000,
+        "maxConsults": 3
+      },
+      "opus": {
+        "minSteps": 50,
+        "maxSteps": 100,
+        "horizonFactor": 2,
+        "cooldownFactor": 2,
+        "maxTurns": 7,
+        "maxOutputTokens": 8000,
+        "maxConsults": 4
+      }
+    },
+    "timeoutMs": 90000,
+    "maxConcurrent": 4,
+    "memoryItems": 12,
+    "inboxItems": 8,
+    "lookMaxTiles": 14,
+    "lookMaxPeople": 10,
+    "nearbyGroupsMax": 5,
+    "textMaxChars": 240,
+    "replanOn": {
+      "planExhausted": true,
+      "stepFailed": true,
+      "spokenTo": true,
+      "critical": true,
+      "nightfall": true,
+      "dawn": false,
+      "seasonChange": true,
+      "rulesChanged": true
+    },
+    "startStaggerMs": 400
+  },
+  "conversation": {
+    "replyMaxOutputTokens": 300,
+    "replyTimeoutMs": 30000,
+    "agentReplyDepth": 1,
+    "replanAfterReply": true
+  },
+  "player": {
+    "speechMinIntervalMs": 4000,
+    "speechPerMinute": 6,
+    "speechMaxChars": 280,
+    "nameMaxChars": 24,
+    "maxPlayers": 8,
+    "inputMax": 1
+  },
+  "groups": {
+    "minMembers": 2,
+    "maxMembers": 8,
+    "nameMaxChars": 32,
+    "replanDebounceMs": 1500,
+    "traceMaxChars": 280,
+    "maxRounds": 2,
+    "colors": [
+      "#e0a030",
+      "#4aa3df",
+      "#c75dbb",
+      "#5fbf6a",
+      "#e05a4f",
+      "#9b8cf0",
+      "#d9c84a",
+      "#3cc8b4"
+    ],
+    "seeded": [
+      {
+        "name": "Clan del Fiume",
+        "pattern": "orchestrator",
+        "members": [
+          "Tomas",
+          "Rudi"
+        ],
+        "leader": "Tomas"
+      },
+      {
+        "name": "Consiglio degli Anziani",
+        "pattern": "council",
+        "members": [
+          "Ilse",
+          "Mara"
+        ],
+        "leader": "Ilse"
+      },
+      {
+        "name": "Assemblea dei Raccoglitori",
+        "pattern": "assembly",
+        "members": [
+          "Okon",
+          "Pell"
+        ],
+        "leader": null
+      }
+    ],
+    "proseMaxOutputTokens": 600,
+    "maxTurns": 3
+  },
+  "crowd": {
+    "count": 4,
+    "tier": "haiku",
+    "groupName": "Folla",
+    "names": [
+      "Abe",
+      "Bru",
+      "Cira",
+      "Duma",
+      "Elio",
+      "Fosca",
+      "Gaia",
+      "Ugo"
+    ],
+    "roles": [
+      "gatherer",
+      "builder"
+    ],
+    "personality": "Gente semplice del villaggio."
+  },
+  "chronicle": {
+    "enabled": true,
+    "kind": "Chronicle",
+    "operation": "import_records",
+    "flushMs": 10000,
+    "maxBatch": 50,
+    "maxQueue": 1000,
+    "retryBaseMs": 2000,
+    "retryMaxMs": 60000
+  },
+  "mock": {
+    "thinkDelayMs": 600,
+    "replyDelayMs": 40,
+    "wanderRadius": 6
+  },
+  "brain": {
+    "mcpUrl": "http://127.0.0.1:8190/mcp",
+    "domain": "world",
+    "tools": [
+      "lorebase_get",
+      "lorebase_query",
+      "lorebase_search",
+      "lorebase_history",
+      "lorebase_diff",
+      "lorebase_changes",
+      "lorebase_schema",
+      "lorebase_context"
+    ],
+    "cacheMs": 30000,
+    "callTimeoutMs": 15000,
+    "outputMaxChars": 3000,
+    "connectRetryMs": 10000,
+    "memoryDir": "data/minds",
+    "memoryRecallLimit": 6
+  },
+  "insights": {
+    "enabled": true,
+    "kind": "Insight",
+    "operation": "share_insight",
+    "updateOperation": "update_insight",
+    "branchPrefix": "role/",
+    "autoAcceptMinutes": 120,
+    "maxPendingPerRole": 10,
+    "textMaxChars": 400,
+    "listMax": 5
+  }
+}

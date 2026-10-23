@@ -30,7 +30,7 @@ let workspaceProvider: Provider | undefined;
  * except when ANTHROPIC_WORKSPACE_ID is set: keys not scoped to a workspace must send the
  * `anthropic-workspace-id` header, which the preset cannot add, so the provider is built here.
  */
-function realModel(model: string): string | ModelRef {
+export function realModel(model: string): string | ModelRef {
   const parts = splitModel(model);
   const workspace = process.env.ANTHROPIC_WORKSPACE_ID;
   if (parts?.provider !== 'anthropic' || !workspace) return model;

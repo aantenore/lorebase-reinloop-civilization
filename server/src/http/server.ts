@@ -2,41 +2,68 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
-import { ROOT, type RosterEntry } from '../config.ts';
+import { ROOT, type RosterEntry, type SimConfig } from '../config.ts';
+import type { LorebaseClient } from '../lorebase/client.ts';
+import type { Rule } from '../lorebase/rules.ts';
 import { loadScenarios } from '../lorebase/scenarios.ts';
-import { writeRules } from '../lorebase/writer.ts';
-import type { Simulation } from '../sim/sim.ts';
+import { createRule, writeRules } from '../lorebase/writer.ts';
+import { allowedOrigins, checkMutation, isMutation } from './security.ts';
+
+/** What the HTTP API needs from a world: the tick simulation (v1) or the real-time game (v2). */
+export interface HttpHost {
+  readonly cfg: SimConfig;
+  readonly client: LorebaseClient;
+  status(): { lorebase: { revision: string } };
+  rules(): Rule[];
+  snapshot(): unknown;
+  subscribe(fn: (ev: unknown) => void): () => void;
+  rosterView(): unknown;
+  setRoster(entries: RosterEntry[]): Promise<string | undefined>;
+  addAgent(entry: RosterEntry): { agent?: unknown; error?: string };
+  removeAgent(id: string): boolean;
+  start?(): void;
+  pause?(): void;
+  reset?(seed?: number): Promise<void>;
+  setSpeed?(tickMs: number): void;
+  insightList?(role?: string): Promise<unknown>;
+  consciousness?(): Promise<unknown>;
+}
+
+const CATEGORIES = ['survival', 'economy', 'climate', 'society', 'time'];
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json',
 };
-const MAX_BODY = 256 * 1024;
+class BodyTooLarge extends Error {}
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, max: number): Promise<unknown> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > MAX_BODY) throw new Error('body too large');
+    if (size > max) throw new BodyTooLarge('body too large');
     chunks.push(c as Buffer);
   }
   const text = Buffer.concat(chunks).toString('utf8').trim();
   return text ? JSON.parse(text) : {};
 }
 
-export function createHttpServer(sim: Simulation): Server {
+export function createHttpServer(sim: HttpHost): Server {
   const cfg = sim.cfg;
   const staticRoot = resolve(ROOT, cfg.http.staticDir);
   const writerCfg = cfg.lorebase;
+  const guard = { port: cfg.http.port, corsOrigins: cfg.http.corsOrigins, apiToken: cfg.apiToken };
+  const origins = allowedOrigins(guard);
+  const readBody = (req: IncomingMessage) => readJson(req, cfg.http.maxBodyBytes);
 
   const cors = (req: IncomingMessage, res: ServerResponse) => {
     const origin = req.headers.origin;
-    if (origin && cfg.http.corsOrigins.includes(origin)) {
+    if (origin && origins.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     }
   };
   const send = (res: ServerResponse, status: number, body: unknown) => {
@@ -74,19 +101,26 @@ export function createHttpServer(sim: Simulation): Server {
     const method = req.method ?? 'GET';
     try {
       if (method === 'OPTIONS') return void res.writeHead(204).end();
+      if (path.startsWith('/api/') && isMutation(method)) {
+        const refused = checkMutation(req, guard);
+        if (refused) return send(res, refused.status, { ok: false, error: refused.error });
+      }
+      const unsupported = () => send(res, 404, { ok: false, error: 'not supported in this mode' });
       if (method === 'GET' && path === '/api/stream') return stream(req, res);
       if (method === 'GET' && path === '/api/status') return send(res, 200, sim.status());
-      if (method === 'POST' && path === '/api/sim/start') return (sim.start(), send(res, 200, { ok: true, status: sim.status() }));
-      if (method === 'POST' && path === '/api/sim/pause') return (sim.pause(), send(res, 200, { ok: true, status: sim.status() }));
+      if (method === 'POST' && path === '/api/sim/start') return sim.start ? (sim.start(), send(res, 200, { ok: true, status: sim.status() })) : unsupported();
+      if (method === 'POST' && path === '/api/sim/pause') return sim.pause ? (sim.pause(), send(res, 200, { ok: true, status: sim.status() })) : unsupported();
       if (method === 'POST' && path === '/api/sim/reset') {
-        const body = (await readJson(req)) as { seed?: unknown };
+        if (!sim.reset) return unsupported();
+        const body = (await readBody(req)) as { seed?: unknown };
         const seed = body.seed === undefined || body.seed === null ? undefined : Number(body.seed);
         if (seed !== undefined && !Number.isInteger(seed)) return send(res, 400, { ok: false, error: 'seed must be an integer' });
         await sim.reset(seed);
         return send(res, 200, { ok: true, status: sim.status() });
       }
       if (method === 'POST' && path === '/api/sim/speed') {
-        const { tickMs } = (await readJson(req)) as { tickMs?: unknown };
+        if (!sim.setSpeed) return unsupported();
+        const { tickMs } = (await readBody(req)) as { tickMs?: unknown };
         const n = Number(tickMs);
         if (!Number.isFinite(n) || n < 0) return send(res, 400, { ok: false, error: 'tickMs must be a non-negative number' });
         sim.setSpeed(n);
@@ -94,12 +128,12 @@ export function createHttpServer(sim: Simulation): Server {
       }
       if (method === 'GET' && path === '/api/roster') return send(res, 200, sim.rosterView());
       if (method === 'PUT' && path === '/api/roster') {
-        const { agents } = (await readJson(req)) as { agents?: RosterEntry[] };
+        const { agents } = (await readBody(req)) as { agents?: RosterEntry[] };
         const error = await sim.setRoster(agents as RosterEntry[]);
         return send(res, error ? 400 : 200, error ? { ok: false, error } : { ok: true });
       }
       if (method === 'POST' && path === '/api/agents') {
-        const out = sim.addAgent((await readJson(req)) as RosterEntry);
+        const out = sim.addAgent((await readBody(req)) as RosterEntry);
         return send(res, out.error ? 400 : 201, out.error ? { ok: false, error: out.error } : { ok: true, agent: out.agent });
       }
       const del = /^\/api\/agents\/([^/]+)$/.exec(path);
@@ -108,10 +142,20 @@ export function createHttpServer(sim: Simulation): Server {
         return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'no living agent with that id' });
       }
       if (method === 'GET' && path === '/api/rules') return send(res, 200, { revision: sim.status().lorebase.revision, rules: sim.rules() });
+      if (method === 'GET' && path === '/api/insights') return sim.insightList ? send(res, 200, await sim.insightList(url.searchParams.get('role') ?? undefined)) : unsupported();
+      if (method === 'GET' && path === '/api/consciousness') return sim.consciousness ? send(res, 200, await sim.consciousness()) : unsupported();
       if (method === 'POST' && path === '/api/rules') {
-        const body = (await readJson(req)) as { key?: string; value?: unknown; mode?: string; message?: string };
-        if (!body.key || !sim.rules().some((r) => r.key === body.key)) return send(res, 400, { ok: false, error: `unknown rule "${body.key}"` });
+        const body = (await readBody(req)) as { key?: string; value?: unknown; mode?: string; message?: string; text?: string; category?: string; unit?: string };
         const mode = body.mode === 'proposal' ? 'proposal' : 'direct';
+        if (body.key && !sim.rules().some((r) => r.key === body.key) && typeof body.text === 'string') {
+          // A brand-new law: engine keys get physics, any other key is a law people read and may follow.
+          if (!CATEGORIES.includes(String(body.category))) return send(res, 400, { ok: false, error: `category must be one of ${CATEGORIES.join(', ')}` });
+          const value = body.value === undefined || body.value === null || body.value === '' ? 1 : Number(body.value);
+          const message = body.message?.trim() || `New law ${body.key}`;
+          const out = await createRule(sim.client, writerCfg, { key: body.key, value, text: body.text.slice(0, 1000), category: String(body.category), unit: typeof body.unit === 'string' ? body.unit.slice(0, 40) : undefined }, mode, message);
+          return send(res, out.ok ? 201 : 502, out);
+        }
+        if (!body.key || !sim.rules().some((r) => r.key === body.key)) return send(res, 400, { ok: false, error: `unknown rule "${body.key}" (to create a law, send text and category)` });
         const message = body.message?.trim() || `Set ${body.key} to ${body.value}`;
         const out = await writeRules(sim.client, writerCfg, [{ key: body.key, value: Number(body.value) }], mode, message);
         return send(res, out.ok ? 200 : 502, out);
@@ -129,7 +173,7 @@ export function createHttpServer(sim: Simulation): Server {
       send(res, 404, { ok: false, error: 'not found' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (!res.headersSent) send(res, err instanceof SyntaxError ? 400 : 500, { ok: false, error: message });
+      if (!res.headersSent) send(res, err instanceof BodyTooLarge ? 413 : err instanceof SyntaxError ? 400 : 500, { ok: false, error: message });
     }
   });
 }

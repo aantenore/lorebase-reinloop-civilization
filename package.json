@@ -4,7 +4,9 @@
   "private": true,
   "description": "A tiny civilization of LLM agents living by laws kept in a versioned knowledge graph.",
   "type": "module",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "lorebase:up": "bash scripts/lorebase-up.sh up",
     "lorebase:down": "bash scripts/lorebase-up.sh down",
@@ -13,9 +15,14 @@
     "sim:mock": "node server/src/main.ts --mock",
     "rule": "node scripts/change-rule.ts",
     "scenario": "node scripts/apply-scenario.ts",
-    "test": "node --test \"server/src/**/*.test.ts\""
+    "test": "node --test \"server/src/**/*.test.ts\"",
+    "game": "node server/src/game-main.ts",
+    "game:mock": "node server/src/game-main.ts --mock",
+    "herald:up": "bash scripts/herald-up.sh up",
+    "herald:down": "bash scripts/herald-up.sh down"
   },
   "dependencies": {
-    "reinloop": "file:../reinloop"
+    "reinloop": "file:../reinloop",
+    "ws": "^8.22.0"
   }
 }

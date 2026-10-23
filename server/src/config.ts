@@ -21,7 +21,8 @@ export interface SimConfig {
   seed: number;
   tickMs: number;
   autoStart: boolean;
-  http: { port: number; corsOrigins: string[]; staticDir: string };
+  /** `host` is the bind address (default 127.0.0.1); `maxBodyBytes` caps JSON request bodies. */
+  http: { host: string; port: number; corsOrigins: string[]; staticDir: string; maxBodyBytes: number };
   lorebase: {
     url: string;
     domain: string;
@@ -30,11 +31,15 @@ export interface SimConfig {
     roleKind: string;
     directOperation: string;
     updateOperation: string;
+    enactOperation: string;
+    createOperation: string;
     proposalBranchPrefix: string;
     pollMs: number;
     reconnectMs: number;
   };
   models: Record<Tier, string>;
+  /** Extra model ids a roster entry may name besides the tier models (no other id is accepted). */
+  allowedModels?: string[];
   agents: {
     maxTurns: number;
     maxOutputTokens: number;
@@ -56,6 +61,21 @@ export interface SimConfig {
   modelOverride?: string;
   forceMock: boolean;
   rosterFile: string;
+  /** SIM_API_TOKEN: when set, mutating routes and the WebSocket join require it. */
+  apiToken?: string;
+}
+
+/** Model ids a roster entry may request: the tier models plus `allowedModels`. */
+export function allowedModels(cfg: Pick<SimConfig, 'models' | 'allowedModels'>): string[] {
+  return [...new Set([...Object.values(cfg.models), ...(cfg.allowedModels ?? [])])];
+}
+
+/** Error text when a requested per-agent model is not allowed, else undefined. */
+export function checkModel(cfg: Pick<SimConfig, 'models' | 'allowedModels'>, model: unknown): string | undefined {
+  if (model === undefined) return undefined;
+  const allowed = allowedModels(cfg);
+  if (typeof model !== 'string' || !allowed.includes(model)) return `model must be one of ${allowed.join(', ')}`;
+  return undefined;
 }
 
 const num = (v: string | undefined) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : undefined);
@@ -74,6 +94,9 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env: NodeJS.P
   cfg.tickMs = num(env.SIM_TICK_MS) ?? cfg.tickMs;
   cfg.autoStart = env.SIM_AUTOSTART ? env.SIM_AUTOSTART === '1' : argv.includes('--start') || cfg.autoStart;
   cfg.http.port = num(env.PORT ?? env.SIM_PORT) ?? cfg.http.port;
+  cfg.http.host = env.SIM_HOST ?? cfg.http.host ?? '127.0.0.1';
+  cfg.http.maxBodyBytes ??= 64 * 1024;
+  cfg.apiToken = env.SIM_API_TOKEN || undefined;
   cfg.lorebase.url = env.LOREBASE_URL ?? cfg.lorebase.url;
   cfg.lorebase.domain = env.LOREBASE_DOMAIN ?? cfg.lorebase.domain;
   cfg.lorebase.branch = env.LOREBASE_BRANCH ?? cfg.lorebase.branch;

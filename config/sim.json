@@ -4,10 +4,14 @@
   "tickMs": 4000,
   "autoStart": false,
   "http": {
+    "host": "127.0.0.1",
     "port": 4400,
+    "maxBodyBytes": 65536,
     "corsOrigins": [
       "http://localhost:5173",
-      "http://127.0.0.1:5173"
+      "http://127.0.0.1:5173",
+      "http://localhost:5174",
+      "http://127.0.0.1:5174"
     ],
     "staticDir": "web/dist"
   },
@@ -19,6 +23,8 @@
     "roleKind": "Role",
     "directOperation": "set_rule",
     "updateOperation": "update_rule",
+    "enactOperation": "enact_rule",
+    "createOperation": "create_rule",
     "proposalBranchPrefix": "law/",
     "pollMs": 5000,
     "reconnectMs": 3000
@@ -28,6 +34,7 @@
     "sonnet": "anthropic/claude-sonnet-5-5",
     "haiku": "anthropic/claude-haiku-5-5"
   },
+  "allowedModels": [],
   "agents": {
     "maxTurns": 3,
     "maxOutputTokens": 600,
