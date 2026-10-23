@@ -5,8 +5,9 @@
 // the MCP tools. No tasks, goals or strategy. Texts come from config/i18n.
 import type { Translate } from '../i18n.ts';
 import type { Role, RuleChange } from '../lorebase/rules.ts';
+import { knownRecipes } from './economy.ts';
 import { tileOf } from './plan.ts';
-import { DAY_MINUTES, type RtEntity, type RtWorld } from './world.ts';
+import { type BodyCause, DAY_MINUTES, type RtEntity, type RtWorld } from './world.ts';
 
 export interface GroupView {
   id: string;
@@ -19,9 +20,88 @@ export interface PromptLimits {
   lookMaxTiles: number;
   lookMaxPeople: number;
   nearbyGroupsMax: number;
+  /** Items shown for each person in view. */
+  carriedMax: number;
+  /** Recipes listed in the observation. */
+  recipesMax: number;
+  /** Gatherable materials listed among the tiles in view. */
+  gatherSpotsMax: number;
+  /** Smallest change of health or hunger worth a line in the body block. */
+  bodyMinDelta: number;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+const signed = (n: number) => `${n > 0 ? '+' : ''}${round1(n)}`;
+const itemName = (w: RtWorld, code: string) => w.catalog.resources.get(code)?.name ?? code;
+const bagText = (t: Translate, w: RtWorld, bag: Record<string, number>) =>
+  Object.entries(bag).map(([code, n]) => t('rt.observation.itemLine', { amount: Math.round(n * 100) / 100, name: itemName(w, code), code })).join(', ');
+
+/** The largest stocks a person carries (tools included), for those who see it. */
+export function carriedTop(t: Translate, w: RtWorld, b: RtEntity, max: number): string {
+  const bag: Record<string, number> = {};
+  for (const [k, n] of Object.entries(b.inventory)) if (n >= 1) bag[k] = Math.floor(n);
+  for (const x of b.tools) bag[x.item] = (bag[x.item] ?? 0) + 1;
+  const top = Object.entries(bag).sort((a, c) => c[1] - a[1]).slice(0, Math.max(0, max));
+  return top.length ? bagText(t, w, Object.fromEntries(top)) : t('rt.observation.nothingCarried');
+}
+
+/** What a person is visibly doing: the action of its current step. */
+export function doingText(t: Translate, w: RtWorld, b: RtEntity): string {
+  const step = b.plan && b.plan.current < b.plan.steps.length ? b.plan.steps[b.plan.current] : undefined;
+  if (!step) return t('rt.look.doing.idle');
+  const a = step.args;
+  const item = String(a.item ?? a.resource ?? '');
+  const recipe = w.catalog.recipes.get(String(a.recipe ?? ''));
+  return t(`rt.look.doing.${step.action}`, { item: item ? itemName(w, item) : '', recipe: recipe?.name ?? String(a.recipe ?? ''), to: String(a.to ?? ''), x: Number(a.x ?? 0), y: Number(a.y ?? 0) });
+}
+
+/** What happened to the body since the person last thought, with the causes the body felt. Empty when nothing worth saying. */
+export function bodyBlock(t: Translate, w: RtWorld, e: RtEntity, limits: Pick<PromptLimits, 'bodyMinDelta'>): string {
+  const b = w.bodySince(e);
+  const min = limits.bodyMinDelta;
+  const causes = (Object.entries(b.causes) as Array<[BodyCause, number]>).filter(([, n]) => Math.abs(n) >= min).map(([c, n]) => t('rt.body.cause', { cause: t(`rt.body.${c}`), delta: signed(n) }));
+  if (b.minutes <= 0 || (Math.abs(b.hp) < min && Math.abs(b.hunger) < min && !causes.length && !b.ate)) return '';
+  return t('rt.body.line', {
+    minutes: b.minutes, hp: Math.abs(b.hp) < min ? t('rt.body.same') : signed(b.hp), causes: causes.length ? t('rt.body.causes', { list: causes.join(', ') }) : '',
+    hunger: Math.abs(b.hunger) < min ? t('rt.body.same') : signed(b.hunger), ate: b.ate ? t('rt.body.ate', { amount: round1(b.ate) }) : '',
+  });
+}
+
+/**
+ * The recipes this person knows (Lorebase recipes of its role or of anyone, whose technology is known), with what
+ * each needs and what the person lacks right now. Hidden (undiscovered) recipes never appear.
+ */
+export function recipesBlock(t: Translate, w: RtWorld, e: RtEntity, limits: Pick<PromptLimits, 'recipesMax'>): string {
+  const mine = knownRecipes(w.catalog, new Set(w.discovered.keys())).filter((r) => !r.role || r.role === e.role).slice(0, Math.max(0, limits.recipesMax));
+  if (!mine.length) return '';
+  const lines = mine.map((r) => {
+    const lack: Record<string, number> = {};
+    for (const [k, n] of Object.entries(r.inputs)) if ((e.inventory[k] ?? 0) < n) lack[k] = n - Math.floor(e.inventory[k] ?? 0);
+    for (const k of r.tools) if (!e.tools.some((x) => x.item === k)) lack[k] = 1;
+    const needs = [
+      ...(r.tools.length ? [t('rt.recipes.tools', { list: r.tools.map((k) => `${itemName(w, k)} (${k})`).join(', ') })] : []),
+      ...(r.station ? [t('rt.recipes.station', { name: itemName(w, r.station), code: r.station })] : []),
+    ].join('; ');
+    return t('rt.recipes.line', {
+      name: r.name, code: r.code, inputs: bagText(t, w, r.inputs), outputs: bagText(t, w, r.outputs), needs: needs ? `; ${needs}` : '',
+      lack: Object.keys(lack).length ? t('rt.recipes.lack', { list: bagText(t, w, lack) }) : t('rt.recipes.ready'),
+    });
+  });
+  return t('rt.recipes.block', { lines: lines.join('\n') });
+}
+
+/** Materials (gathered, not tile stocks) that can be gathered on the tiles in view: nearest tile per material. */
+function gatherSpots(t: Translate, w: RtWorld, here: { x: number; y: number }, r: number, max: number): string {
+  const dist = (a: { x: number; y: number }) => Math.max(Math.abs(a.x - here.x), Math.abs(a.y - here.y));
+  const near = w.tiles.filter((x) => dist(x) <= r && w.walkable(x.x, x.y)).sort((a, b) => dist(a) - dist(b));
+  const spots: string[] = [];
+  for (const def of w.catalog.resources.values()) {
+    if (def.source !== 'biome' || spots.length >= max) continue;
+    const at = near.find((x) => w.canGatherAt(def.code, x));
+    if (at) spots.push(t('rt.look.gatherAt', { name: def.name, code: def.code, x: at.x, y: at.y }));
+  }
+  return t('rt.look.gather', { spots: spots.length ? spots.join('; ') : t('rt.look.nothing') });
+}
 
 export function rtInstructions(t: Translate, e: Pick<RtEntity, 'name' | 'personality' | 'role'>, role: Role | undefined, plan: { horizon: number }): string {
   return t('rt.instructions', {
@@ -106,7 +186,8 @@ export function look(t: Translate, w: RtWorld, e: RtEntity, groups: GroupView[],
       const g = groupName(b.groupId);
       return t('rt.look.person', {
         name: b.name, role: roleTitle(b.role), group: g ? t('rt.look.personGroup', { group: g }) : '', x: bp.x, y: bp.y,
-        hp: round1(b.hp), hunger: round1(b.hunger), food: b.inventory.food, busy: b.kind === 'player' ? t('rt.look.personPlayer') : '',
+        hp: round1(b.hp), hunger: round1(b.hunger), carries: carriedTop(t, w, b, limits.carriedMax),
+        doing: b.kind === 'player' ? '' : doingText(t, w, b), busy: b.kind === 'player' ? t('rt.look.personPlayer') : '',
       }) + (about?.(b) ?? '');
     });
   const shelters = w.tiles.filter((x) => x.shelter > 0).sort((a, b) => dist(a) - dist(b));
@@ -119,9 +200,11 @@ export function look(t: Translate, w: RtWorld, e: RtEntity, groups: GroupView[],
     .slice(0, limits.nearbyGroupsMax)
     .map((g) => t('rt.look.groupLine', { name: g.name, pattern: g.pattern, members: g.members.map((id) => w.entities.get(id)?.name ?? id).join(', ') }));
   return [
-    t('rt.look.here', { x: here.x, y: here.y, biome: t(`rt.biome.${ht.biome}`), elev: ht.elev, food: ht.food, wood: ht.wood, shelter: `${ht.shelter ? t('rt.look.shelterHere', { level: ht.shelter }) : ''}${structuresText(t, w, ht)}` }) + (w.distanceFromCenter(here) > w.r('wild_distance') ? t('rt.look.wild') : ''),
+    t('rt.look.here', { x: here.x, y: here.y, biome: t(`rt.biome.${ht.biome}`), elev: ht.elev, food: ht.food, wood: ht.wood, shelter: `${ht.shelter ? t('rt.look.shelterHere', { level: ht.shelter }) : ''}${structuresText(t, w, ht)}` })
+      + (w.distanceFromCenter(here) > w.r('wild_distance') ? t('rt.look.wild') + (w.hasFelt(e, 'wild') ? t('rt.look.wildFelt') : '') : ''),
     t('rt.look.map', { w: w.width, h: w.height }),
     t('rt.look.tiles', { radius: r, tiles: tiles.length ? tiles.join('; ') : t('rt.look.nothing') }),
+    gatherSpots(t, w, here, r, limits.gatherSpotsMax),
     t('rt.look.people', { people: people.length ? people.join('; ') : t('rt.look.nobody') }),
     t('rt.look.shelters', { shelter: nearest }),
     t('rt.look.groups', { groups: near.length ? near.join('; ') : t('rt.look.noGroups') }),
@@ -168,10 +251,12 @@ export function rtObservation(
   return [
     timeLine(t, w),
     selfLine(t, w, e),
+    bodyBlock(t, w, e, limits),
     groupLine(t, w, e, groups),
     doingLine(t, e),
     t('rt.observation.why', { why }),
     t('rt.observation.perceive', { look: look(t, w, e, groups, roleTitle, limits, society ? (b) => society.about(e, b) : undefined) }),
+    recipesBlock(t, w, e, limits),
     ...(society?.blocks(e) ?? []),
     inboxBlock(t, e),
     memoryBlock(t, e),

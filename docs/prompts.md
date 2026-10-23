@@ -28,10 +28,28 @@ why to use them. A refused `proponi_legge` says only "la tua voce
 non ha ancora abbastanza peso".
 
 The plan interface lists the economy actions (`crea(recipe)`, `sperimenta(items)`, `usa(item)`,
-`dai(to, item, amount)`, `scambia(to, give, want)`, `gather(resource)` by item code) as a tool description only: which recipes
-exist, who knows them and what they need is in Lorebase (`Recipe`, `Resource`, `Technology`), not in
-the prompt; undiscovered recipes are not readable at all. Perception adds the structures on tiles
-(hearth, storehouse) and whether the person stands in the wilds. The step count is a suggestion in
+`dai(to, item, amount)`, `scambia(to, give, want)`, `gather(resource)` by item code) as a tool description only; the
+catalog itself is in Lorebase (`Recipe`, `Resource`, `Technology`), and undiscovered recipes are not readable at all.
+Perception adds the structures on tiles (hearth, storehouse) and whether the person stands in the wilds.
+
+Factual perception lines (`rt.body.*`, `rt.recipes.*`, `rt.look.gather|doing|wildFelt`), each capped by
+`decisions.perception` in `config/game.json` so the prompt stays short:
+
+- **Body** (`IL TUO CORPO negli ultimi N minuti`): change of health and hunger since the person last thought, with the
+  physical causes the body felt (hunger, winter cold or the wilds away from a shelter, rest, remedies) and the food
+  eaten. Causes below `bodyMinDelta` are left out; no line when nothing changed.
+- **Wilds**: "Sei nelle terre selvagge." as before; only a person that has already lost health there also reads
+  "Nelle terre selvagge, fuori da un rifugio, hai già perso salute." (its own experience, not the law).
+- **People in view**: the `carriedMax` largest things each one carries (tools included) and the action of its
+  current step ("raccoglie Selce", "fabbrica: Fare un'ascia", "va da Vera").
+- **Gatherable in view** (`gatherSpotsMax`): for each gathered material, the nearest tile in view where it can be
+  gathered.
+- **Recipes you know** (`recipesMax`): the known recipes of the person's role or of anyone (never a hidden one),
+  with inputs, outputs, tools and station, and what the person lacks right now ("ti manca: 2 Selce (flint)").
+
+Where materials are found is world generation (`map.regions`): outside a core around the spawn the map is cut into
+seeded angular sectors, each yielding only its listed materials on the biomes their `Resource` names. The core has
+food and wood only, so every first recipe of every role needs something from a sector or from another role. The step count is a suggestion in
 the `commit_plan` schema ("di solito non più di N"), not a minimum.
 
 Rendered example (Ilse, opus, at the start of a mock world; v1 of the self line, now `porti: … ; attrezzi: …`):

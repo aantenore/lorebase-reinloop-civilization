@@ -9,7 +9,7 @@ import type { Role, RuleChange } from '../lorebase/rules.ts';
 import type { Brain, ConsultEvent } from './brain.ts';
 import type { Tier } from '../world/types.ts';
 import { AGENT_PATTERNS, type GameConfig, type TierDecision } from './config.ts';
-import { flatSteps, mockSteps } from './mock.ts';
+import { flatSteps, mockSteps, needsOf } from './mock.ts';
 import { MODEL_ACTIONS, normalizeStep, type PlanStep } from './plan.ts';
 import {
   doingLine, type GroupView, groupLine, inboxBlock, look, memoryBlock, type PromptLimits, recalledBlock, rtInstructions, rtObservation, selfLine, timeLine,
@@ -121,7 +121,7 @@ export function decisionTimeoutMs(cfg: GameConfig, w: Pick<RtWorld, 'r' | 'timeS
 }
 
 export function limitsOf(cfg: GameConfig): PromptLimits {
-  return { lookMaxTiles: cfg.decisions.lookMaxTiles, lookMaxPeople: cfg.decisions.lookMaxPeople, nearbyGroupsMax: cfg.decisions.nearbyGroupsMax };
+  return { lookMaxTiles: cfg.decisions.lookMaxTiles, lookMaxPeople: cfg.decisions.lookMaxPeople, nearbyGroupsMax: cfg.decisions.nearbyGroupsMax, ...cfg.decisions.perception };
 }
 
 /**
@@ -284,13 +284,20 @@ function mockPlanTurn(host: DecideHost, e: RtEntity, tc: TierDecision): MockTurn
     calls.push({ name: 'rispondi_scambio', args: { offer: o.id, accept: can } });
   }
   const near = w.living().filter((b) => b.id !== e.id && b.kind !== 'player' && Math.hypot(b.x - e.x, b.y - e.y) <= w.r('speech_radius'));
+  // What my recipes use and I lack, and what a neighbour carries of it.
+  const needs = needsOf(w, e.role);
+  const lacking = (b: RtEntity) => Object.keys(b.inventory).filter((k) => needs.has(k) && (b.inventory[k] ?? 0) >= 1 && (e.inventory[k] ?? 0) < 2);
   if (e.kind === 'agent' && near.length && roll('offer') < m.offerChance) {
-    const b = near[Math.floor(roll('who') * near.length)]!;
+    const b = near.find((x) => lacking(x).length) ?? near[Math.floor(roll('who') * near.length)]!;
     const mine = Object.keys(e.inventory).filter((k) => (e.inventory[k] ?? 0) >= 1);
+    const theirNeeds = needsOf(w, b.role);
     const theirs = Object.keys(b.inventory).filter((k) => (b.inventory[k] ?? 0) >= 1 && !mine.includes(k));
-    const give = mine.find((k) => k !== 'food') ?? mine[0];
-    const want = theirs[0] ?? Object.keys(b.inventory).find((k) => k !== give && (b.inventory[k] ?? 0) >= 1);
-    if (give && want) calls.push({ name: 'scambia', args: { to: b.name, give: { [give]: 1 }, want: { [want]: 1 } } });
+    const give = mine.find((k) => theirNeeds.has(k) && !needs.has(k)) ?? mine.find((k) => k !== 'food') ?? mine[0];
+    const want = lacking(b)[0] ?? theirs[0] ?? Object.keys(b.inventory).find((k) => k !== give && (b.inventory[k] ?? 0) >= 1);
+    if (give && want && give !== want) calls.push({ name: 'scambia', args: { to: b.name, give: { [give]: 1 }, want: { [want]: 1 } } });
+  } else if (e.kind === 'agent' && roll('ask') < m.askChance) {
+    const b = near.find((x) => lacking(x).length);
+    if (b) calls.push({ name: 'chiedi', args: { a: b.name, item: lacking(b)[0], amount: 1 } });
   }
   if (e.kind === 'agent' && near.length && roll('judge') < m.judgeChance) {
     const b = near[Math.floor(roll('whom') * near.length)]!;
@@ -340,6 +347,8 @@ export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: 
     toolSettings: { concurrency: 1 },
   });
   const prompt = rtObservation(t, w, e, why, host.groups(), host.roleTitle, limitsOf(cfg), host.changedLaws(e), host.perceived);
+  // What the body went through is counted again from this thought on.
+  w.resetBody(e);
   const signal = AbortSignal.any([AbortSignal.timeout(decisionTimeoutMs(cfg, w)), ...(stop ? [stop] : [])]);
   const handle = runner.stream(prompt, { signal });
   let thought = '';

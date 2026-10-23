@@ -133,7 +133,7 @@
     "tileShelter": " SHELTER {level}",
     "nothing": "nothing",
     "people": "People in sight: {people}.",
-    "person": "{name} [{role}{group}] at ({x},{y}) health {hp} hunger {hunger} food {food}{busy}",
+    "person": "{name} [{role}{group}] at ({x},{y}) health {hp} hunger {hunger}; carries: {carries}; {doing}{busy}",
     "personGroup": ", group {group}",
     "personPlayer": ", comes from outside",
     "nobody": "nobody",
@@ -149,7 +149,27 @@
     "reputeHigh": ", held in high esteem",
     "reputeLow": ", held in low esteem",
     "reputeFamous": ", everyone talks of what they did",
-    "reputeHeard": ", of {name} they say: \"{text}\""
+    "reputeHeard": ", of {name} they say: \"{text}\"",
+    "wildFelt": " In the wilds, away from a shelter, you have already lost health.",
+    "gather": "Gatherable in view: {spots}.",
+    "gatherAt": "{name} ({code}) at ({x},{y})",
+    "doing": {
+      "idle": "doing nothing",
+      "move_to": "walking to ({x},{y})",
+      "approach": "going to {to}",
+      "gather": "gathering {item}",
+      "eat": "eating",
+      "build": "building a shelter",
+      "give": "giving {item} to {to}",
+      "say": "talking",
+      "rest": "resting",
+      "sleep": "sleeping",
+      "wait": "waiting",
+      "craft": "making: {recipe}",
+      "experiment": "combining things",
+      "use": "using {item}",
+      "offer": "proposing an exchange to {to}"
+    }
   },
   "tools": {
     "commitPlan": "Fix what you will do from now on: a list of steps executed in order, in real time. Actions: move_to(x,y); approach(to); gather(resource) gather an item by code on your tile (food, wood or other); eat(amount?, item?); build a shelter on your tile; dai(to, item, amount) give to someone next to you; scambia(to, give, want) offer someone near you the items in give for those in want (code -> amount), which they accept or reject; say(to, text); rest(minutes); sleep(minutes); wait(minutes); crea(recipe) follow a recipe by code; sperimenta(items) combine some items you carry, one of each, which are used up; usa(item) use an item you carry.",
@@ -373,7 +393,8 @@
       "use": "I use a remedy",
       "craft": "I make: {name}",
       "experiment": "I try combining things",
-      "gatherItem": "I gather {name}"
+      "gatherItem": "I gather {name}",
+      "offer": "I propose an exchange to {name}"
     },
     "groupName": "Company of {name}",
     "summary": "Everyone does their part: {parts}.",
@@ -452,5 +473,25 @@
   "society": {
     "familyName": "House of {name}"
   },
-  "askInbox": "I ask you ({id}): {want}. I have nothing to give you in return."
+  "askInbox": "I ask you ({id}): {want}. I have nothing to give you in return.",
+  "body": {
+    "line": "YOUR BODY in the last {minutes} minutes: health {hp}{causes}; hunger {hunger}{ate}.",
+    "causes": " ({list})",
+    "cause": "{cause} {delta}",
+    "starved": "starvation",
+    "cold": "winter cold away from a shelter",
+    "wild": "the wilds away from a shelter",
+    "rest": "rest",
+    "remedy": "remedies",
+    "ate": ", you ate {amount} food",
+    "same": "unchanged"
+  },
+  "recipes": {
+    "block": "RECIPES YOU KNOW:\n{lines}",
+    "line": "- {name} ({code}): {inputs} -> {outputs}{needs}; {lack}",
+    "tools": "tools: {list}",
+    "station": "done where there is {name} ({code})",
+    "lack": "you lack: {list}",
+    "ready": "you have what it consumes"
+  }
 }

@@ -17,6 +17,8 @@ export interface MockKnobs {
   experimentChance?: number;
   /** Hunger at which a mock person eats what it carries (well before the critical level). */
   eatAtHunger?: number;
+  /** Chance of proposing an exchange (plan step) for an input a neighbour carries. */
+  offerChance?: number;
 }
 
 export interface MockPlan {
@@ -25,7 +27,7 @@ export interface MockPlan {
 }
 
 /** Items the known recipes of a role use (inputs and tools). */
-function needsOf(w: RtWorld, role: string): Set<string> {
+export function needsOf(w: RtWorld, role: string): Set<string> {
   const out = new Set<string>();
   for (const r of knownRecipes(w.catalog, new Set(w.discovered.keys()))) {
     if (r.role && r.role !== role) continue;
@@ -40,7 +42,7 @@ function needsOf(w: RtWorld, role: string): Set<string> {
  * follow, use a remedy when hurt, gather what recipes use, and (explorers, or by chance) combine
  * carried items. A stand-in for a model, nothing more.
  */
-export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentChance: number): PlanStep[] {
+export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentChance: number, offerChance = 0): PlanStep[] {
   const c = w.catalog;
   if (!c.resources.size) return [];
   const rng = createRng(hash(`eco:${e.id}:${Math.floor(w.clock)}`));
@@ -53,18 +55,6 @@ export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentCha
   // Hurt: use a remedy.
   const remedy = Object.keys(e.inventory).find((k) => has(k) && (c.resources.get(k)?.heal ?? 0) > 0);
   if (remedy && e.hp < e.maxHp * 0.7) steps.push({ action: 'use', args: { item: remedy }, label: L('use') });
-  // Give: something a neighbour of another role uses (or a remedy to someone hurt).
-  const near = w.living().filter((b) => b.id !== e.id && b.kind !== 'player' && b.role !== e.role && dist(tileOf(b)) <= Math.max(3, w.r('vision_radius') * 2));
-  for (const b of near.sort(() => rng.next() - 0.5)) {
-    const theirs = needsOf(w, b.role);
-    const item = Object.keys(e.inventory).find((k) => has(k) && k !== 'food' && ((theirs.has(k) && (!mine.has(k) || (e.inventory[k] ?? 0) >= 4)) || ((c.resources.get(k)?.heal ?? 0) > 0 && b.hp < b.maxHp * 0.7)));
-    if (item) {
-      const amount = Math.max(1, Math.min(2, Math.floor((e.inventory[item] ?? 0) / 2)));
-      steps.push({ action: 'approach', args: { to: b.name }, label: L('approach', { name: b.name }) });
-      steps.push({ action: 'give', args: { to: b.name, item, amount }, label: L('give', { name: b.name }) });
-      return steps;
-    }
-  }
   // Craft: the first recipe one can follow, walking to its station.
   const disc = new Set(w.discovered.keys());
   for (const r of knownRecipes(c, disc).sort(() => rng.next() - 0.5)) {
@@ -77,6 +67,31 @@ export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentCha
     }
     steps.push({ action: 'craft', args: { recipe: r.code }, label: L('craft', { name: r.name }) });
     return steps;
+  }
+  const near = w.living().filter((b) => b.id !== e.id && b.kind !== 'player' && b.role !== e.role && dist(tileOf(b)) <= Math.max(3, w.r('vision_radius') * 2));
+  // Barter: an input my recipes use that a neighbour carries, for something of mine its recipes use (or food).
+  if (rng.next() < offerChance) {
+    for (const b of near) {
+      const want = Object.keys(b.inventory).find((k) => mine.has(k) && k !== 'food' && (b.inventory[k] ?? 0) >= 1 && (e.inventory[k] ?? 0) < 2);
+      if (!want) continue;
+      const theirs = needsOf(w, b.role);
+      const give = Object.keys(e.inventory).find((k) => has(k) && k !== want && theirs.has(k)) ?? (has('food') ? 'food' : undefined);
+      if (!give) continue;
+      steps.push({ action: 'approach', args: { to: b.name }, label: L('approach', { name: b.name }) });
+      steps.push({ action: 'offer', args: { to: b.name, give: { [give]: 1 }, want: { [want]: 1 } }, label: L('offer', { name: b.name }) });
+      return steps;
+    }
+  }
+  // Give: something a neighbour of another role uses (or a remedy to someone hurt).
+  for (const b of near.sort(() => rng.next() - 0.5)) {
+    const theirs = needsOf(w, b.role);
+    const item = Object.keys(e.inventory).find((k) => has(k) && k !== 'food' && ((theirs.has(k) && (!mine.has(k) || (e.inventory[k] ?? 0) >= 4)) || ((c.resources.get(k)?.heal ?? 0) > 0 && b.hp < b.maxHp * 0.7)));
+    if (item) {
+      const amount = Math.max(1, Math.min(2, Math.floor((e.inventory[item] ?? 0) / 2)));
+      steps.push({ action: 'approach', args: { to: b.name }, label: L('approach', { name: b.name }) });
+      steps.push({ action: 'give', args: { to: b.name, item, amount }, label: L('give', { name: b.name }) });
+      return steps;
+    }
   }
   // Explore and experiment: far resources, then a combination of two carried items.
   const carried = Object.keys(e.inventory).filter(has);
@@ -94,12 +109,19 @@ export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentCha
   const raw = [...wanted].map((k) => c.resources.get(k)).filter((r) => r && r.source === 'biome' && (e.inventory[r.code] ?? 0) < 4 && (fit || r.minDistance <= w.r('wild_distance')));
   const pick = raw.length ? raw[Math.floor(rng.next() * raw.length)]! : undefined;
   if (pick) {
+    // Where it is found (biome, distance, region); out of the wild when possible.
+    const wild = (p: Point) => (w.distanceFromCenter(p) > w.r('wild_distance') ? 1000 : 0);
     const tile = w.tiles
-      .filter((x) => w.walkable(x.x, x.y) && pick.biomes.includes(x.biome) && w.distanceFromCenter(x) >= pick.minDistance)
-      .sort((a, b) => dist(a) - dist(b))[0];
+      .filter((x) => w.walkable(x.x, x.y) && w.canGatherAt(pick.code, x))
+      .sort((a, b) => dist(a) + wild(a) - dist(b) - wild(b))[0];
     if (tile) {
       if (dist(tile) > 0) steps.push({ action: 'move_to', args: { x: tile.x, y: tile.y }, label: L('move', tile) });
       for (let i = 0; i < 2; i++) steps.push({ action: 'gather', args: { resource: pick.code }, label: L('gatherItem', { name: pick.name }) });
+      // What the gathering completes: a recipe of mine without tools or station, followed right there.
+      const after = { ...e.inventory, [pick.code]: (e.inventory[pick.code] ?? 0) + 2 * Math.max(1, Math.floor(pick.gatherYield)) };
+      const done = knownRecipes(c, new Set(w.discovered.keys())).find((r) => (!r.role || r.role === e.role) && !r.station && !r.tools.length
+        && r.inputs[pick.code] !== undefined && Object.entries(r.inputs).every(([k, n]) => (after[k] ?? 0) >= n));
+      if (done) steps.push({ action: 'craft', args: { recipe: done.code }, label: L('craft', { name: done.name }) });
     }
   }
   return steps;
@@ -151,7 +173,7 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
     if (back) go(back);
   }
 
-  const eco = e.hunger < w.r('critical_hunger') - 1 ? mockEconomy(t, w, e, experimentChance) : [];
+  const eco = e.hunger < w.r('critical_hunger') - 1 ? mockEconomy(t, w, e, experimentChance, knobs.offerChance ?? 0) : [];
   for (const s of eco) push(s);
   if (eco.length) {
     reason = t('rt.mock.reason.work');

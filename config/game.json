@@ -59,6 +59,41 @@
       "fill": 1,
       "minFood": 3
     },
+    "regions": {
+      "coreRadius": 5,
+      "minTiles": 6,
+      "rotations": 24,
+      "sectors": [
+        {
+          "name": "sabbie",
+          "items": [
+            "flint",
+            "clay"
+          ]
+        },
+        {
+          "name": "prati",
+          "items": [
+            "fiber",
+            "seeds"
+          ]
+        },
+        {
+          "name": "boschi",
+          "items": [
+            "herbs",
+            "seeds"
+          ]
+        },
+        {
+          "name": "rive",
+          "items": [
+            "herbs",
+            "clay"
+          ]
+        }
+      ]
+    },
     "maxPopulation": 40
   },
   "movement": {
@@ -103,6 +138,12 @@
     "lookMaxTiles": 14,
     "lookMaxPeople": 10,
     "nearbyGroupsMax": 5,
+    "perception": {
+      "carriedMax": 3,
+      "recipesMax": 6,
+      "gatherSpotsMax": 4,
+      "bodyMinDelta": 0.2
+    },
     "textMaxChars": 240,
     "replanOn": {
       "planExhausted": true,
@@ -233,7 +274,8 @@
     "eatAtHunger": 1,
     "offerChance": 0.35,
     "judgeChance": 0.5,
-    "lawChance": 0.1
+    "lawChance": 0.1,
+    "askChance": 0.35
   },
   "brain": {
     "mcpUrl": "http://127.0.0.1:8190/mcp",

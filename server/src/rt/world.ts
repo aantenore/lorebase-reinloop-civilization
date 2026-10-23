@@ -74,7 +74,29 @@ export interface MapConfig {
    * (Chebyshev, from the map centre) start filled to `fill` of their food capacity and with at least `minFood`.
    */
   spawnFood?: { radius: number; fill: number; minFood: number };
+  /**
+   * Where the gathered materials are found. Outside a core of `coreRadius` tiles (Chebyshev, from the map
+   * centre) the map is cut into angular sectors, each yielding only its `items` (on the biomes their Lorebase
+   * Resource names); the core yields none of the listed items. Items listed in no sector are found wherever
+   * their biome is. The rotation of the sectors is seeded: of `rotations` candidates the first where every
+   * sector has at least `minTiles` tiles for each of its items is kept (else the best one).
+   */
+  regions?: { coreRadius: number; minTiles: number; rotations: number; sectors: Array<{ name: string; items: string[] }> };
   maxPopulation: number;
+}
+
+/** Why the body lost or gained health since the person last thought (physically attributable causes). */
+export type BodyCause = 'starved' | 'cold' | 'wild' | 'rest' | 'remedy';
+
+export interface BodyLog {
+  /** Game clock when the log began. */
+  since: number;
+  hp: number;
+  hunger: number;
+  /** Health lost (negative) or gained (positive) per cause. */
+  causes: Partial<Record<BodyCause, number>>;
+  /** Food units eaten. */
+  ate: number;
 }
 
 export interface MovementConfig {
@@ -197,6 +219,13 @@ export class RtWorld {
   memoryItems: number;
   inboxItems: number;
   private rng: Rng;
+  /** Seeded rotation of the resource sectors (map.regions), chosen once the catalog is known. */
+  private regionSeed = 0;
+  private regionOffset = 0;
+  private regionCatalog?: Catalog;
+  private bodyLogs = new Map<string, BodyLog>();
+  /** Harms each person has felt on its own body at least once (e.g. 'wild'). */
+  private felt = new Map<string, Set<BodyCause>>();
   /** Who the child of two parents is (tier, model, kind), or undefined when no birth may happen. Default: like a random parent. */
   childOf?: (a: RtEntity, b: RtEntity, rnd: () => number) => { tier: EntityTier; model: string; kind: EntityKind } | undefined;
   /** Barter (plan step `offer`): the game's offer book handles it. */
@@ -273,6 +302,7 @@ export class RtWorld {
         this.tiles.push({ x, y, biome, elev, food: round2(cap.food * fill), wood: round2(cap.wood * fill), shelter: 0, structures: {}, shelterWear: 0 });
       }
     }
+    this.regionSeed = this.rng.next();
     const sf = m.spawnFood;
     if (!sf || sf.radius < 0) return;
     const cx = Math.floor(this.width / 2);
@@ -281,6 +311,94 @@ export class RtWorld {
       if (Math.max(Math.abs(t.x - cx), Math.abs(t.y - cy)) > sf.radius || m.blocked.includes(t.biome)) continue;
       t.food = round2(Math.max(t.food, m.capacity[t.biome].food * sf.fill, sf.minFood));
     }
+  }
+
+  // ---- regions (where gathered materials are found) ---------------------------------
+
+  /** Sector index of a tile, -1 inside the core, undefined when the map has no regions. */
+  regionOf(p: Point): number | undefined {
+    const rg = this.map.regions;
+    if (!rg || !rg.sectors.length) return undefined;
+    this.ensureRegions();
+    return this.sectorAt(p, this.regionOffset);
+  }
+
+  private sectorAt(p: Point, offset: number): number {
+    const rg = this.map.regions!;
+    if (this.distanceFromCenter(p) <= rg.coreRadius) return -1;
+    const a = Math.atan2(p.y - Math.floor(this.height / 2), p.x - Math.floor(this.width / 2)) / (2 * Math.PI);
+    const turn = (((a + offset) % 1) + 1) % 1;
+    return Math.min(rg.sectors.length - 1, Math.floor(turn * rg.sectors.length));
+  }
+
+  /** Picks the sector rotation once the catalog (biomes of each Resource) is known. */
+  private ensureRegions(): void {
+    const rg = this.map.regions;
+    if (!rg || this.regionCatalog === this.catalog) return;
+    this.regionCatalog = this.catalog;
+    const n = Math.max(1, Math.floor(rg.rotations));
+    let best = { offset: this.regionSeed, score: -1 };
+    for (let k = 0; k < n; k++) {
+      const offset = (this.regionSeed + k / n) % 1;
+      const counts = rg.sectors.map((s) => Object.fromEntries(s.items.map((i) => [i, 0])) as Record<string, number>);
+      for (const t of this.tiles) {
+        if (!this.walkable(t.x, t.y)) continue;
+        const s = this.sectorAt(t, offset);
+        if (s < 0) continue;
+        for (const item of rg.sectors[s]!.items) {
+          const def = this.catalog.resources.get(item);
+          if (def && gatherableAt(def, t.biome, this.distanceFromCenter(t))) counts[s]![item]!++;
+        }
+      }
+      const score = Math.min(...counts.flatMap((c) => Object.values(c)), Number.MAX_SAFE_INTEGER);
+      if (score > best.score) best = { offset, score };
+      if (score >= rg.minTiles) break;
+    }
+    this.regionOffset = best.offset;
+  }
+
+  /** Whether `item` can be gathered on tile `t` (its biome, its distance and the region's items). */
+  canGatherAt(item: string, t: Pick<RtTile, 'x' | 'y' | 'biome'>): boolean {
+    const def = this.catalog.resources.get(item);
+    if (!def || !gatherableAt(def, t.biome, this.distanceFromCenter(t))) return false;
+    const rg = this.map.regions;
+    if (!rg || !rg.sectors.some((s) => s.items.includes(item))) return true;
+    const s = this.regionOf(t)!;
+    return s >= 0 && rg.sectors[s]!.items.includes(item);
+  }
+
+  // ---- body log (what the body went through since the person last thought) --------------
+
+  private bodyLog(e: RtEntity): BodyLog {
+    let log = this.bodyLogs.get(e.id);
+    if (!log) {
+      log = { since: this.clock, hp: e.hp, hunger: e.hunger, causes: {}, ate: 0 };
+      this.bodyLogs.set(e.id, log);
+    }
+    return log;
+  }
+
+  private logBody(e: RtEntity, cause: BodyCause, amount: number): void {
+    if (!amount) return;
+    const log = this.bodyLog(e);
+    log.causes[cause] = round2((log.causes[cause] ?? 0) + amount);
+    if (amount < 0 && cause !== 'rest' && cause !== 'remedy') (this.felt.get(e.id) ?? this.felt.set(e.id, new Set()).get(e.id)!).add(cause);
+  }
+
+  /** The body's changes since the log began (health and hunger now minus then, causes, food eaten). */
+  bodySince(e: RtEntity): { minutes: number; hp: number; hunger: number; causes: Partial<Record<BodyCause, number>>; ate: number } {
+    const log = this.bodyLog(e);
+    return { minutes: Math.round(this.clock - log.since), hp: round2(e.hp - log.hp), hunger: round2(e.hunger - log.hunger), causes: { ...log.causes }, ate: log.ate };
+  }
+
+  /** Starts a new body log (when the person has just thought about its situation). */
+  resetBody(e: RtEntity): void {
+    this.bodyLogs.set(e.id, { since: this.clock, hp: e.hp, hunger: e.hunger, causes: {}, ate: 0 });
+  }
+
+  /** Whether the person has already felt this harm on its own body. */
+  hasFelt(e: RtEntity, cause: BodyCause): boolean {
+    return this.felt.get(e.id)?.has(cause) ?? false;
   }
 
   tile(x: number, y: number): RtTile | undefined {
@@ -461,7 +579,7 @@ export class RtWorld {
     } else {
       const def = this.catalog.resources.get(resource);
       if (!def) return { ok: false, reason: 'unknown_item' };
-      if (!gatherableAt(def, t.biome, this.distanceFromCenter(t))) return { ok: false, reason: 'not_here' };
+      if (!this.canGatherAt(resource, t)) return { ok: false, reason: 'not_here' };
       amount = Math.floor(def.gatherYield * boost * this.winterFactor());
       if (amount < 1) return { ok: false, reason: 'not_enough' };
     }
@@ -506,7 +624,9 @@ export class RtWorld {
     if ('error' in fx) return { ok: false, reason: fx.error };
     addItems(e, item, -1, fx.def);
     e.hunger = round2(Math.max(0, e.hunger - fx.def.nourish));
+    const hp = e.hp;
     e.hp = Math.min(e.maxHp, e.hp + fx.def.heal);
+    this.logBody(e, 'remedy', e.hp - hp);
     this.onEvent({ type: 'used', id: e.id, item });
     return { ok: true, amount: 1 };
   }
@@ -521,6 +641,7 @@ export class RtWorld {
     const n = Math.min(want, Math.floor(count(e, food)), Math.ceil(e.hunger / per));
     addItems(e, food, -n, this.catalog.resources.get(food));
     e.hunger = round2(Math.max(0, e.hunger - n * per));
+    this.bodyLog(e).ate += n;
     return { ok: true, amount: n };
   }
 
@@ -721,12 +842,15 @@ export class RtWorld {
     e.hunger = round2(e.hunger + this.r('food_per_tick') * perTurn);
     let cause: 'starved' | 'frozen' | undefined;
     if (e.hunger > threshold) {
-      e.hp -= this.r('starvation_damage') * perTurn;
+      const dmg = this.r('starvation_damage') * perTurn;
+      e.hp -= dmg;
+      this.logBody(e, 'starved', -dmg);
       cause = 'starved';
     }
     const sheltered = this.isSheltered(e);
-    const exposure = (this.season() === 'winter' && !sheltered ? this.r('cold_damage_unsheltered') : 0)
-      + (!sheltered && this.distanceFromCenter(tileOf(e)) > this.r('wild_distance') ? this.r('wild_damage') : 0);
+    const cold = this.season() === 'winter' && !sheltered ? this.r('cold_damage_unsheltered') : 0;
+    const wild = !sheltered && this.distanceFromCenter(tileOf(e)) > this.r('wild_distance') ? this.r('wild_damage') : 0;
+    const exposure = cold + wild;
     if (exposure > 0) {
       const guard = protectionOf(this.catalog, e);
       const dmg = exposure * (1 - guard.share) * perTurn;
@@ -740,11 +864,17 @@ export class RtWorld {
       }
       if (dmg > 0) {
         e.hp -= dmg;
+        this.logBody(e, 'cold', -dmg * (cold / exposure));
+        this.logBody(e, 'wild', -dmg * (wild / exposure));
         cause ??= 'frozen';
       }
     }
     const resting = e.anim === 'sleep' || (e.plan && ['rest', 'sleep'].includes(e.plan.steps[e.plan.current]?.action ?? ''));
-    if (resting && e.hunger <= threshold) e.hp += this.r('rest_heal') * perTurn;
+    if (resting && e.hunger <= threshold && e.hp < e.maxHp) {
+      const heal = Math.min(this.r('rest_heal') * perTurn, e.maxHp - e.hp);
+      e.hp += heal;
+      this.logBody(e, 'rest', heal);
+    }
     e.hp = clamp(e.hp, 0, e.maxHp);
     if (e.hp <= 0) {
       this.kill(e.id, cause ?? 'other', nowMs);

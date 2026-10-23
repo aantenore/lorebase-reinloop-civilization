@@ -133,7 +133,7 @@
     "tileShelter": " RIFUGIO {level}",
     "nothing": "niente",
     "people": "Persone in vista: {people}.",
-    "person": "{name} [{role}{group}] in ({x},{y}) salute {hp} fame {hunger} cibo {food}{busy}",
+    "person": "{name} [{role}{group}] in ({x},{y}) salute {hp} fame {hunger}; porta: {carries}; {doing}{busy}",
     "personGroup": ", gruppo {group}",
     "personPlayer": ", viene da fuori",
     "nobody": "nessuno",
@@ -149,7 +149,27 @@
     "reputeHigh": ", gode di molta stima",
     "reputeLow": ", gode di poca stima",
     "reputeFamous": ", tutti parlano di ciò che ha fatto",
-    "reputeHeard": ", di {name} si dice: «{text}»"
+    "reputeHeard": ", di {name} si dice: «{text}»",
+    "wildFelt": " Nelle terre selvagge, fuori da un rifugio, hai già perso salute.",
+    "gather": "Si raccoglie in vista: {spots}.",
+    "gatherAt": "{name} ({code}) in ({x},{y})",
+    "doing": {
+      "idle": "non sta facendo niente",
+      "move_to": "cammina verso ({x},{y})",
+      "approach": "va da {to}",
+      "gather": "raccoglie {item}",
+      "eat": "mangia",
+      "build": "costruisce un rifugio",
+      "give": "dà {item} a {to}",
+      "say": "parla",
+      "rest": "riposa",
+      "sleep": "dorme",
+      "wait": "aspetta",
+      "craft": "fabbrica: {recipe}",
+      "experiment": "combina delle cose",
+      "use": "usa {item}",
+      "offer": "propone uno scambio a {to}"
+    }
   },
   "tools": {
     "commitPlan": "Fissa ciò che farai da ora in avanti: una lista di passi eseguiti in ordine, in tempo reale. Azioni: move_to(x,y) cammina fino a una casella; approach(to) avvicinati a una persona; gather(resource) raccogli sulla tua casella una cosa per codice (food, wood o altro); eat(amount?, item?) mangia; build costruisci o amplia un rifugio sulla tua casella; dai(to, item, amount) dai a chi ti sta accanto; scambia(to, give, want) proponi a chi ti sta vicino di scambiare le cose in give con quelle in want (codice -> quantità), che lui accetta o rifiuta; say(to, text) parla a una persona o a \"all\"; rest(minutes) riposa; sleep(minutes) dormi; wait(minutes) aspetta; crea(recipe) segui una ricetta per codice; sperimenta(items) combina alcune cose che porti, una per tipo, che si consumano; usa(item) usa una cosa che porti.",
@@ -373,7 +393,8 @@
       "use": "uso un rimedio",
       "craft": "faccio: {name}",
       "experiment": "provo a combinare delle cose",
-      "gatherItem": "raccolgo {name}"
+      "gatherItem": "raccolgo {name}",
+      "offer": "propongo uno scambio a {name}"
     },
     "groupName": "Compagnia di {name}",
     "summary": "Ognuno fa la sua parte: {parts}.",
@@ -452,5 +473,25 @@
   "society": {
     "familyName": "Casata di {name}"
   },
-  "askInbox": "Ti chiedo ({id}): {want}. Non ho niente da darti in cambio."
+  "askInbox": "Ti chiedo ({id}): {want}. Non ho niente da darti in cambio.",
+  "body": {
+    "line": "IL TUO CORPO negli ultimi {minutes} minuti: salute {hp}{causes}; fame {hunger}{ate}.",
+    "causes": " ({list})",
+    "cause": "{cause} {delta}",
+    "starved": "fame",
+    "cold": "freddo d'inverno fuori da un rifugio",
+    "wild": "terre selvagge fuori da un rifugio",
+    "rest": "riposo",
+    "remedy": "rimedi",
+    "ate": ", hai mangiato {amount} cibo",
+    "same": "invariata"
+  },
+  "recipes": {
+    "block": "RICETTE CHE CONOSCI:\n{lines}",
+    "line": "- {name} ({code}): {inputs} -> {outputs}{needs}; {lack}",
+    "tools": "attrezzi: {list}",
+    "station": "si fa dove c'è {name} ({code})",
+    "lack": "ti manca: {list}",
+    "ready": "hai ciò che consuma"
+  }
 }

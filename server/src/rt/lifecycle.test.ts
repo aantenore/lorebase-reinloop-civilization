@@ -7,7 +7,9 @@ import { canAddAgentMind, childSpec } from './births.ts';
 import { loadGameConfig } from './config.ts';
 import { lastHeard } from './decide.ts';
 import { Game } from './game.ts';
-import { proclamation, recalledBlock } from './prompt.ts';
+import { recipeFrom, resourceFrom } from './economy.ts';
+import { bodyBlock, proclamation, recalledBlock, recipesBlock } from './prompt.ts';
+import { type RtEntity, RtWorld } from './world.ts';
 
 const game = loadGameConfig({});
 const t = translator(loadTemplates(ROOT, 'it'));
@@ -70,4 +72,30 @@ test('a death frees the mind, the group and the private memory', async () => {
   assert.equal(internals.minds.has(e.id), false);
   assert.deepEqual(forgot, [['mara-bianca', { speaker: 'Mara Bianca', runAgent: e.id }]]);
   g.stopLoop();
+});
+
+test('regions: the core yields no listed material, each sector its own; body and recipes are perceived as facts', () => {
+  const w = new RtWorld(game.map, game.movement, 1337, 0, { namePool: [], memoryItems: 5, inboxItems: 5 });
+  for (const d of [{ code: 'flint', source: 'biome', biomes: ['sand'] }, { code: 'fiber', source: 'biome', biomes: ['grass'] }, { code: 'herbs', source: 'biome', biomes: ['forest'] }]) {
+    w.catalog.resources.set(d.code, resourceFrom(d));
+  }
+  w.catalog.recipes.set('rope', recipeFrom({ code: 'rope', name: 'Corda', inputs: { fiber: 3 }, outputs: { rope: 1 } }));
+  const rg = game.map.regions!;
+  const walk = w.tiles.filter((x) => w.walkable(x.x, x.y));
+  for (const item of ['flint', 'fiber', 'herbs']) {
+    const where = walk.filter((x) => w.canGatherAt(item, x));
+    assert.ok(where.length >= rg.minTiles, item);
+    assert.ok(where.every((x) => w.distanceFromCenter(x) > rg.coreRadius && rg.sectors[w.regionOf(x)!]!.items.includes(item)), item);
+  }
+  const e = { id: 'a1', role: 'crafter', inventory: { food: 0, wood: 0, fiber: 1 }, tools: [], hp: 8, hunger: 1 } as unknown as RtEntity;
+  w.resetBody(e);
+  w.clock += 60;
+  e.hp = 7;
+  (w as unknown as { logBody(e: RtEntity, c: string, n: number): void }).logBody(e, 'wild', -1);
+  const limits = { ...game.decisions.perception };
+  const body = bodyBlock(t, w, e, limits);
+  assert.ok(body.includes('60') && body.includes('-1') && body.includes(t('rt.body.wild')), body);
+  assert.ok(w.hasFelt(e, 'wild'));
+  const recipes = recipesBlock(t, w, e, limits);
+  assert.ok(recipes.includes('rope') && recipes.includes('2 Fibre') === false && recipes.includes('fiber'), recipes);
 });

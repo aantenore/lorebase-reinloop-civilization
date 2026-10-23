@@ -135,6 +135,8 @@ export interface GameConfig {
     lookMaxTiles: number;
     lookMaxPeople: number;
     nearbyGroupsMax: number;
+    /** Budget of the factual perception lines (items shown per person, recipes, gathering spots; smallest body change worth a line). */
+    perception: { carriedMax: number; recipesMax: number; gatherSpotsMax: number; bodyMinDelta: number };
     textMaxChars: number;
     replanOn: Record<ReplanTrigger, boolean>;
     startStaggerMs: number;
@@ -167,7 +169,7 @@ export interface GameConfig {
   };
   crowd: { count: number; tier: Tier; groupName: string; names: string[]; roles: string[]; personality: string };
   chronicle: { enabled: boolean; kind: string; operation: string; flushMs: number; maxBatch: number; maxQueue: number; retryBaseMs: number; retryMaxMs: number };
-  mock: { thinkDelayMs: number; replyDelayMs: number; wanderRadius: number; planSteps: number; experimentChance: number; eatAtHunger: number; offerChance: number; judgeChance: number; lawChance: number };
+  mock: { thinkDelayMs: number; replyDelayMs: number; wanderRadius: number; planSteps: number; experimentChance: number; eatAtHunger: number; offerChance: number; askChance: number; judgeChance: number; lawChance: number };
   brain: BrainConfig;
   insights: InsightConfig;
   barter: BarterConfig;
