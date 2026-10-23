@@ -30,7 +30,9 @@
     "reconnectMs": 3000,
     "repealOperation": "repeal_rule",
     "amendOperation": "amend_rule",
-    "deleteOperation": "delete_rule"
+    "deleteOperation": "delete_rule",
+    "bulkDeleteOperation": "delete_records",
+    "maxBulkDeleteKeys": 1000
   },
   "models": {
     "opus": "anthropic/claude-opus-5-5",

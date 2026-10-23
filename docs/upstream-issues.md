@@ -194,9 +194,11 @@ Friction found in the projects this demo builds on, worked around here without p
   Revision on the branch.
 - **Where:** `packages/keeper/src/lorebase_keeper/services/operation_catalog.py` (built-ins: `create_`,
   `update_`, `delete_`, `link_`, `unlink_`, `import_records`, `import_links`, `import_batch`; no bulk delete).
-- **Workaround:** `scripts/world-reset.ts` waits out each 429 (`retry_after_s`) and merges all deletes with one
-  Proposal; the seed run right after it pauses first.
-- **Status:** Open.
+- **Workaround:** none needed any more (was: `scripts/world-reset.ts` waited out each 429).
+- **Status:** Resolved upstream in lorebase `da53556`: built-in `delete_records {kind, keys, skip_missing?}` deletes
+  up to `keeper.operations.max_bulk_delete_keys` (default 1000) Records of one Kind in one Revision and one
+  `writes` token. `world:reset` sends one call per Kind and batch (`lorebase.bulkDeleteOperation`,
+  `lorebase.maxBulkDeleteKeys` in `config/sim.json`) on the `reset/` branch and merges them with one Proposal.
 
 ## 16. reinloop: `McpToolInfo` is not exported from the package entry
 

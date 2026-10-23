@@ -330,13 +330,14 @@ At most `decisions.offersMax` pending offers per person.
 ### World reset
 
 `npm run world:reset` returns Lorebase `main` to the seed state with the governed flow only (Operations on
-a `reset/<stamp>` branch, one Proposal, approved and merged): laws not in `lorebase/rules.seed.yaml` are
+a `reset/<stamp>` branch, one Proposal, approved and merged; records leave `main` through the bulk
+`delete_records` Operation, one call per Kind and batch of `lorebase.maxBulkDeleteKeys` keys): laws not in `lorebase/rules.seed.yaml` are
 repealed, seed laws and roles get their seed values back, discovered technologies and their recipes
 leave `main` (the seed then rebuilds `nature/hidden`), Chronicle, Insight and Family records are kept on
 `archive/<stamp>` and removed from `main`, and stale `role/`, `law/`, `tech/`, `seed/`, `reset/` branches
 and their open Proposals are closed. Then mnemo's database (`config/mnemo.json` `db.path`) is deleted
 (`data/models` is kept). `--dry-run` lists the actions; `--keep-memory` keeps mnemo; it refuses while
-mnemo answers (`--force` to override). Writes wait out the Keeper's rate limit (429).
+mnemo answers (`--force` to override).
 
 ### Private memory: mnemo (`services/mnemo`)
 

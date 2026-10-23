@@ -1,5 +1,7 @@
 // Returns the world data of Lorebase `main` to the seed state, through the governed flow only
-// (Operations on a `reset/` branch, merged by a Proposal; never direct DB access):
+// (Operations on a `reset/` branch, merged by a single Proposal; never direct DB access). Deletes go
+// through the bulk `delete_records` Operation, one call (one Revision) per Kind and batch of at most
+// lorebase.maxBulkDeleteKeys keys:
 //   - laws not in lorebase/rules.seed.yaml are repealed, seed laws get their seed value and wording back
 //     (missing ones are re-created), roles get their seed values back;
 //   - discovered technologies and their recipes leave main (back to nature/hidden, rebuilt by the seed);
@@ -13,7 +15,7 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseYaml } from 'reinloop';
 import { loadConfig, ROOT } from '../server/src/config.ts';
-import { LorebaseClient, LorebaseError, type RecordItem } from '../server/src/lorebase/client.ts';
+import { LorebaseClient, type RecordItem } from '../server/src/lorebase/client.ts';
 import { loadGameConfig } from '../server/src/rt/config.ts';
 
 const argv = process.argv.slice(2);
@@ -36,17 +38,11 @@ interface Action {
   what: string;
 }
 
-/** Runs a write, waiting out the Keeper's write rate limit (429, retry_after_s). */
-async function patiently<T>(fn: () => Promise<T>): Promise<T> {
-  for (let i = 0; ; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (!(err instanceof LorebaseError) || err.status !== 429 || i >= 20) throw err;
-      const after = Number((err.body as Record<string, unknown> | undefined)?.retry_after_s);
-      await new Promise((r) => setTimeout(r, (Number.isFinite(after) && after > 0 ? after : 1) * 1000));
-    }
-  }
+/** Records of one Kind leaving main (one bulk delete per batch). */
+interface Removal {
+  kind: string;
+  key: string;
+  what: string;
 }
 
 const snake = (kind: string) => kind.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
@@ -60,13 +56,14 @@ await client.ready().catch(() => {
 
 // ---- plan ----------------------------------------------------------------------
 const actions: Action[] = [];
+const removals: Removal[] = [];
 const rules = await records(lb.ruleKind);
 const seedRules = new Map(seed.rules.map((r) => [String(r.code), r]));
 for (const r of rules) {
   const code = String(r.values.code ?? r.key);
   const s = seedRules.get(code);
   if (!s) {
-    actions.push({ op: lb.deleteOperation, params: { key: r.key }, what: `repeal law ${code}` });
+    removals.push({ kind: lb.ruleKind, key: r.key, what: `repeal law ${code}` });
     continue;
   }
   const changed = (['value', 'text', 'category', 'unit'] as const).filter((k) => !same(r.values[k], s[k]));
@@ -84,15 +81,15 @@ for (const r of await records(lb.roleKind)) {
 }
 
 const eco = game.economy.kinds;
-for (const t of await records(eco.technology)) actions.push({ op: `delete_${snake(eco.technology)}`, params: { key: t.key }, what: `re-hide technology ${t.key}` });
+for (const t of await records(eco.technology)) removals.push({ kind: eco.technology, key: t.key, what: `re-hide technology ${t.key}` });
 for (const r of await records(eco.recipe)) {
-  if (String(r.values.tech ?? '')) actions.push({ op: `delete_${snake(eco.recipe)}`, params: { key: r.key }, what: `re-hide recipe ${r.key}` });
+  if (String(r.values.tech ?? '')) removals.push({ kind: eco.recipe, key: r.key, what: `re-hide recipe ${r.key}` });
 }
 const archived: Record<string, number> = {};
 for (const kind of ARCHIVE_KINDS) {
   const items = await records(kind);
   archived[kind] = items.length;
-  for (const x of items) actions.push({ op: `delete_${snake(kind)}`, params: { key: x.key }, what: `archive ${kind} ${x.key}` });
+  for (const x of items) removals.push({ kind, key: x.key, what: `archive ${kind} ${x.key}` });
 }
 
 const branches = await client.listBranches();
@@ -101,13 +98,21 @@ const open = (await client.listProposals('open')).filter((p) => stale.some((b) =
 
 // ---- report ----------------------------------------------------------------------
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').toLowerCase();
-const byKind = (prefix: string) => actions.filter((a) => a.what.startsWith(prefix));
+const byKind = (prefix: string) => [...actions, ...removals].filter((a) => a.what.startsWith(prefix));
+// One bulk delete per Kind and batch of keys (the Keeper caps the keys of one call).
+const batchSize = Math.max(1, lb.maxBulkDeleteKeys);
+const batches: Array<{ kind: string; keys: string[] }> = [];
+for (const kind of [...new Set(removals.map((x) => x.kind))]) {
+  const keys = removals.filter((x) => x.kind === kind).map((x) => x.key);
+  for (let i = 0; i < keys.length; i += batchSize) batches.push({ kind, keys: keys.slice(i, i + batchSize) });
+}
 console.log(`world reset of ${lb.domain}/${main}${dry ? ' (dry run)' : ''}:`);
 for (const prefix of ['repeal law', 'restore law', 're-create law', 'restore role', 're-hide technology', 're-hide recipe']) {
   const list = byKind(prefix);
   if (list.length) console.log(`  ${prefix}: ${list.map((a) => a.what.slice(prefix.length + 1)).join('; ')}`);
 }
 for (const [kind, n] of Object.entries(archived)) console.log(`  archive ${kind}: ${n} record(s) -> archive/${stamp}, removed from ${main}`);
+if (batches.length) console.log(`  ${lb.bulkDeleteOperation}: ${batches.map((b) => `${b.kind} ${b.keys.length}`).join(', ')} (${batches.length} call(s), at most ${batchSize} keys each)`);
 console.log(`  close ${open.length} open Proposal(s) and delete ${stale.length} stale branch(es)${stale.length ? `: ${stale.map((b) => b.name).join(', ')}` : ''}`);
 const mnemoDb = resolve(ROOT, process.env.MNEMO_DB || (JSON.parse(readFileSync(resolve(ROOT, process.env.MNEMO_CONFIG ?? 'config/mnemo.json'), 'utf8')) as { db: { path: string } }).db.path);
 console.log(`  private memory: ${keepMemory ? 'kept' : `delete ${mnemoDb} (models kept)`}`);
@@ -123,25 +128,23 @@ if (!keepMemory && !force) {
 }
 for (const p of open) await client.closeProposal(p.id).catch((err) => console.warn(`  close ${p.id}: ${err.message}`));
 for (const b of stale) await client.deleteBranch(b.name).catch((err) => console.warn(`  delete ${b.name}: ${err.message}`));
-if (actions.length) {
-  if (Object.values(archived).some((n) => n > 0)) await patiently(() => client.createBranch(`archive/${stamp}`, main));
+const changes = actions.length + removals.length;
+if (changes) {
+  if (Object.values(archived).some((n) => n > 0)) await client.createBranch(`archive/${stamp}`, main);
   const work = `reset/${stamp}`;
-  await patiently(() => client.createBranch(work, main));
-  let done = 0;
-  for (const a of actions) {
-    await patiently(() => client.execute(a.op, a.params, { branch: work, message: `World reset: ${a.what}` }));
-    if (++done % 50 === 0) console.log(`  ${done}/${actions.length} operations`);
+  await client.createBranch(work, main);
+  for (const a of actions) await client.execute(a.op, a.params, { branch: work, message: `World reset: ${a.what}` });
+  for (const b of batches) {
+    await client.execute(lb.bulkDeleteOperation, { kind: b.kind, keys: b.keys, skip_missing: true }, { branch: work, message: `World reset: remove ${b.keys.length} ${b.kind} record(s)` });
   }
-  const pr = await client.createProposal(work, main, 'World reset', `Back to the seed state: ${actions.length} change(s). History archived on archive/${stamp}.`);
+  const pr = await client.createProposal(work, main, 'World reset', `Back to the seed state: ${changes} change(s) in ${actions.length + batches.length} Operation(s). History archived on archive/${stamp}.`);
   await client.review(pr.id, 'approve', 'World reset');
   const merged = await client.merge(pr.id, 'World reset');
   await client.deleteBranch(work).catch(() => undefined);
-  console.log(`merged ${pr.id} into ${main}: ${merged.result} @ ${merged.revision.slice(0, 12)}`);
+  console.log(`merged ${pr.id} into ${main}: ${merged.result} @ ${merged.revision.slice(0, 12)} (${actions.length + batches.length} Operation(s))`);
 } else console.log(`${main} already matches the seed`);
 
 // The hidden catalog is rebuilt from main (and anything missing is seeded back).
-// A short pause first: the reset may have used up the Keeper's write rate budget.
-await new Promise((r) => setTimeout(r, 3000));
 const seeded = spawnSync(process.execPath, [resolve(ROOT, 'scripts/lorebase-seed.ts')], { stdio: 'inherit', env: process.env });
 if (seeded.status !== 0) console.warn('seed step failed: run npm run lorebase:seed');
 

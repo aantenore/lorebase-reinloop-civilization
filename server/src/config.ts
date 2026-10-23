@@ -36,6 +36,9 @@ export interface SimConfig {
     repealOperation: string;
     amendOperation: string;
     deleteOperation: string;
+    /** Built-in bulk delete (one Revision per call) and the Keeper's per-call key cap (keeper.operations.max_bulk_delete_keys). */
+    bulkDeleteOperation: string;
+    maxBulkDeleteKeys: number;
     proposalBranchPrefix: string;
     pollMs: number;
     reconnectMs: number;
