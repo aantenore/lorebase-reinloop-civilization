@@ -16,7 +16,7 @@ case "${1:-up}" in
   up)
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker run -d --name "$NAME" --network "${PROJECT}_default" -p "127.0.0.1:${PORT}:8090" \
-      -e LOREBASE_URL=http://keeper:8080 -e LOREBASE_DOMAIN="$DOMAIN" \
+      -e LOREBASE_URL=http://keeper:8080 -e LOREBASE_DOMAIN="$DOMAIN" -e LOREBASE_BRANCH="${LOREBASE_BRANCH:-main}" \
       -e LOREBASE__HERALD__TRANSPORT=streamable_http -e LOREBASE__HERALD__HTTP__HOST=0.0.0.0 \
       -e LOREBASE__HERALD__HTTP__ALLOWED_HOSTS="[\"127.0.0.1:${PORT}\",\"localhost:${PORT}\"]" \
       "lorebase:$TAG" python -m lorebase_herald >/dev/null

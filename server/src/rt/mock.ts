@@ -2,6 +2,7 @@
 // so `npm run game:mock` runs without a model. Not how real agents are prompted (see
 // docs/prompts.md): real agents get no tasks; this heuristic only stands in for a model.
 import type { Translate } from '../i18n.ts';
+import { knownRecipes, stationsOf } from './economy.ts';
 import { createRng } from '../world/rng.ts';
 import type { PlanStep } from './plan.ts';
 import { tileOf } from './plan.ts';
@@ -15,13 +16,92 @@ export interface MockPlan {
   reason: string;
 }
 
+/** Items the known recipes of a role use (inputs and tools). */
+function needsOf(w: RtWorld, role: string): Set<string> {
+  const out = new Set<string>();
+  for (const r of knownRecipes(w.catalog, new Set(w.discovered.keys()))) {
+    if (r.role && r.role !== role) continue;
+    for (const k of Object.keys(r.inputs)) out.add(k);
+    for (const k of r.tools) out.add(k);
+  }
+  return out;
+}
+
+/**
+ * The economic part of a mock plan: give what a neighbour's role uses, follow a recipe one can
+ * follow, use a remedy when hurt, gather what recipes use, and (explorers, or by chance) combine
+ * carried items. A stand-in for a model, nothing more.
+ */
+export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentChance: number): PlanStep[] {
+  const c = w.catalog;
+  if (!c.resources.size) return [];
+  const rng = createRng(hash(`eco:${e.id}:${Math.floor(w.clock)}`));
+  const L = (key: string, vars: Record<string, string | number> = {}) => t(`rt.mock.label.${key}`, vars);
+  const steps: PlanStep[] = [];
+  const here = tileOf(e);
+  const has = (k: string) => (e.inventory[k] ?? 0) >= 1;
+  const dist = (a: Point) => Math.max(Math.abs(a.x - here.x), Math.abs(a.y - here.y));
+  const mine = needsOf(w, e.role);
+  // Hurt: use a remedy.
+  const remedy = Object.keys(e.inventory).find((k) => has(k) && (c.resources.get(k)?.heal ?? 0) > 0);
+  if (remedy && e.hp < e.maxHp * 0.7) steps.push({ action: 'use', args: { item: remedy }, label: L('use') });
+  // Give: something a neighbour of another role uses (or a remedy to someone hurt).
+  const near = w.living().filter((b) => b.id !== e.id && b.kind !== 'player' && b.role !== e.role && dist(tileOf(b)) <= Math.max(3, w.r('vision_radius') * 2));
+  for (const b of near.sort(() => rng.next() - 0.5)) {
+    const theirs = needsOf(w, b.role);
+    const item = Object.keys(e.inventory).find((k) => has(k) && k !== 'food' && ((theirs.has(k) && (!mine.has(k) || (e.inventory[k] ?? 0) >= 4)) || ((c.resources.get(k)?.heal ?? 0) > 0 && b.hp < b.maxHp * 0.7)));
+    if (item) {
+      const amount = Math.max(1, Math.min(2, Math.floor((e.inventory[item] ?? 0) / 2)));
+      steps.push({ action: 'approach', args: { to: b.name }, label: L('approach', { name: b.name }) });
+      steps.push({ action: 'give', args: { to: b.name, item, amount }, label: L('give', { name: b.name }) });
+      return steps;
+    }
+  }
+  // Craft: the first recipe one can follow, walking to its station.
+  const disc = new Set(w.discovered.keys());
+  for (const r of knownRecipes(c, disc).sort(() => rng.next() - 0.5)) {
+    if (r.role && r.role !== e.role) continue;
+    if (!Object.entries(r.inputs).every(([k, n]) => (e.inventory[k] ?? 0) >= n) || r.tools.some((k) => !e.tools.some((x) => x.item === k))) continue;
+    if (r.station) {
+      const st = w.tiles.filter((x) => stationsOf(x).has(r.station!)).sort((a, b) => dist(a) - dist(b))[0];
+      if (!st) continue;
+      if (dist(st) > 0) steps.push({ action: 'move_to', args: { x: st.x, y: st.y }, label: L('move', st) });
+    }
+    steps.push({ action: 'craft', args: { recipe: r.code }, label: L('craft', { name: r.name }) });
+    return steps;
+  }
+  // Explore and experiment: far resources, then a combination of two carried items.
+  const carried = Object.keys(e.inventory).filter(has);
+  if ((e.role === 'explorer' || rng.next() < experimentChance / 4) && carried.length >= 2 && rng.next() < experimentChance) {
+    const a = rng.pick(carried);
+    const b = rng.pick(carried.filter((x) => x !== a));
+    steps.push({ action: 'experiment', args: { items: [a, b] }, label: L('experiment') });
+    return steps;
+  }
+  const wanted = new Set<string>(e.role === 'explorer' ? [...c.resources.values()].filter((r) => r.minDistance > 0).map((r) => r.code) : []);
+  for (const k of mine) wanted.add(k);
+  if (e.role === 'gatherer' || e.role === 'elder') for (const b of near) for (const k of needsOf(w, b.role)) wanted.add(k);
+  const raw = [...wanted].map((k) => c.resources.get(k)).filter((r) => r && r.source === 'biome' && (e.inventory[r.code] ?? 0) < 4);
+  const pick = raw.length ? raw[Math.floor(rng.next() * raw.length)]! : undefined;
+  if (pick) {
+    const tile = w.tiles
+      .filter((x) => w.walkable(x.x, x.y) && pick.biomes.includes(x.biome) && w.distanceFromCenter(x) >= pick.minDistance)
+      .sort((a, b) => dist(a) - dist(b))[0];
+    if (tile) {
+      if (dist(tile) > 0) steps.push({ action: 'move_to', args: { x: tile.x, y: tile.y }, label: L('move', tile) });
+      for (let i = 0; i < 2; i++) steps.push({ action: 'gather', args: { resource: pick.code }, label: L('gatherItem', { name: pick.name }) });
+    }
+  }
+  return steps;
+}
+
 /** Plans `count` steps for one person by simulating its position and inventory forward. */
-export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: number; max: number }, wanderRadius: number): MockPlan {
+export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: number; max: number }, wanderRadius: number, experimentChance = 0): MockPlan {
   const rng = createRng(hash(`${e.id}:${Math.floor(w.clock)}`));
   const steps: PlanStep[] = [];
   let pos: Point = tileOf(e);
-  let food = e.inventory.food;
-  let wood = e.inventory.wood;
+  let food = e.inventory.food ?? 0;
+  let wood = e.inventory.wood ?? 0;
   let hunger = e.hunger;
   let reason = '';
   const L = (key: string, vars: Record<string, string | number> = {}) => t(`rt.mock.label.${key}`, vars);
@@ -43,6 +123,14 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
     pos = { x: p.x, y: p.y };
   };
   const why = (key: string) => (reason ||= t(`rt.mock.reason.${key}`));
+
+  const eco = e.hunger < w.r('critical_hunger') - 1 ? mockEconomy(t, w, e, experimentChance) : [];
+  for (const s of eco) push(s);
+  if (eco.length) {
+    reason = t('rt.mock.reason.work');
+    const last = [...eco].reverse().find((s) => s.action === 'move_to');
+    if (last) pos = { x: Number(last.args.x), y: Number(last.args.y) };
+  }
 
   // Talking: planners greet the nearest person now and then.
   const other = w.living().filter((b) => b.id !== e.id && Math.hypot(b.x - e.x, b.y - e.y) <= w.r('speech_radius'))[0];
@@ -125,11 +213,11 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
 }
 
 /** A joint plan: each member's own mock plan, tagged with `who`. */
-export function mockGroupPlan(t: Translate, w: RtWorld, members: RtEntity[], count: { min: number; max: number }, wanderRadius: number): { summary: string; steps: PlanStep[] } {
+export function mockGroupPlan(t: Translate, w: RtWorld, members: RtEntity[], count: { min: number; max: number }, wanderRadius: number, experimentChance = 0): { summary: string; steps: PlanStep[] } {
   const parts: string[] = [];
   const steps: PlanStep[] = [];
   for (const m of members) {
-    const p = mockSteps(t, w, m, count, wanderRadius);
+    const p = mockSteps(t, w, m, count, wanderRadius, experimentChance);
     parts.push(t('rt.mock.part', { name: m.name, label: p.steps[0]?.label ?? t('rt.mock.label.wait') }));
     for (const s of p.steps) steps.push({ ...s, args: { ...s.args, who: m.id } });
   }

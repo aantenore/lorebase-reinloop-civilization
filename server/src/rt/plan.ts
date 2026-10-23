@@ -3,14 +3,22 @@
 // number of game minutes) that advances with real time at the person's own speed.
 import type { Point } from './path.ts';
 
-export const STEP_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'give', 'say', 'rest', 'sleep', 'wait'] as const;
+export const STEP_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'give', 'say', 'rest', 'sleep', 'wait', 'craft', 'experiment', 'use'] as const;
 export type StepAction = (typeof STEP_ACTIONS)[number];
+
+/** Names agents write for some actions (the people of the world speak Italian); normalized to STEP_ACTIONS. */
+export const ACTION_ALIASES: Record<string, StepAction> = { crea: 'craft', sperimenta: 'experiment', usa: 'use', dai: 'give' };
+/** Actions offered to models in the commit_plan schema. */
+export const MODEL_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'dai', 'say', 'rest', 'sleep', 'wait', 'crea', 'sperimenta', 'usa'] as const;
 export type Dir = 'n' | 'e' | 's' | 'w';
 export type Anim = 'idle' | 'walk' | 'work' | 'sleep' | 'eat';
 
 export interface PlanStep {
   action: StepAction;
-  /** move_to {x,y} · approach {to} · gather {resource} · eat {amount?} · give {to,resource,amount} · say {to,text} · rest/sleep/wait {minutes}. Group plans add `who`. */
+  /**
+   * move_to {x,y} · approach {to} · gather {resource} · eat {amount?, item?} · give {to,item,amount} · say {to,text} ·
+   * rest/sleep/wait {minutes} · craft {recipe} · experiment {items} · use {item}. Group plans add `who`.
+   */
   args: Record<string, unknown>;
   label: string;
 }
@@ -41,7 +49,9 @@ export interface ExecContext {
   path(from: Point, to: Point): Point[] | undefined;
   /** Tile coordinates of a person by id or name, if alive. */
   locate(who: string): Point | undefined;
-  durations: { gather: number; build: number; eat: number };
+  durations: { gather: number; build: number; eat: number; experiment: number; use: number };
+  /** Work minutes of a recipe, undefined when there is no such recipe. */
+  craftMinutes(recipe: string): number | undefined;
   /** Upper bound of rest/sleep/wait in game minutes. */
   maxWaitMinutes: number;
 }
@@ -49,6 +59,11 @@ export interface ExecContext {
 export type Prepared = { activity: Activity } | { error: string };
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+/** An item, recipe or technology code: snake_case, lower case. */
+const code = (v: unknown): string | undefined => {
+  const c = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  return /^[a-z][a-z0-9_]{0,40}$/.test(c) ? c : undefined;
+};
 const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
 
 /**
@@ -59,7 +74,8 @@ export function normalizeStep(raw: unknown, textMax: number): PlanStep | undefin
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const a = { ...(r.args && typeof r.args === 'object' ? (r.args as Record<string, unknown>) : {}), ...r };
-  const action = str(a.action, 32) as StepAction;
+  const named = str(a.action, 32).toLowerCase();
+  const action = (ACTION_ALIASES[named] ?? named) as StepAction;
   if (!STEP_ACTIONS.includes(action)) return undefined;
   const label = str(a.label, textMax);
   const args: Record<string, unknown> = {};
@@ -79,7 +95,7 @@ export function normalizeStep(raw: unknown, textMax: number): PlanStep | undefin
       break;
     }
     case 'gather': {
-      const resource = a.resource === 'wood' ? 'wood' : a.resource === 'food' ? 'food' : undefined;
+      const resource = code(a.resource ?? a.item);
       if (!resource) return undefined;
       args.resource = resource;
       break;
@@ -87,14 +103,34 @@ export function normalizeStep(raw: unknown, textMax: number): PlanStep | undefin
     case 'eat': {
       const amount = Math.floor(num(a.amount));
       if (Number.isFinite(amount) && amount > 0) args.amount = amount;
+      const item = code(a.item);
+      if (item) args.item = item;
       break;
     }
     case 'give': {
       const to = str(a.to, 64);
-      const resource = a.resource === 'wood' ? 'wood' : a.resource === 'food' ? 'food' : undefined;
-      const amount = Math.floor(num(a.amount));
-      if (!to || !resource || !Number.isFinite(amount) || amount < 1) return undefined;
-      Object.assign(args, { to, resource, amount });
+      const item = code(a.item ?? a.resource);
+      const amount = Math.floor(num(a.amount ?? 1));
+      if (!to || !item || !Number.isFinite(amount) || amount < 1) return undefined;
+      Object.assign(args, { to, item, amount });
+      break;
+    }
+    case 'craft': {
+      const recipe = code(a.recipe);
+      if (!recipe) return undefined;
+      args.recipe = recipe;
+      break;
+    }
+    case 'experiment': {
+      const items = (Array.isArray(a.items) ? a.items : typeof a.items === 'string' ? a.items.split(',') : []).map(code).filter((x): x is string => !!x);
+      if (!items.length) return undefined;
+      args.items = [...new Set(items)].slice(0, 8);
+      break;
+    }
+    case 'use': {
+      const item = code(a.item);
+      if (!item) return undefined;
+      args.item = item;
       break;
     }
     case 'say': {
@@ -147,6 +183,15 @@ export function prepareStep(step: PlanStep, mover: Mover, ctx: ExecContext): Pre
       const minutes = Math.min(Math.max(Number(step.args.minutes) || 1, 0), ctx.maxWaitMinutes);
       return { activity: { kind: 'timed', remaining: minutes, anim: step.action === 'sleep' ? 'sleep' : 'idle', scaled: false } };
     }
+    case 'craft': {
+      const minutes = ctx.craftMinutes(String(step.args.recipe));
+      if (minutes === undefined) return { error: 'unknown_recipe' };
+      return { activity: { kind: 'timed', remaining: minutes, anim: 'work', scaled: true } };
+    }
+    case 'experiment':
+      return { activity: { kind: 'timed', remaining: ctx.durations.experiment, anim: 'work', scaled: true } };
+    case 'use':
+      return { activity: { kind: 'timed', remaining: ctx.durations.use, anim: 'eat', scaled: false } };
     case 'give':
     case 'say':
       return { activity: { kind: 'instant' } };

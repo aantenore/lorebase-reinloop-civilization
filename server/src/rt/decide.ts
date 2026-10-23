@@ -11,7 +11,7 @@ import type { Brain, ConsultEvent } from './brain.ts';
 import type { Tier } from '../world/types.ts';
 import { AGENT_PATTERNS, type GameConfig, type TierDecision } from './config.ts';
 import { flatSteps, mockSteps } from './mock.ts';
-import { normalizeStep, type PlanStep, STEP_ACTIONS } from './plan.ts';
+import { MODEL_ACTIONS, normalizeStep, type PlanStep } from './plan.ts';
 import {
   doingLine, type GroupView, groupLine, inboxBlock, look, memoryBlock, type PromptLimits, rtInstructions, rtObservation, selfLine, timeLine,
 } from './prompt.ts';
@@ -41,6 +41,10 @@ export interface DecideHost {
   shareInsight(e: RtEntity, text: string, confidence: number, evidence: string): Promise<ToolOutcome>;
   reviewInsights(e: RtEntity): string;
   judgeInsight(e: RtEntity, code: string, verdict: 'approve' | 'reject', reason: string): Promise<ToolOutcome>;
+  /** A group member said something while the group deliberated (reinloop pattern trace). */
+  deliberated(g: { id: string; pattern: string }, memberId: string, role: string, text: string): void;
+  /** A model run ended (usage and cost per agent, for the Observatory). */
+  ranModel(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number }): void;
   /** A person consulted Lorebase (shown to clients). */
   consulted(e: RtEntity, ev: ConsultEvent): void;
 }
@@ -49,7 +53,7 @@ export interface DecideHost {
 export function faculties(host: DecideHost, e: RtEntity, maxConsults: number): Tool[] {
   return [
     ...host.brain.lorebaseTools({ left: maxConsults, onConsult: (ev) => host.consulted(e, ev) }),
-    ...host.brain.memoryTools(e.name),
+    ...host.brain.memoryTools(e.name, () => ({ day: host.world().day, minute: host.world().minute }), host.cfg.memory.ingest.remember ?? { importance: 0.5, emotion: 0 }),
   ];
 }
 
@@ -77,17 +81,20 @@ export function modelRef(host: Pick<DecideHost, 'mock'>, model: string, script: 
   return realModel(model);
 }
 
-/** JSON Schema of the commit_plan tool. Counts are stated in the instructions, not enforced here. */
-export function planSchema(t: Translate, textMax: number, withWho = false): Record<string, unknown> {
+/** JSON Schema of the commit_plan tool. The step count is a suggestion (`maxSteps` only caps what is kept). */
+export function planSchema(t: Translate, textMax: number, withWho = false, maxSteps?: number): Record<string, unknown> {
   const step: Record<string, unknown> = {
     type: 'object',
     properties: {
       ...(withWho ? { who: { type: 'string' } } : {}),
-      action: { enum: [...STEP_ACTIONS] },
+      action: { enum: [...MODEL_ACTIONS] },
       x: { type: 'integer' },
       y: { type: 'integer' },
       to: { type: 'string' },
-      resource: { enum: ['food', 'wood'] },
+      resource: { type: 'string', description: t('rt.tools.stepResource') },
+      item: { type: 'string', description: t('rt.tools.stepItem') },
+      items: { type: 'array', items: { type: 'string' }, description: t('rt.tools.stepItems') },
+      recipe: { type: 'string', description: t('rt.tools.stepRecipe') },
       amount: { type: 'integer' },
       text: { type: 'string', maxLength: textMax },
       minutes: { type: 'number' },
@@ -97,7 +104,10 @@ export function planSchema(t: Translate, textMax: number, withWho = false): Reco
   };
   return {
     type: 'object',
-    properties: { reason: { type: 'string', description: t('rt.tools.planReason') }, steps: { type: 'array', items: step, description: t('rt.tools.planSteps') } },
+    properties: {
+      reason: { type: 'string', description: t('rt.tools.planReason') },
+      steps: { type: 'array', items: step, description: maxSteps ? t('rt.tools.planStepsUpTo', { maxSteps }) : t('rt.tools.planSteps') },
+    },
     required: ['reason', 'steps'],
   };
 }
@@ -179,7 +189,7 @@ function mockPlanTurn(host: DecideHost, e: RtEntity, tc: TierDecision): MockTurn
     const f = w.tiles.filter((x) => x.food >= 3 && Math.hypot(x.x - e.x, x.y - e.y) < 8)[0];
     if (f) calls.push({ name: 'share_insight', args: { text: t('rt.mock.insight', { x: f.x, y: f.y }), confidence: 0.6, evidence: t('rt.mock.insightEvidence', { day: w.day }) } });
   }
-  const plan = mockSteps(t, w, e, { min: tc.minSteps, max: tc.maxSteps }, host.cfg.mock.wanderRadius);
+  const plan = mockSteps(t, w, e, { min: Math.min(host.cfg.mock.planSteps, tc.maxSteps), max: tc.maxSteps }, host.cfg.mock.wanderRadius, host.cfg.mock.experimentChance);
   calls.push({ name: 'commit_plan', args: { reason: plan.reason, steps: flatSteps(plan.steps) } });
   return { text: plan.reason, toolCalls: calls };
 }
@@ -194,7 +204,7 @@ export async function decide(host: DecideHost, e: RtEntity, why: string): Promis
   const textMax = cfg.decisions.textMaxChars;
   const controller = new AbortController();
   let committed: Decision | undefined;
-  const commit = tool<{ reason: string; steps: unknown[] }>('commit_plan', t('rt.tools.commitPlan'), planSchema(t, textMax), (args) => {
+  const commit = tool<{ reason: string; steps: unknown[] }>('commit_plan', t('rt.tools.commitPlan'), planSchema(t, textMax, false, tc.maxSteps), (args) => {
     const steps = normalizeSteps(args?.steps, textMax, tc.maxSteps);
     if (!steps.length) return { content: t('rt.act.noSteps'), isError: true };
     committed = { steps, reason: String(args?.reason ?? '').slice(0, textMax) };
@@ -206,7 +216,7 @@ export async function decide(host: DecideHost, e: RtEntity, why: string): Promis
     name: e.id,
     model: modelRef(host, e.model, (req) => mockDecision(host, e, tc, req), cfg.mock.thinkDelayMs),
     params: { maxTokens: tc.maxOutputTokens },
-    instructions: rtInstructions(t, e, host.roleOf(e.role), { minSteps: tc.minSteps, maxSteps: tc.maxSteps, horizon }),
+    instructions: rtInstructions(t, e, host.roleOf(e.role), { horizon }),
     tools: [commit, ...socialTools(host, e), ...faculties(host, e, tc.maxConsults)],
     budget: { maxTurns: tc.maxTurns, maxToolCalls: tc.maxConsults + tc.maxTurns * 4 },
     toolSettings: { concurrency: 1 },
@@ -214,6 +224,7 @@ export async function decide(host: DecideHost, e: RtEntity, why: string): Promis
   const prompt = rtObservation(t, w, e, why, host.groups(), host.roleTitle, limitsOf(cfg), host.changedLaws(e));
   const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.decisions.timeoutMs)]);
   const res = await runner.run(prompt, { signal });
+  host.ranModel(e, res);
   if (!committed && res.status !== 'completed') console.warn(`[decide ${e.name}] ${res.status}: ${res.reason ?? ''}`);
   return committed;
 }
@@ -245,9 +256,9 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
     name: e.id,
     model: modelRef(host, e.model, mockReply, cfg.mock.replyDelayMs),
     params: { maxTokens: cfg.conversation.replyMaxOutputTokens },
-    instructions: `${rtInstructions(t, e, host.roleOf(e.role), { minSteps: tc.minSteps, maxSteps: tc.maxSteps, horizon: w.r('plan_horizon_minutes') * tc.horizonFactor })}\n${t('rt.replyInstructions')}`,
+    instructions: `${rtInstructions(t, e, host.roleOf(e.role), { horizon: w.r('plan_horizon_minutes') * tc.horizonFactor })}\n${t('rt.replyInstructions')}`,
     tools: [rethinkTool],
-    budget: { maxTurns: 2 },
+    budget: { maxTurns: cfg.conversation.replyMaxTurns },
   });
   const prompt = [
     timeLine(t, w),
@@ -271,6 +282,7 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
     }
   }
   const res = await handle.result;
+  host.ranModel(e, res);
   if (!text && res.status !== 'completed' && !rethink) console.warn(`[reply ${e.name}] ${res.status}: ${res.reason ?? ''}`);
   return { text: text.trim(), rethink };
 }

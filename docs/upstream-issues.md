@@ -112,3 +112,45 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Where:** `deploy/compose/docker-compose.yaml`.
 - **Workaround:** `scripts/herald-up.sh` runs the backend image (`python -m lorebase_herald`) on the
   compose network with `LOREBASE__HERALD__HTTP__HOST=0.0.0.0` and explicit `ALLOWED_HOSTS`, published on 127.0.0.1:8190.
+
+## 10. lorebase: Keeper CORS cannot expose `ETag`/`Lorebase-Revision`; `allow_headers` replaces defaults
+
+- **Severity:** dx
+- **Repro:** `LOREBASE__KEEPER__CORS__ALLOW_ORIGINS='["http://localhost:5180"]'`, web app in live mode on that origin
+  (cross origin); `GET /api/v1/domains` and read `ETag`.
+- **Expected:** a setting such as `keeper.cors.expose_headers` so the web adapter's conditional reads work
+  cross origin; `allow_headers` adding to the defaults.
+- **Actual:** exposed headers are fixed (`X-Request-ID` plus the rate-limit ones); `ETag` is not, so every read is a plain 200
+  (documented in `apps/web/README.md`). `allow_headers` replaces the default list, so `If-None-Match` must be added together with the three defaults.
+- **Where:** `packages/keeper/src/lorebase_keeper/app.py:217`, `packages/keeper/src/lorebase_keeper/settings.py:33` (`CorsSettings`).
+- **Workaround:** `deploy/compose.override.yaml` sets `LOREBASE__KEEPER__CORS__ALLOW_ORIGINS` / `__ALLOW_HEADERS` (JSON lists); no conditional reads.
+
+## 10. reinloop: `MemoryStore` has no search hook; `recall` always ranks by keyword overlap
+
+- **Severity:** dx
+- **Repro:** back `memoryTools({ store })` with a semantic store; `recall` calls `store.all(ns)` and ranks with `rank()`.
+- **Expected:** an optional `search(namespace, query, limit)` on `MemoryStore` used by `recall` when present.
+- **Actual:** the store can only return everything; ranking is word overlap (`src/tools/memory.ts:44` `rank`, `:83` `recall`).
+- **Workaround:** the game defines its own `remember`/`recall` tools that call mnemo (`server/src/rt/brain.ts`).
+
+## 11. reinloop: `parallel` pattern reports only "all workers failed"
+
+- **Severity:** dx
+- **Repro:** a `parallel` team whose workers all end with a non-completed status (budget, timeout, provider error).
+- **Expected:** the failed result carries the workers' reasons.
+- **Actual:** `reason: 'all workers failed'` only (`src/patterns.ts:105`); the cause is visible only in each worker's `run_end`.
+- **Workaround:** the group decision sink collects non-completed `run_end` reasons and logs them (`server/src/rt/groups.ts`).
+
+## 12. reinloop: `parseYaml` rejects multi-line flow mappings
+
+- **Severity:** dx
+- **Repro:** `parseYaml('a:\n  - {code: x,\n     name: y}\n')`.
+- **Expected:** valid YAML parses (or the docs state the supported subset).
+- **Actual:** `frontmatter line N: expected ":" after ""` (`src/frontmatter.ts`, `flowValue`).
+- **Workaround:** `lorebase/economy.seed.yaml` uses block style only.
+
+## 13. lorebase: reserved attribute names also include `kind`
+
+- **Severity:** doc (same as 3)
+- **Repro:** a Kind attribute named `kind` → `schema.api_name_reserved`.
+- **Workaround:** the `Resource` Kind uses `category`.

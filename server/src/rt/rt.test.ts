@@ -33,7 +33,8 @@ test('findPath: same tile, blocked target, unreachable', () => {
 const ctx: ExecContext = {
   path: (from, to) => findPath(5, 5, walk, from, to, opts),
   locate: (who) => (who === 'Mara' ? { x: 0, y: 4 } : undefined),
-  durations: { gather: 4, build: 20, eat: 1 },
+  durations: { gather: 4, build: 20, eat: 1, experiment: 15, use: 2 },
+  craftMinutes: (code) => (code === 'axe' ? 40 : undefined),
   maxWaitMinutes: 30,
 };
 
@@ -41,7 +42,10 @@ test('normalizeStep accepts flat or nested args and rejects junk', () => {
   assert.deepEqual(normalizeStep({ action: 'move_to', x: '3', y: 1.4, label: 'vado' }, 50), { action: 'move_to', args: { x: 3, y: 1 }, label: 'vado' });
   assert.deepEqual(normalizeStep({ action: 'gather', args: { resource: 'wood' } }, 50)?.args, { resource: 'wood' });
   assert.equal(normalizeStep({ action: 'fly' }, 50), undefined);
-  assert.equal(normalizeStep({ action: 'give', to: 'Mara', resource: 'gold', amount: 1 }, 50), undefined);
+  assert.equal(normalizeStep({ action: 'give', to: 'Mara', resource: 'Gold bars!', amount: 1 }, 50), undefined);
+  assert.deepEqual(normalizeStep({ action: 'dai', to: 'Mara', item: 'axe' }, 50)?.args, { to: 'Mara', item: 'axe', amount: 1 });
+  assert.deepEqual(normalizeStep({ action: 'sperimenta', items: ['seeds', 'food', 'seeds'] }, 50), { action: 'experiment', args: { items: ['seeds', 'food'] }, label: 'experiment' });
+  assert.equal(normalizeStep({ action: 'crea', recipe: 'axe' }, 50)?.action, 'craft');
   assert.equal(normalizeStep({ action: 'say', to: 'all', text: 'x'.repeat(99) }, 10)?.args.text, 'x'.repeat(10));
   assert.equal(normalizeStep({ action: 'move_to', x: 1, y: 2, who: 'a1' }, 50)?.args.who, 'a1');
 });

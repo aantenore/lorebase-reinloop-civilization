@@ -89,7 +89,7 @@ kinds:
         required: true
       event:
         description: What kind of event this is.
-        type: {enum: [birth, death, arrival, departure, group_formed, group_dissolved, laws_changed]}
+        type: {enum: [birth, death, arrival, departure, group_formed, group_dissolved, laws_changed, discovery]}
         required: true
         indexed: true
       text:
@@ -145,7 +145,191 @@ kinds:
         required: true
         indexed: true
 
+  Resource:
+    description: Something people can carry, gather, craft, use or build (the economy of the real-time world).
+    primary_key: [code]
+    title_attribute: name
+    attributes:
+      code:
+        description: Stable item code used in inventories, snake_case.
+        type: string
+        required: true
+        constraints:
+          pattern: '^[a-z][a-z0-9_]*$'
+      name:
+        description: Name of the item as people read it.
+        type: string
+        required: true
+      description:
+        description: What the item is, as people read it.
+        type: text
+        required: true
+        searchable: true
+      category:
+        description: What sort of thing it is.
+        type: {enum: [food, material, tool, medicine, structure]}
+        required: true
+        indexed: true
+      perishable:
+        description: Whether the item spoils while carried.
+        type: boolean
+        required: true
+      decay_per_day:
+        description: Share of a carried perishable stock lost per day of the world; for structures, durability lost per day.
+        type: decimal(8,4)
+      durability:
+        description: Uses before a tool breaks; days before a structure falls apart.
+        type: decimal(8,2)
+      nourish:
+        description: Hunger removed by eating one unit.
+        type: decimal(6,2)
+      heal:
+        description: Health restored by using one unit.
+        type: decimal(6,2)
+      protection:
+        description: Share of the damage from cold and from the wilds that a carried unit wards off.
+        type: decimal(4,3)
+      boosts:
+        description: Item codes whose gathering this tool improves.
+        type: json
+      boost:
+        description: Multiplier of the gathered amount when the tool is used.
+        type: decimal(6,2)
+      source:
+        description: Where it comes from - tile (food and wood of a tile), biome (gathered from the ground of some biomes), craft (only made).
+        type: {enum: [tile, biome, craft]}
+        required: true
+      biomes:
+        description: Biomes where it can be gathered.
+        type: json
+      gather_yield:
+        description: Units gathered by one gathering on a suitable tile.
+        type: decimal(6,2)
+      min_distance:
+        description: Fewest tiles from the centre of the world at which it is found.
+        type: decimal(6,2)
+
+  Recipe:
+    description: A way to turn some items into others; known to the world only once its technology is discovered.
+    primary_key: [code]
+    title_attribute: name
+    attributes:
+      code:
+        description: Stable recipe code, snake_case.
+        type: string
+        required: true
+        constraints:
+          pattern: '^[a-z][a-z0-9_]*$'
+      name:
+        description: Name of the recipe as people read it.
+        type: string
+        required: true
+      description:
+        description: What the recipe makes, as people read it.
+        type: text
+        searchable: true
+      inputs:
+        description: Items consumed, code -> amount.
+        type: json
+        required: true
+      outputs:
+        description: Items produced, code -> amount (a structure is built on the tile).
+        type: json
+        required: true
+      tools:
+        description: Tool codes needed (worn, not consumed).
+        type: json
+      role:
+        description: Code of the role whose people know how to do it; empty for anyone.
+        type: string
+        indexed: true
+      tech:
+        description: Code of the technology that unlocks it; empty when known from the start.
+        type: string
+        indexed: true
+      station:
+        description: Where it must be done - shelter or a structure code; empty by hand anywhere.
+        type: string
+      minutes:
+        description: Work time in game minutes at work speed 1.
+        type: decimal(8,2)
+        required: true
+
+  Technology:
+    description: A body of knowledge of the civilization; discovering it makes its recipes known.
+    primary_key: [code]
+    title_attribute: name
+    attributes:
+      code:
+        description: Stable technology code, snake_case.
+        type: string
+        required: true
+        constraints:
+          pattern: '^[a-z][a-z0-9_]*$'
+      name:
+        description: Name of the technology as people read it.
+        type: string
+        required: true
+      description:
+        description: What the technology is, as people read it.
+        type: text
+        required: true
+        searchable: true
+      prerequisites:
+        description: Codes of the technologies that must be known first.
+        type: json
+      discovered:
+        description: Whether the civilization knows it.
+        type: boolean
+        required: true
+        indexed: true
+      discovered_by:
+        description: Name of the person who discovered it.
+        type: string
+      discovered_role:
+        description: Role of the person who discovered it.
+        type: string
+      discovered_day:
+        description: Day of the world on which it was discovered.
+        type: integer
+      discovered_minute:
+        description: Minute of the day at which it was discovered.
+        type: integer
+      session:
+        description: Id of the world run in which it was discovered.
+        type: string
+
 relations:
+  unlocked_by:
+    inverse_api_name: unlocks
+    description: The technology whose discovery makes a recipe known.
+    from_kind: Recipe
+    to_kind: Technology
+    cardinality: many_to_one
+  known_by:
+    inverse_api_name: recipes
+    description: The social role whose people know how to follow a recipe.
+    from_kind: Recipe
+    to_kind: Role
+    cardinality: many_to_one
+  consumes:
+    inverse_api_name: consumed_by
+    description: Items a recipe uses up.
+    from_kind: Recipe
+    to_kind: Resource
+    cardinality: many_to_many
+  produces:
+    inverse_api_name: produced_by
+    description: Items a recipe makes.
+    from_kind: Recipe
+    to_kind: Resource
+    cardinality: many_to_many
+  requires:
+    inverse_api_name: required_by
+    description: Technologies that must be known before this one can be discovered.
+    from_kind: Technology
+    to_kind: Technology
+    cardinality: many_to_many
   held_by_role:
     inverse_api_name: insights
     description: The social role whose shared consciousness an insight belongs to.
@@ -240,6 +424,50 @@ operations:
         relation: held_by_role
         from: $step[0]
         to: params.role
+    review_policy:
+      mode: never
+
+  repeal_rule:
+    description: Repeal a law directly on the live branch (no review).
+    parameters:
+      - name: rule
+        type: ref(Rule)
+        required: true
+        description: The rule to repeal.
+    steps:
+      - step: delete_record
+        kind: Rule
+        target: params.rule
+    review_policy:
+      mode: never
+
+  amend_rule:
+    description: Change the wording, category and unit of one law directly on the live branch (no review).
+    parameters:
+      - name: rule
+        type: ref(Rule)
+        required: true
+        description: The rule to amend.
+      - name: text
+        type: text
+        required: true
+        description: The new wording.
+      - name: category
+        type: {enum: [survival, economy, climate, society, time]}
+        required: true
+        description: The area of life it governs.
+      - name: unit
+        type: string
+        required: false
+        description: Unit of the value.
+    steps:
+      - step: update_record
+        kind: Rule
+        target: params.rule
+        values:
+          text: params.text
+          category: params.category
+          unit: params.unit
     review_policy:
       mode: never
 

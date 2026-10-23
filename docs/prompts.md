@@ -10,18 +10,25 @@ The prompt is minimal: no laws, no tasks, no goals, no strategy, no advice on wh
 | Part | Source |
 |------|--------|
 | Instructions (system) | `config/i18n/<lang>.rt.json` → `instructions`: name, personality, role code and title (Lorebase `Role`), the faculties (a mind connected to Lorebase through the `lorebase_*` tools: laws, the role's shared consciousness, the chronicle; a private memory `remember`/`recall`) and the plan interface (`commit_plan`, step counts and horizon of the tier) |
-| Observation (user message, at each decision) | `rt.observation.*`, `rt.look.*`: time and season, the person's body and position, group, current step, why it is thinking again (a fact: plan finished, step failed, spoken to, ...), what it perceives within `vision_radius`, what was said to it, what it lived (last `memoryItems`), and which law keys changed since it last thought |
-| Tools | `commit_plan`, `say`, `form_group`, `join_group`, `leave_group`, `share_insight`, `review_insights`, `judge_insight` (`rt.tools.*`); Lorebase read tools from Herald (`lorebase_get`, `lorebase_query`, `lorebase_search`, `lorebase_history`, `lorebase_diff`, `lorebase_changes`, `lorebase_schema`, `lorebase_context`; descriptions `rt.mcp.*`); private memory `remember`/`recall` (reinloop memory tools, one file per person under `data/minds`) |
+| Observation (user message, at each decision) | `rt.observation.*`, `rt.look.*`: time and season, the person's body, what it carries (item names and codes, tools with wear) and position, group, current step, why it is thinking again (a fact: plan finished, step failed, spoken to, ...), what it perceives within `vision_radius`, what was said to it, what it lived (last `memoryItems`), and which law keys changed since it last thought |
+| Tools | `commit_plan`, `say`, `form_group`, `join_group`, `leave_group`, `share_insight`, `review_insights`, `judge_insight` (`rt.tools.*`); Lorebase read tools from Herald (`lorebase_get`, `lorebase_query`, `lorebase_search`, `lorebase_history`, `lorebase_diff`, `lorebase_changes`, `lorebase_schema`, `lorebase_context`; descriptions `rt.mcp.*`); private memory `remember(text, importance?)`/`recall(query)` (mnemo: semantic recall, memories fade and blur; results say whether a memory is vivid or faded) |
 | Spoken reply | same instructions + `rt.replyInstructions`; short observation without laws; optional `rethink` tool |
 | Group members | `rt.memberInstructions` + the group situation (`rt.group.*`: members, perception of the leader, what was said, group memory, the JSON shape of a joint plan); pattern texts `rt.group.tpl.*` replace reinloop's English harness templates |
 
-Rendered example (Ilse, opus, at the start of a mock world):
+The plan interface lists the economy actions (`crea(recipe)`, `sperimenta(items)`, `usa(item)`,
+`dai(to, item, amount)`, `gather(resource)` by item code) as a tool description only: which recipes
+exist, who knows them and what they need is in Lorebase (`Recipe`, `Resource`, `Technology`), not in
+the prompt; undiscovered recipes are not readable at all. Perception adds the structures on tiles
+(hearth, storehouse) and whether the person stands in the wilds. The step count is a suggestion in
+the `commit_plan` schema ("di solito non più di N"), not a minimum.
+
+Rendered example (Ilse, opus, at the start of a mock world; v1 of the self line, now `porti: … ; attrezzi: …`):
 
 ```text
 Sei Ilse. Il tuo carattere: Calma, lungimirante; parla poco ma con chiarezza.
 Il tuo ruolo nella società: Anziano (elder).
 La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).
-Il tempo scorre senza pause. Quando ti fermi a pensare fissi con commit_plan ciò che farai nei prossimi minuti, da 50 a 100 passi per circa 60 minuti; mentre pensi continui a fare ciò che stavi facendo.
+Il tempo scorre senza pause. Quando ti fermi a pensare fissi con commit_plan ciò che farai per circa 60 minuti; mentre pensi continui a fare ciò che stavi facendo.
 Pensi e parli in italiano.
 ```
 

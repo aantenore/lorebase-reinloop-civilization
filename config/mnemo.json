@@ -1,0 +1,99 @@
+{
+  "http": {
+    "host": "127.0.0.1",
+    "port": 4410,
+    "maxBodyBytes": 65536
+  },
+  "db": {
+    "path": "data/mnemo.db",
+    "maxBytes": 200000000,
+    "capBatch": 100
+  },
+  "embedder": {
+    "provider": "transformers",
+    "model": "Xenova/multilingual-e5-small",
+    "dtype": "q8",
+    "cacheDir": "data/models",
+    "queryPrefix": "query: ",
+    "passagePrefix": "passage: ",
+    "conceptDim": 512,
+    "conceptModel": "claude-haiku-5-5",
+    "conceptMaxTokens": 200,
+    "conceptWordWeight": 0.3,
+    "reembedBatch": 32
+  },
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-haiku-5-5",
+    "maxOutputTokens": 400,
+    "timeoutMs": 30000,
+    "heuristicMergeChars": 240
+  },
+  "recall": {
+    "weights": {
+      "cosine": 0.45,
+      "bm25": 0.2,
+      "fidelity": 0.15,
+      "recency": 0.1,
+      "importance": 0.1
+    },
+    "candidates": 40,
+    "recencyHalfLifeHours": 6,
+    "defaultLimit": 6,
+    "rerank": {
+      "enabled": false,
+      "minCandidates": 12,
+      "model": "claude-haiku-5-5"
+    }
+  },
+  "fading": {
+    "baseStabilityHours": 2,
+    "importanceWeight": 2,
+    "emotionWeight": 1.5,
+    "recallStabilityFactor": 1.8,
+    "strengthen": 0.5,
+    "gistStabilityFactor": 3,
+    "gistFidelity": 0.5
+  },
+  "compaction": {
+    "intervalMs": 300000,
+    "blurBelow": [
+      0.6,
+      0.35
+    ],
+    "mergeBelow": 0.3,
+    "mergeCosine": 0.9,
+    "mergeMinCluster": 2,
+    "forgetBelow": 0.08,
+    "maxAgentsPerPass": 20,
+    "maxLlmCallsPerPass": 30,
+    "maxInputChars": 4000,
+    "maxMemoriesPerAgent": 300
+  },
+  "reconsolidation": {
+    "enabled": true,
+    "probability": 0.15,
+    "fidelityPenalty": 0.05
+  },
+  "runs": {
+    "maxRuns": 500,
+    "maxAgeHours": 72,
+    "pruneEveryInserts": 50
+  },
+  "events": {
+    "maxKept": 5000,
+    "trimEvery": 200
+  },
+  "namespaces": {
+    "fading": [
+      "mind"
+    ],
+    "static": [
+      "world"
+    ]
+  },
+  "conversations": {
+    "maxKept": 20000,
+    "maxLimit": 500
+  }
+}

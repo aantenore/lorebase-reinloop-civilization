@@ -33,6 +33,9 @@ export interface SimConfig {
     updateOperation: string;
     enactOperation: string;
     createOperation: string;
+    repealOperation: string;
+    amendOperation: string;
+    deleteOperation: string;
     proposalBranchPrefix: string;
     pollMs: number;
     reconnectMs: number;

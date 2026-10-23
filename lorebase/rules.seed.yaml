@@ -168,6 +168,47 @@ rules:
     unit: livelli
     category: economy
     text: "Un rifugio può essere ampliato fino a questo livello; ogni livello costa la legna di un rifugio."
+  - code: shelter_decay_per_day
+    value: 0.25
+    unit: livelli/giorno
+    category: economy
+    text: "I rifugi si degradano: ogni giorno perdono questa parte di un livello, finché qualcuno non li ripara costruendo di nuovo."
+  - code: wild_distance
+    value: 9
+    unit: caselle
+    category: survival
+    text: "Oltre questa distanza dal cuore del mondo cominciano le terre selvagge."
+  - code: wild_damage
+    value: 0.5
+    unit: salute/turno
+    category: survival
+    text: "Nelle terre selvagge chi non sta su un rifugio perde questa salute a ogni turno."
+  - code: experiment_minutes
+    value: 15
+    unit: minuti
+    category: economy
+    text: "Sperimentare combinando delle cose richiede questo tempo di lavoro; le cose combinate si consumano, una per tipo."
+  - code: use_minutes
+    value: 2
+    unit: minuti
+    category: survival
+    text: "Usare una medicina o un oggetto simile richiede questo tempo."
+  - code: offer_minutes
+    value: 60
+    unit: minuti
+    category: society
+    text: "Una proposta di scambio resta valida per questo tempo, poi decade."
+  - code: season_turn_minutes
+    value: 1440
+    unit: minuti
+    category: time
+    text: "Nel mondo che scorre senza pause le stagioni contano i turni dell'anno in giorni: un turno dell'anno dura questi minuti."
+  - code: tool_wear_per_use
+    value: 1
+    unit: usi
+    category: economy
+    text: "Ogni volta che un attrezzo viene usato perde questa durata; a zero si rompe."
+
 roles:
   - code: gatherer
     move_factor: 1.0
@@ -194,3 +235,8 @@ roles:
     work_factor: 1.0
     title: Guaritore
     description: "Nella società sei chi si prende cura degli altri e si accorge di chi è debole, affamato o ferito."
+  - code: crafter
+    move_factor: 0.95
+    work_factor: 1.3
+    title: Artigiano
+    description: "Nella società sei chi sa trasformare la pietra, le fibre e il legno in oggetti e attrezzi."

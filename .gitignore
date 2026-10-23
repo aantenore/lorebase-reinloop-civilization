@@ -9,3 +9,10 @@ dist/
 *.log
 .DS_Store
 *.tsbuildinfo
+*.db
+*.sqlite
+*.sqlite-*
+*.db-shm
+*.db-wal
+services/mnemo/.cache/
+.cache/

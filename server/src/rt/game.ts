@@ -12,15 +12,19 @@ import { RuleWatcher } from '../lorebase/watcher.ts';
 import { cleanEntry, loadRosterFile, saveRosterFile, validateEntry, validateRoster } from '../roster.ts';
 import type { Rules } from '../world/types.ts';
 import { Brain } from './brain.ts';
+import { type Catalog, Flows, unlocksOf } from './economy.ts';
+import { EconomyBook } from './economy-book.ts';
+import { type MemoryEvent, memoryKey, Mnemo } from './mnemo.ts';
+import { Observatory, UsageLedger } from './observatory.ts';
 import { Chronicle, type ChronicleEvent } from './chronicle.ts';
 import { type Insight, InsightBook } from './insights.ts';
 import { AGENT_PATTERNS, type GameConfig, type GroupPattern } from './config.ts';
 import { type DecideHost, decide, reply, type ToolOutcome } from './decide.ts';
 import { type Group, GroupManager, type JointPlan } from './groups.ts';
-import { AgentMind, GroupMind, Limiter, type Perception } from './mind.ts';
+import { AgentMind, GroupMind, Limiter, type MindHost, type Perception } from './mind.ts';
 import { type Plan, type PlanStep, tileOf } from './plan.ts';
 import type { GroupView } from './prompt.ts';
-import { missingRtRules, type Resource, type RtEntity, RtWorld, type WorldEvent } from './world.ts';
+import { missingRtRules, RT_RULE_KEYS, type Resource, type RtEntity, RtWorld, type WorldEvent } from './world.ts';
 
 type Msg = Record<string, unknown> & { type: string };
 
@@ -46,6 +50,18 @@ export class Game {
   private readonly chronicle: Chronicle;
   readonly brain: Brain;
   readonly insights: InsightBook;
+  readonly mnemo: Mnemo;
+  readonly economy: EconomyBook;
+  private catalog: Catalog = { resources: new Map(), recipes: new Map(), techs: new Map() };
+  private discovered = new Map<string, import('./economy.ts').Discovery>();
+  private readonly flows = new Flows();
+  readonly usage = new UsageLedger();
+  /** Recent thoughts (plan reasons) and Lorebase consultations per agent, for god mode. */
+  private readonly thoughts = new Map<string, Array<{ at: { day: number; minute: number }; text: string }>>();
+  private readonly consults = new Map<string, Array<{ at: { day: number; minute: number }; tool: string; query: string }>>();
+  readonly observatoryView: Observatory;
+  private lastFlows: import('./economy.ts').FlowEdge[] = [];
+  private lastFlowsMs = 0;
   private autoAcceptBusy = false;
   private laws: Rule[] = [];
   private roles: Role[] = [];
@@ -75,7 +91,14 @@ export class Game {
     this.mock = cfg.forceMock || !process.env.ANTHROPIC_API_KEY;
     this.client = new LorebaseClient(cfg.lorebase.url, cfg.lorebase.domain);
     this.limiter = new Limiter(game.decisions.maxConcurrent);
-    this.brain = new Brain(game.brain, this.t);
+    this.mnemo = new Mnemo(game.memory);
+    this.brain = new Brain(game.brain, this.t, this.mnemo, cfg.lorebase.branch);
+    this.economy = new EconomyBook(this.client, cfg.lorebase.branch, game.economy);
+    this.observatoryView = new Observatory({
+      client: this.client, mnemo: this.mnemo, branch: cfg.lorebase.branch, revision: () => this.revision, usage: this.usage,
+      agents: () => this.world.living().filter((e) => e.kind === 'agent').map((e) => ({ id: e.id, name: e.name, key: memoryKey(e.name) })),
+      stats: () => ({ ...this.stats, running: this.limiter.running }),
+    }, game.observatory);
     this.world = this.newWorld();
     this.groups = this.newGroups();
     this.chronicle = new Chronicle(this.client, cfg.lorebase.branch, game.chronicle);
@@ -103,6 +126,10 @@ export class Game {
       namePool: this.cfg.world.namePool, memoryItems: this.game.decisions.memoryItems, inboxItems: this.game.decisions.inboxItems,
     });
     w.roleOf = (code) => this.roles.find((r) => r.key === code);
+    w.catalog = this.catalog;
+    w.discovered = this.discovered;
+    w.timeScale = this.game.loop.timeScale;
+    w.minExperimentItems = this.game.economy.minExperimentItems;
     w.onEvent = (ev) => this.onWorldEvent(ev);
     return w;
   }
@@ -170,7 +197,16 @@ export class Game {
         const err = await this.insights.judge(code, { name: e.name, role: e.role }, verdict, reason);
         return err ? { ok: false, text: this.t('rt.act.insightJudgeFailed', { reason: this.insightReason(err) }) } : { ok: true, text: this.t('rt.act.insightJudged') };
       },
-      consulted: (e, ev) => this.broadcast({ type: 'consult', agentId: e.id, tool: ev.tool, query: ev.query }),
+      ranModel: (who, res) => this.usage.track(who, res),
+      deliberated: (g, memberId, role, text) => {
+        const name = this.world.entities.get(memberId)?.name ?? memberId;
+        this.broadcast({ type: 'deliberation', groupId: g.id, pattern: g.pattern, member: memberId, role, text });
+        this.mnemo.converse({ from: name, to: this.groups.groups.get(g.id)?.name ?? g.id, text, kind: 'deliberation', at: this.now(), groupId: g.id });
+      },
+      consulted: (e, ev) => {
+        this.recent(this.consults, e.id, { at: this.now(), tool: ev.tool, query: ev.query });
+        this.broadcast({ type: 'consult', agentId: e.id, tool: ev.tool, query: ev.query });
+      },
     };
   }
 
@@ -196,12 +232,54 @@ export class Game {
         await new Promise((r) => setTimeout(r, this.cfg.lorebase.pollMs));
       }
     }
+    if (this.game.economy.enabled) await this.loadEconomy();
     this.world.clock = this.world.epoch = this.values.dawn_minute ?? 0;
+    this.mnemo.follow((ev) => this.onMemory(ev));
     this.roster = loadRosterFile(this.cfg, this.roles.map((r) => r.key));
     this.populate();
     this.chronicle.start();
     await this.brain.connect();
     this.start();
+  }
+
+  /** Loads the economy catalog (retrying until Lorebase has it). */
+  private async loadEconomy(): Promise<void> {
+    for (;;) {
+      try {
+        const eco = await this.economy.load();
+        if (!eco.catalog.resources.size) throw new Error('no Resource records (run: npm run lorebase:seed)');
+        this.catalog = eco.catalog;
+        this.discovered = eco.discovered;
+        this.world.catalog = this.catalog;
+        this.world.discovered = this.discovered;
+        console.log(`[economy] ${this.catalog.resources.size} resources, ${this.catalog.recipes.size} recipes, ${this.catalog.techs.size} technologies (${this.discovered.size} discovered)`);
+        return;
+      } catch (err) {
+        console.error(`[economy] ${err instanceof Error ? err.message : err}; retrying in ${this.cfg.lorebase.pollMs} ms`);
+        await new Promise((r) => setTimeout(r, this.cfg.lorebase.pollMs));
+      }
+    }
+  }
+
+  /** Something a person lived: kept in its short-term memory and sent to its private memory (mnemo). */
+  private live(e: RtEntity | undefined, key: string, text: string): void {
+    if (!e || e.kind === 'player') return;
+    this.world.remember(e, text);
+    const ingest = this.game.memory.ingest[key];
+    if (ingest && e.kind === 'agent') void this.mnemo.add(memoryKey(e.name), text, { ...ingest, at: { day: this.world.day, minute: this.world.minute }, source: key });
+  }
+
+  private onMemory(ev: MemoryEvent): void {
+    const e = this.world.living().find((x) => x.kind === 'agent' && memoryKey(x.name) === ev.agentId);
+    this.broadcast({ type: 'memory', agentId: e?.id ?? ev.agentId, action: ev.action, memory: memoryDto(ev.memory), ...(ev.mergedFrom ? { mergedFrom: ev.mergedFrom } : {}) });
+  }
+
+  private itemName(code: string): string {
+    return this.catalog.resources.get(code)?.name ?? code;
+  }
+
+  private bagText(bag: Record<string, number>): string {
+    return Object.entries(bag).map(([k, n]) => `${n} ${this.itemName(k)}`).join(', ');
   }
 
   private populate(): void {
@@ -252,6 +330,7 @@ export class Game {
     this.stopLoop();
     this.watcher.stop();
     await this.brain.close();
+    this.mnemo.stop();
     await this.chronicle.stop();
   }
 
@@ -300,6 +379,13 @@ export class Game {
       this.lastStateMs = now;
       this.sendState();
     }
+    if (now - this.lastFlowsMs >= this.game.economy.flowsMs) {
+      if (this.lastFlowsMs) {
+        this.lastFlows = this.flows.take();
+        this.broadcast({ type: 'flows', window: Math.round((now - this.lastFlowsMs) / 1000), edges: this.lastFlows });
+      }
+      this.lastFlowsMs = now;
+    }
     if (now - this.lastTimeMs >= this.game.loop.timeBroadcastMs) {
       this.lastTimeMs = now;
       this.broadcast({ type: 'time', ...this.timeDto() });
@@ -346,7 +432,7 @@ export class Game {
         const step = e?.plan?.steps[ev.step];
         if (!e || !step) break;
         const reason = t(`rt.reason.${ev.reason}`);
-        w.remember(e, t('rt.memory.failed', { label: step.label, reason }));
+        this.live(e, 'stepFailed', t('rt.memory.failed', { label: step.label, reason }));
         this.perceive(e, { kind: 'stepFailed', label: step.label, reason });
         break;
       }
@@ -354,7 +440,24 @@ export class Game {
         this.onSay(ev.from, ev.to, ev.text, ev.hearers);
         break;
       case 'tile':
-        this.broadcast({ type: 'tile', x: ev.tile.x, y: ev.tile.y, food: ev.tile.food, wood: ev.tile.wood, shelter: Math.min(2, ev.tile.shelter) });
+        this.broadcast({ type: 'tile', ...this.tileDto(ev.tile) });
+        break;
+      case 'craft': {
+        const e = w.entities.get(ev.id);
+        this.broadcast({ type: 'craft', by: ev.id, recipe: ev.recipe, inputs: ev.inputs, outputs: ev.outputs, at: ev.at });
+        this.live(e, 'craft', t('rt.memory.crafted', { outputs: this.bagText(ev.outputs), inputs: this.bagText(ev.inputs) }));
+        break;
+      }
+      case 'experiment':
+        this.onExperiment(ev.id, ev.items, ev.found);
+        break;
+      case 'decay': {
+        const e = w.entities.get(ev.id);
+        this.broadcast({ type: 'decay', id: ev.id, item: ev.item, amount: ev.amount, reason: ev.reason });
+        if (e && ev.reason !== 'spoiled') this.live(e, 'decay', t('rt.memory.decayed', { amount: ev.amount, item: this.itemName(ev.item), reason: t(`rt.events.${ev.reason}`) }));
+        break;
+      }
+      case 'used':
         break;
       case 'death': {
         const e = w.entities.get(ev.id);
@@ -386,9 +489,11 @@ export class Game {
         const a = w.entities.get(ev.from);
         const b = w.entities.get(ev.to);
         if (!a || !b) break;
-        const res = t(`resource.${ev.resource}`);
-        w.remember(a, t('rt.memory.gave', { amount: ev.amount, resource: res, name: b.name }));
-        w.remember(b, t('rt.memory.got', { amount: ev.amount, resource: res, name: a.name }));
+        const res = this.itemName(ev.resource);
+        this.live(a, 'gift', t('rt.memory.gave', { amount: ev.amount, resource: res, name: b.name }));
+        this.live(b, 'gift', t('rt.memory.got', { amount: ev.amount, resource: res, name: a.name }));
+        this.broadcast({ type: 'trade', from: a.id, to: b.id, give: { [ev.resource]: ev.amount }, get: {}, kind: 'gift' });
+        this.flows.add(a.role, b.role, ev.resource, ev.amount);
         break;
       }
       case 'critical': {
@@ -414,10 +519,11 @@ export class Game {
     // The speaking player already knows what it said: never echo it back.
     const exclude = from.kind === 'player' ? fromId : undefined;
     this.broadcast({ type: 'say', from: fromId, to, text, kind: 'speech' }, exclude);
+    this.mnemo.converse({ from: from.name, to: w.entities.get(to)?.name ?? 'all', text, kind: 'speech', at: this.now() });
     if (from.kind !== 'player') w.remember(from, this.t('rt.memory.said', { to: w.entities.get(to)?.name ?? this.t('rt.memory.everyone'), text }));
     for (const id of hearers) {
       const h = w.entities.get(id);
-      if (h && h.kind !== 'player') w.remember(h, this.t('rt.memory.heard', { from: from.name, text }));
+      if (h && h.kind !== 'player') this.live(h, 'heard', this.t('rt.memory.heard', { from: from.name, text }));
     }
     // A person addressed directly by another agent answers (players get their reply in `speak`).
     const target = w.entities.get(to);
@@ -440,8 +546,12 @@ export class Game {
       reply: (e, speaker, onDelta) => reply(host, e, speaker, onDelta),
       commitPlan: (e, d) => {
         this.setPlan(e, d.steps, d.reason, 'entity');
-        this.world.remember(e, this.t('rt.memory.planned', { reason: d.reason }));
-        if (d.reason) this.broadcast({ type: 'say', from: e.id, to: 'all', text: d.reason, kind: 'thought' });
+        this.live(e, 'planned', this.t('rt.memory.planned', { reason: d.reason }));
+        if (d.reason) {
+          this.broadcast({ type: 'say', from: e.id, to: 'all', text: d.reason, kind: 'thought' });
+          this.recent(this.thoughts, e.id, { at: this.now(), text: d.reason });
+          this.mnemo.converse({ from: e.name, to: e.name, text: d.reason, kind: 'thought', at: this.now() });
+        }
       },
       thinking: (id, on) => this.broadcast({ type: 'thinking', id, on }),
       replyDelta: (from, to, delta, done) => this.broadcast({ type: 'say_delta', from: from.id, to: to.id, delta, done }),
@@ -464,6 +574,34 @@ export class Game {
       },
       groupFailed: (m) => this.minds.get(m.id)?.perceive({ kind: 'groupFailed' }),
     };
+  }
+
+  /** An experiment: maybe a discovery, which becomes knowledge of the whole civilization in Lorebase. */
+  private onExperiment(id: string, items: string[], found: { tech: import('./economy.ts').TechDef } | undefined): void {
+    const t = this.t;
+    const w = this.world;
+    const e = w.entities.get(id);
+    if (!e) return;
+    const names = items.map((i) => this.itemName(i)).join(' + ');
+    if (!found || this.discovered.has(found.tech.code)) {
+      this.live(e, 'experiment', t('rt.memory.experimented', { items: names }));
+      return;
+    }
+    const tech = found.tech;
+    const d = { by: e.name, role: e.role, day: w.day, minute: w.minute };
+    this.discovered.set(tech.code, d);
+    const unlocks = unlocksOf(this.catalog, tech.code);
+    const recipes = unlocks.map((c) => this.catalog.recipes.get(c)!).filter(Boolean);
+    this.economy.record(tech, recipes, d, this.chronicle.session);
+    this.brain.invalidate();
+    const text = t('rt.events.discovery', { name: e.name, role: this.roles.find((r) => r.key === e.role)?.title ?? e.role, tech: tech.name, recipes: recipes.map((r) => r.name).join(', ') });
+    this.broadcast({ type: 'discovery', tech: { code: tech.code, name: tech.name, description: tech.description, unlocks }, by: e.id, role: e.role, at: tileOf(e) });
+    this.event('rules', text, e);
+    this.chron('discovery', text, [e.name]);
+    this.live(e, 'discovery', t('rt.memory.discovered', { tech: tech.name, items: names }));
+    if (this.game.economy.insightOnDiscovery && e.kind === 'agent') {
+      void this.insights.share({ name: e.name, role: e.role }, t('rt.mock.discoveryInsight', { items: names, tech: tech.name }), 1, t('rt.memory.discovered', { tech: tech.name, items: names }), w.day, w.clock);
+    }
   }
 
   private why(p: Perception): string {
@@ -663,7 +801,16 @@ export class Game {
     let out;
     switch (action) {
       case 'gather':
-        out = w.gather(e, 'food', at);
+        out = w.gather(e, typeof args.item === 'string' && args.item ? args.item : 'food', at);
+        break;
+      case 'craft':
+        out = w.craft(e, String(args.recipe ?? ''));
+        break;
+      case 'experiment':
+        out = w.experiment(e, Array.isArray(args.items) ? args.items.map(String) : [], this.game.economy.minExperimentItems);
+        break;
+      case 'use':
+        out = w.use(e, String(args.item ?? ''));
         break;
       case 'chop':
         out = w.gather(e, 'wood', at);
@@ -675,7 +822,7 @@ export class Game {
         out = w.eat(e);
         break;
       case 'give': {
-        const item: Resource = args.item === 'wood' ? 'wood' : 'food';
+        const item: Resource = typeof args.item === 'string' && args.item ? args.item : 'food';
         out = w.give(e, String(args.to ?? ''), item, Math.max(1, Math.floor(Number(args.amount) || 1)));
         break;
       }
@@ -721,12 +868,12 @@ export class Game {
     return {
       id: e.id, name: e.name, role: e.role, tier: e.tier, model: e.model, kind: e.kind, groupId: e.groupId,
       x: r2(e.x), y: r2(e.y), dir: e.dir, anim: e.anim, hp: r1(e.hp), maxHp: e.maxHp, hunger: r1(e.hunger),
-      inventory: { ...e.inventory }, speed: e.alive ? this.world.speedOf(e) : 0, alive: e.alive,
+      inventory: { ...e.inventory }, tools: e.tools.map((x) => ({ ...x })), speed: e.alive ? this.world.speedOf(e) : 0, alive: e.alive,
     };
   }
 
   private deltaDto(e: RtEntity): Msg {
-    return { id: e.id, x: r2(e.x), y: r2(e.y), dir: e.dir, anim: e.anim, hp: r1(e.hp), hunger: r1(e.hunger), inventory: { ...e.inventory }, alive: e.alive } as unknown as Msg;
+    return { id: e.id, x: r2(e.x), y: r2(e.y), dir: e.dir, anim: e.anim, hp: r1(e.hp), hunger: r1(e.hunger), inventory: { ...e.inventory }, tools: e.tools.map((x) => ({ item: x.item, durability: r1(x.durability), max: x.max })), alive: e.alive } as unknown as Msg;
   }
 
   groupDto(g: Group) {
@@ -742,14 +889,106 @@ export class Game {
     return {
       type: 'hello',
       you: you ? { entityId: you } : null,
-      map: { w: w.width, h: w.height, tiles: w.tiles.map((t) => ({ x: t.x, y: t.y, biome: t.biome, elev: t.elev, food: t.food, wood: t.wood, shelter: Math.min(2, t.shelter) })) },
+      map: { w: w.width, h: w.height, tiles: w.tiles.map((t) => ({ biome: t.biome, elev: t.elev, ...this.tileDto(t) })) },
       entities: [...w.entities.values()].map((e) => this.entityDto(e)),
       groups: this.groups.list().map((g) => this.groupDto(g)),
       rules: this.laws.map((r) => ({ key: r.key, value: r.value, text: r.text, category: r.category, unit: r.unit })),
       time: this.timeDto(),
       roles: this.roles.map((r) => r.key),
       lorebase: { connected: this.watcher.connected, branch: this.cfg.lorebase.branch, revision: this.revision },
+      economy: this.economyDto(),
     };
+  }
+
+  private tileDto(t: import('./world.ts').RtTile) {
+    return { x: t.x, y: t.y, food: t.food, wood: t.wood, shelter: Math.min(2, t.shelter), ...(Object.keys(t.structures).length ? { structures: { ...t.structures } } : {}) };
+  }
+
+  /** What the civilization knows: undiscovered technologies show as '???', their recipes are counted, not listed. */
+  economyDto() {
+    const known = (tech: string | null) => !tech || this.discovered.has(tech);
+    const recipes = [...this.catalog.recipes.values()];
+    return {
+      resources: [...this.catalog.resources.values()].map((r) => ({ code: r.code, name: r.name, perishable: r.perishable })),
+      recipes: recipes.filter((r) => known(r.tech)).map((r) => ({ code: r.code, name: r.name, inputs: r.inputs, outputs: r.outputs, role: r.role ?? '', tech: r.tech, station: r.station })),
+      techs: [...this.catalog.techs.values()].map((x) => {
+        const d = this.discovered.get(x.code);
+        const by = d ? (this.world.entities.get(d.by)?.id ?? [...this.world.entities.values()].find((e) => e.name === d.by)?.id ?? d.by) : null;
+        return d
+          ? { code: x.code, name: x.name, description: x.description, discovered: true, discoveredBy: by, discoveredAt: { day: d.day, minute: d.minute }, unlocks: unlocksOf(this.catalog, x.code) }
+          : { code: x.code, name: '???', description: '', discovered: false, discoveredBy: null, discoveredAt: null, unlocks: [] as string[] };
+      }),
+      hiddenRecipes: recipes.filter((r) => !known(r.tech)).length,
+    };
+  }
+
+  private now(): { day: number; minute: number } {
+    return { day: this.world.day, minute: this.world.minute };
+  }
+
+  private recent<T>(map: Map<string, T[]>, id: string, item: T): void {
+    const list = map.get(id) ?? [];
+    list.push(item);
+    if (list.length > this.game.god.recentMax) list.splice(0, list.length - this.game.god.recentMax);
+    map.set(id, list);
+  }
+
+  engineKeys(): readonly string[] {
+    return RT_RULE_KEYS;
+  }
+
+  /** GET /api/conversations?agent=&with=&group=&since=&limit= (agent/with: entity id or name). */
+  async conversations(q: URLSearchParams): Promise<unknown[]> {
+    const nameOf = (ref: string | null) => (ref ? (this.world.find(ref)?.name ?? ref) : undefined);
+    const query: Record<string, string> = {};
+    const agent = nameOf(q.get('agent'));
+    const other = nameOf(q.get('with'));
+    if (agent) query.agent = agent;
+    if (other) query.with = other;
+    for (const k of ['group', 'since', 'limit']) if (q.get(k)) query[k] = q.get(k)!;
+    const idOf = (name: string) => this.world.living().find((e) => e.name === name)?.id ?? name;
+    const rows = await this.mnemo.conversations(query).catch(() => []);
+    return rows.map((r) => ({ ...r, from: idOf(r.from), to: r.kind === 'deliberation' ? r.to : r.to === 'all' ? 'all' : idOf(r.to), fromName: r.from, toName: r.to }));
+  }
+
+  /** GET /api/agents/:id/mind */
+  async mind(id: string): Promise<unknown | undefined> {
+    const e = this.world.entities.get(id) ?? this.world.find(id);
+    if (!e || e.kind === 'player') return undefined;
+    const g = this.groups.of(e);
+    const mems = await this.mnemo.list(memoryKey(e.name)).catch(() => []);
+    const avg = mems.length ? mems.reduce((s, m) => s + m.fidelity, 0) / mems.length : 0;
+    return {
+      id: e.id, name: e.name, role: e.role, tier: e.tier, model: e.model, alive: e.alive,
+      plan: e.plan ? { steps: e.plan.steps, current: e.plan.current, reason: e.plan.reason, createdAt: e.plan.createdAt } : null,
+      recentThoughts: this.thoughts.get(e.id) ?? [],
+      shortTermMemory: [...e.memory],
+      consults: this.consults.get(e.id) ?? [],
+      memoriesSummary: {
+        count: mems.length, avgFidelity: Math.round(avg * 1000) / 1000, gists: mems.filter((m) => m.kind === 'gist').length,
+        recent: mems.slice(0, this.game.god.recentMax).map(memoryDto),
+      },
+      group: g ? this.groupDto(g) : null,
+      inventory: { ...e.inventory }, tools: e.tools.map((x) => ({ ...x })), hp: e.hp, hunger: e.hunger,
+      usage: this.usage.rows.get(e.id) ?? null,
+    };
+  }
+
+  /** GET /api/observatory/* */
+  observatory(path: string, q: URLSearchParams) {
+    return this.observatoryView.handle(path, q);
+  }
+
+  /** GET /api/economy */
+  economyView() {
+    return { ...this.economyDto(), flows: this.lastFlows };
+  }
+
+  /** GET /api/agents/:id/memories (bare array). */
+  async memories(id: string): Promise<unknown[] | undefined> {
+    const e = this.world.entities.get(id) ?? this.world.find(id);
+    if (!e || e.kind === 'player') return undefined;
+    return (await this.mnemo.list(memoryKey(e.name)).catch(() => [])).map(memoryDto);
   }
 
   private broadcastEntity(e: RtEntity): void {
@@ -881,4 +1120,9 @@ export class Game {
     for (const pc of this.conns.values()) pc.conn.send(this.hello(null));
     this.start();
   }
+}
+
+/** Memory as clients see it: emotion as intensity 0-1. */
+function memoryDto(m: import('./mnemo.ts').Memory) {
+  return { id: m.id, text: m.text, fidelity: m.fidelity, importance: m.importance, emotion: Math.round(Math.min(1, Math.abs(Number(m.emotion) || 0)) * 1000) / 1000, kind: m.kind, createdAt: m.createdAt, recalls: m.recalls };
 }

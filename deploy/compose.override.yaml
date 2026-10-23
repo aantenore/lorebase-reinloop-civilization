@@ -8,3 +8,8 @@ services:
     environment:
       LOREBASE__KEEPER__PROPOSALS__ALLOW_SELF_APPROVAL: "true"
       LOREBASE__KEEPER__OPERATIONS__DIRECT_COMMIT_ON_PROTECTED: "true"
+      # Browser access for the Lorebase web app in live mode (cross origin, no cookies). The
+      # lists are JSON; allow_headers replaces the default, so it repeats those and adds
+      # If-None-Match, which the app sends for conditional reads.
+      LOREBASE__KEEPER__CORS__ALLOW_ORIGINS: '["http://localhost:5180", "http://127.0.0.1:5180"]'
+      LOREBASE__KEEPER__CORS__ALLOW_HEADERS: '["Authorization", "Content-Type", "Idempotency-Key", "If-None-Match"]'

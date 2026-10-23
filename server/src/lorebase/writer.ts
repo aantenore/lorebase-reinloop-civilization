@@ -12,6 +12,48 @@ export interface WriterConfig {
   enactOperation: string;
   /** Built-in create Operation of the Rule Kind, used on proposal branches. */
   createOperation: string;
+  /** Operation deleting a law directly on the live branch (review policy never). */
+  repealOperation: string;
+  /** Operation changing a law's wording/category/unit directly (review policy never). */
+  amendOperation: string;
+  /** Built-in delete Operation of the Rule Kind, used on proposal branches. */
+  deleteOperation: string;
+}
+
+/** Runs one change directly, or on a `law/` branch merged through an approved Proposal. */
+async function directOrProposal(client: LorebaseClient, cfg: WriterConfig, mode: WriteMode, message: string, name: string,
+  direct: () => Promise<{ revision: string | null; head: string }>, onBranch: (branch: string) => Promise<unknown>): Promise<WriteResult> {
+  try {
+    if (mode === 'direct') {
+      const out = await direct();
+      return { ok: true, revision: out.revision ?? out.head };
+    }
+    const branch = `${cfg.proposalBranchPrefix}${slug(name)}-${Date.now().toString(36)}`;
+    await client.createBranch(branch, cfg.branch);
+    await onBranch(branch);
+    const proposal = await client.createProposal(branch, cfg.branch, message, message);
+    await client.review(proposal.id, 'approve', 'Approved from the civilization console');
+    const merged = await client.merge(proposal.id, message);
+    await client.deleteBranch(branch).catch(() => undefined);
+    return { ok: true, revision: merged.revision, proposalId: proposal.id, branch };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Repeals a law (the Record is deleted; the change feed reports it with `new: null`). */
+export function repealRule(client: LorebaseClient, cfg: WriterConfig, key: string, mode: WriteMode, message: string): Promise<WriteResult> {
+  return directOrProposal(client, cfg, mode, message, `repeal-${key}`,
+    () => client.execute(cfg.repealOperation, { rule: key }, { branch: cfg.branch, message }),
+    (branch) => client.execute(cfg.deleteOperation, { key }, { branch, message }));
+}
+
+/** Changes the wording, category or unit of a law. */
+export function amendRule(client: LorebaseClient, cfg: WriterConfig, rule: { key: string; text: string; category: string; unit?: string }, mode: WriteMode, message: string): Promise<WriteResult> {
+  const values = { text: rule.text, category: rule.category, ...(rule.unit !== undefined ? { unit: rule.unit } : {}) };
+  return directOrProposal(client, cfg, mode, message, `amend-${rule.key}`,
+    () => client.execute(cfg.amendOperation, { rule: rule.key, ...values }, { branch: cfg.branch, message }),
+    (branch) => client.execute(cfg.updateOperation, { key: rule.key, ...values }, { branch, message }));
 }
 
 export interface NewRule {

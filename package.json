@@ -15,11 +15,13 @@
     "sim:mock": "node server/src/main.ts --mock",
     "rule": "node scripts/change-rule.ts",
     "scenario": "node scripts/apply-scenario.ts",
-    "test": "node --test \"server/src/**/*.test.ts\"",
-    "game": "node server/src/game-main.ts",
-    "game:mock": "node server/src/game-main.ts --mock",
+    "test": "node --test \"server/src/**/*.test.ts\" \"services/mnemo/src/**/*.test.ts\"",
+    "game": "node scripts/run-game.ts",
+    "game:mock": "node scripts/run-game.ts --mock",
     "herald:up": "bash scripts/herald-up.sh up",
-    "herald:down": "bash scripts/herald-up.sh down"
+    "herald:down": "bash scripts/herald-up.sh down",
+    "game:server": "node server/src/game-main.ts",
+    "mnemo": "node services/mnemo/src/main.ts"
   },
   "dependencies": {
     "reinloop": "file:../reinloop",

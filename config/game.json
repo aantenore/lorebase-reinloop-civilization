@@ -8,7 +8,9 @@
     "stateHz": 10,
     "timeBroadcastMs": 1000,
     "deadLingerMs": 8000,
-    "statusLogMs": 15000
+    "statusLogMs": 15000,
+    "tileFlushMs": 1000,
+    "timeScale": 1
   },
   "map": {
     "width": 40,
@@ -61,7 +63,6 @@
   "decisions": {
     "tiers": {
       "haiku": {
-        "minSteps": 20,
         "maxSteps": 35,
         "horizonFactor": 0.5,
         "cooldownFactor": 0.5,
@@ -70,7 +71,6 @@
         "maxConsults": 2
       },
       "sonnet": {
-        "minSteps": 30,
         "maxSteps": 60,
         "horizonFactor": 1,
         "cooldownFactor": 1,
@@ -79,7 +79,6 @@
         "maxConsults": 3
       },
       "opus": {
-        "minSteps": 50,
         "maxSteps": 100,
         "horizonFactor": 2,
         "cooldownFactor": 2,
@@ -104,15 +103,19 @@
       "nightfall": true,
       "dawn": false,
       "seasonChange": true,
-      "rulesChanged": true
+      "rulesChanged": true,
+      "offer": true,
+      "offerAnswered": true
     },
-    "startStaggerMs": 400
+    "startStaggerMs": 400,
+    "offersMax": 5
   },
   "conversation": {
     "replyMaxOutputTokens": 300,
     "replyTimeoutMs": 30000,
     "agentReplyDepth": 1,
-    "replanAfterReply": true
+    "replanAfterReply": true,
+    "replyMaxTurns": 3
   },
   "player": {
     "speechMinIntervalMs": 4000,
@@ -204,7 +207,9 @@
   "mock": {
     "thinkDelayMs": 600,
     "replyDelayMs": 40,
-    "wanderRadius": 6
+    "wanderRadius": 6,
+    "planSteps": 12,
+    "experimentChance": 0.5
   },
   "brain": {
     "mcpUrl": "http://127.0.0.1:8190/mcp",
@@ -223,8 +228,9 @@
     "callTimeoutMs": 15000,
     "outputMaxChars": 3000,
     "connectRetryMs": 10000,
-    "memoryDir": "data/minds",
-    "memoryRecallLimit": 6
+    "branchArgs": [
+      "branch"
+    ]
   },
   "insights": {
     "enabled": true,
@@ -236,5 +242,124 @@
     "maxPendingPerRole": 10,
     "textMaxChars": 400,
     "listMax": 5
+  },
+  "economy": {
+    "enabled": true,
+    "hiddenBranch": "nature/hidden",
+    "discoveryBranchPrefix": "tech/",
+    "kinds": {
+      "resource": "Resource",
+      "recipe": "Recipe",
+      "technology": "Technology"
+    },
+    "relations": {
+      "unlockedBy": "unlocked_by",
+      "knownBy": "known_by",
+      "consumes": "consumes",
+      "produces": "produces",
+      "requires": "requires"
+    },
+    "importOperation": "import_batch",
+    "minExperimentItems": 2,
+    "maxTradeKinds": 4,
+    "flowsMs": 30000,
+    "retryMs": 10000,
+    "insightOnDiscovery": true,
+    "chronicleEvent": "discovery"
+  },
+  "memory": {
+    "enabled": true,
+    "url": "http://127.0.0.1:4410",
+    "timeoutMs": 4000,
+    "pollMs": 1500,
+    "recallLimit": 6,
+    "textMaxChars": 400,
+    "worldIndex": true,
+    "runStore": true,
+    "runFlushMs": 1000,
+    "ingest": {
+      "planned": {
+        "importance": 0.2,
+        "emotion": 0
+      },
+      "craft": {
+        "importance": 0.5,
+        "emotion": 0.3
+      },
+      "experiment": {
+        "importance": 0.4,
+        "emotion": 0.1
+      },
+      "discovery": {
+        "importance": 0.95,
+        "emotion": 0.8
+      },
+      "trade": {
+        "importance": 0.6,
+        "emotion": 0.4
+      },
+      "gift": {
+        "importance": 0.6,
+        "emotion": 0.5
+      },
+      "stepFailed": {
+        "importance": 0.35,
+        "emotion": -0.3
+      },
+      "heard": {
+        "importance": 0.3,
+        "emotion": 0
+      },
+      "decay": {
+        "importance": 0.3,
+        "emotion": -0.3
+      },
+      "death": {
+        "importance": 0.9,
+        "emotion": -0.9
+      },
+      "birth": {
+        "importance": 0.8,
+        "emotion": 0.8
+      },
+      "group": {
+        "importance": 0.5,
+        "emotion": 0.2
+      },
+      "remember": {
+        "importance": 0.6,
+        "emotion": 0
+      }
+    }
+  },
+  "services": {
+    "herald": {
+      "autoStart": true,
+      "script": "scripts/herald-up.sh",
+      "healthUrl": "http://127.0.0.1:8190/mcp",
+      "stopOnExit": false
+    },
+    "mnemo": {
+      "autoStart": true,
+      "entry": "services/mnemo/src/main.ts",
+      "healthUrl": "http://127.0.0.1:4410/health",
+      "readyTimeoutMs": 300000
+    }
+  },
+  "observatory": {
+    "cacheMs": 5000,
+    "maxLimit": 200,
+    "kinds": [
+      "Rule",
+      "Role",
+      "Insight",
+      "Chronicle",
+      "Resource",
+      "Recipe",
+      "Technology"
+    ]
+  },
+  "god": {
+    "recentMax": 20
   }
 }

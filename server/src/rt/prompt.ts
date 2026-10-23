@@ -23,14 +23,12 @@ export interface PromptLimits {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-export function rtInstructions(t: Translate, e: Pick<RtEntity, 'name' | 'personality' | 'role'>, role: Role | undefined, plan: { minSteps: number; maxSteps: number; horizon: number }): string {
+export function rtInstructions(t: Translate, e: Pick<RtEntity, 'name' | 'personality' | 'role'>, role: Role | undefined, plan: { horizon: number }): string {
   return t('rt.instructions', {
     name: e.name,
     personality: e.personality || '-',
     roleTitle: role?.title ?? e.role,
     role: e.role,
-    minSteps: plan.minSteps,
-    maxSteps: plan.maxSteps,
     horizon: Math.round(plan.horizon),
   });
 }
@@ -46,21 +44,30 @@ export function timeLine(t: Translate, w: RtWorld): string {
   const season = w.season();
   const year = Math.max(1, Math.round(w.r('winter_every_ticks')));
   const winterTurns = Math.min(year, Math.max(0, Math.round(w.r('winter_length_ticks'))));
-  const p = w.turn % year;
+  const p = w.seasonTurn % year;
   const winter = season === 'winter'
     ? t('rt.observation.winterNow')
     : winterTurns === 0
       ? t('rt.observation.noWinter')
-      : t('rt.observation.winterIn', { minutes: Math.round((year - winterTurns - p) * w.r('turn_minutes') - ((w.clock - w.epoch) % w.r('turn_minutes'))) });
+      : t('rt.observation.winterIn', { minutes: Math.round((year - winterTurns - p) * w.r('season_turn_minutes') - ((w.clock - w.epoch) % w.r('season_turn_minutes'))) });
   return t('rt.observation.header', {
     day: w.day, clock: w.clockText(), daypart: t(`rt.daypart.${w.isNight() ? 'night' : 'day'}`), season: t(`season.${season}`), winter,
   });
 }
 
+/** What a person carries, by name and code (codes are how tools and recipes name items). */
+export function carried(t: Translate, w: RtWorld, e: RtEntity): { items: string; tools: string } {
+  const name = (code: string) => w.catalog.resources.get(code)?.name ?? code;
+  const toolCodes = new Set(e.tools.map((x) => x.item));
+  const items = Object.entries(e.inventory).filter(([k, n]) => n >= 1 && !toolCodes.has(k)).map(([code, n]) => t('rt.observation.itemLine', { amount: Math.floor(n), name: name(code), code }));
+  const tools = e.tools.map((x) => t('rt.observation.toolLine', { name: name(x.item), code: x.item, durability: round1(x.durability), max: x.max }));
+  return { items: items.join(', ') || t('rt.observation.nothingCarried'), tools: tools.join(', ') || t('rt.observation.noTools') };
+}
+
 export function selfLine(t: Translate, w: RtWorld, e: RtEntity): string {
   const p = tileOf(e);
   return t('rt.observation.self', {
-    hp: round1(e.hp), maxHp: e.maxHp, hunger: round1(e.hunger), food: e.inventory.food, wood: e.inventory.wood, x: p.x, y: p.y,
+    hp: round1(e.hp), maxHp: e.maxHp, hunger: round1(e.hunger), ...carried(t, w, e), x: p.x, y: p.y,
     shelter: t(w.isSheltered(e) ? 'rt.observation.sheltered' : 'rt.observation.unsheltered'),
     speed: round1(w.speedOf(e) / Math.max(1e-6, w.r('game_minutes_per_real_second'))), work: round1(w.workSpeedOf(e)),
   });
@@ -72,10 +79,10 @@ export function look(t: Translate, w: RtWorld, e: RtEntity, groups: GroupView[],
   const r = Math.max(0, Math.floor(w.r('vision_radius')));
   const dist = (a: { x: number; y: number }) => Math.max(Math.abs(a.x - here.x), Math.abs(a.y - here.y));
   const tiles = w.tiles
-    .filter((x) => x !== ht && dist(x) <= r && (x.food >= 1 || x.wood >= 1 || x.shelter > 0))
+    .filter((x) => x !== ht && dist(x) <= r && (x.food >= 1 || x.wood >= 1 || x.shelter > 0 || Object.keys(x.structures).length > 0))
     .sort((a, b) => dist(a) - dist(b))
     .slice(0, limits.lookMaxTiles)
-    .map((x) => t('rt.look.tile', { x: x.x, y: x.y, biome: t(`rt.biome.${x.biome}`), food: x.food, wood: x.wood, shelter: x.shelter ? t('rt.look.tileShelter', { level: x.shelter }) : '' }));
+    .map((x) => t('rt.look.tile', { x: x.x, y: x.y, biome: t(`rt.biome.${x.biome}`), food: x.food, wood: x.wood, shelter: `${x.shelter ? t('rt.look.tileShelter', { level: x.shelter }) : ''}${structuresText(t, w, x)}` }));
   const groupName = (id: string | null) => groups.find((g) => g.id === id)?.name;
   const people = w.living()
     .filter((b) => b.id !== e.id && dist(tileOf(b)) <= r)
@@ -99,13 +106,18 @@ export function look(t: Translate, w: RtWorld, e: RtEntity, groups: GroupView[],
     .slice(0, limits.nearbyGroupsMax)
     .map((g) => t('rt.look.groupLine', { name: g.name, pattern: g.pattern, members: g.members.map((id) => w.entities.get(id)?.name ?? id).join(', ') }));
   return [
-    t('rt.look.here', { x: here.x, y: here.y, biome: t(`rt.biome.${ht.biome}`), elev: ht.elev, food: ht.food, wood: ht.wood, shelter: ht.shelter ? t('rt.look.shelterHere', { level: ht.shelter }) : '' }),
+    t('rt.look.here', { x: here.x, y: here.y, biome: t(`rt.biome.${ht.biome}`), elev: ht.elev, food: ht.food, wood: ht.wood, shelter: `${ht.shelter ? t('rt.look.shelterHere', { level: ht.shelter }) : ''}${structuresText(t, w, ht)}` }) + (w.distanceFromCenter(here) > w.r('wild_distance') ? t('rt.look.wild') : ''),
     t('rt.look.map', { w: w.width, h: w.height }),
     t('rt.look.tiles', { radius: r, tiles: tiles.length ? tiles.join('; ') : t('rt.look.nothing') }),
     t('rt.look.people', { people: people.length ? people.join('; ') : t('rt.look.nobody') }),
     t('rt.look.shelters', { shelter: nearest }),
     t('rt.look.groups', { groups: near.length ? near.join('; ') : t('rt.look.noGroups') }),
   ].join('\n');
+}
+
+function structuresText(t: Translate, w: RtWorld, tile: { structures: Record<string, number> }): string {
+  const list = Object.keys(tile.structures).map((code) => t('rt.look.structureLine', { name: w.catalog.resources.get(code)?.name ?? code, code }));
+  return list.length ? t('rt.look.structures', { list: list.join(', ') }) : '';
 }
 
 const clockOf = (minute: number) => {
@@ -158,6 +170,6 @@ export function memberLine(t: Translate, w: RtWorld, e: RtEntity, roleTitle: (co
   const cur = e.plan && e.plan.current < e.plan.steps.length ? e.plan.steps[e.plan.current]!.label : undefined;
   return t('rt.group.member', {
     name: e.name, id: e.id, role: roleTitle(e.role), x: p.x, y: p.y, hp: round1(e.hp), maxHp: e.maxHp, hunger: round1(e.hunger),
-    food: e.inventory.food, wood: e.inventory.wood, doing: cur ? t('rt.group.memberDoing', { label: cur }) : t('rt.group.memberIdle'),
+    food: e.inventory.food ?? 0, wood: e.inventory.wood ?? 0, doing: cur ? t('rt.group.memberDoing', { label: cur }) : t('rt.group.memberIdle'),
   });
 }

@@ -6,12 +6,17 @@ import { seasonOf } from '../world/engine.ts';
 import { createRng, type Rng, valueNoise } from '../world/rng.ts';
 import type { Rules, Season } from '../world/types.ts';
 import { findPath, nearestWalkable, type Point } from './path.ts';
+import {
+  addItems, applyCraft, canCraft, type Catalog, count, defaultFood, type Discovery, experiment, gatherableAt, gatherTool, protectionOf,
+  type RecipeDef, spoil, stationsOf, type TechDef, type ToolInstance, transfer, useEffect, wearStructures, wearTool,
+} from './economy.ts';
 import { type Activity, advance, type Anim, type Dir, type ExecContext, type Plan, prepareStep, tileOf } from './plan.ts';
 
 export type Biome = 'grass' | 'forest' | 'water' | 'rock' | 'sand';
 export type EntityTier = 'opus' | 'sonnet' | 'haiku' | 'human';
 export type EntityKind = 'agent' | 'player' | 'crowd';
-export type Resource = 'food' | 'wood';
+/** Item code (Lorebase Resource). `food` and `wood` are the tile stocks. */
+export type Resource = string;
 
 /** Rule keys the real-time world reads (values only in Lorebase). */
 export const RT_RULE_KEYS = [
@@ -20,7 +25,7 @@ export const RT_RULE_KEYS = [
   'cold_damage_unsheltered', 'birth_food_cost', 'sharing_allowed', 'vision_radius', 'game_minutes_per_real_second', 'turn_minutes',
   'dawn_minute', 'dusk_minute', 'plan_horizon_minutes', 'replan_cooldown_minutes', 'base_move_speed', 'base_work_speed',
   'gather_minutes', 'build_minutes', 'eat_minutes', 'weak_speed_factor', 'critical_hunger', 'critical_hp_fraction', 'speech_radius',
-  'max_shelter_level',
+  'max_shelter_level', 'shelter_decay_per_day', 'wild_distance', 'wild_damage', 'experiment_minutes', 'use_minutes', 'tool_wear_per_use', 'season_turn_minutes',
 ] as const;
 export type RtRuleKey = (typeof RT_RULE_KEYS)[number];
 
@@ -38,6 +43,10 @@ export interface RtTile {
   food: number;
   wood: number;
   shelter: number;
+  /** Structures built on the tile (code -> days of durability left). */
+  structures: Record<string, number>;
+  /** Fraction of a shelter level already worn away. */
+  shelterWear: number;
 }
 
 export interface MapConfig {
@@ -88,7 +97,10 @@ export interface RtEntity {
   hp: number;
   maxHp: number;
   hunger: number;
-  inventory: { food: number; wood: number };
+  inventory: Record<string, number>;
+  tools: ToolInstance[];
+  /** Perishable stock already half-spoiled (fractions not yet lost). */
+  spoilAcc: Record<string, number>;
   alive: boolean;
   plan?: Plan;
   activity?: Activity;
@@ -113,6 +125,10 @@ export type WorldEvent =
   | { type: 'birth'; child: RtEntity; parents: [string, string] }
   | { type: 'build'; id: string; x: number; y: number; level: number }
   | { type: 'gave'; from: string; to: string; resource: Resource; amount: number }
+  | { type: 'craft'; id: string; recipe: string; inputs: Record<string, number>; outputs: Record<string, number>; at: Point; broken: string[] }
+  | { type: 'experiment'; id: string; items: string[]; found?: { tech: TechDef; recipe: RecipeDef } }
+  | { type: 'decay'; id: string; item: string; amount: number; reason: 'spoiled' | 'broken' | 'worn' }
+  | { type: 'used'; id: string; item: string }
   | { type: 'critical'; id: string; what: 'hunger' | 'hp' }
   | { type: 'season'; season: Season }
   | { type: 'night'; night: boolean };
@@ -140,6 +156,12 @@ export class RtWorld {
   epoch: number;
   rules: Rules = {};
   roleOf: (code: string) => Role | undefined = () => undefined;
+  /** The economy (Lorebase Resource/Recipe/Technology) and what the civilization has discovered. */
+  catalog: Catalog = { resources: new Map(), recipes: new Map(), techs: new Map() };
+  discovered = new Map<string, Discovery>();
+  /** Multiplies game time per real second (engine knob, config `loop.timeScale`). */
+  timeScale = 1;
+  minExperimentItems = 2;
   onEvent: (ev: WorldEvent) => void = () => undefined;
   namePool: string[];
   memoryItems: number;
@@ -185,8 +207,13 @@ export class RtWorld {
     return Math.floor((this.clock - this.epoch) / Math.max(1, this.r('turn_minutes')));
   }
 
+  /** Turns of the year for seasons (rule season_turn_minutes; turn_minutes stays the body's clock). */
+  get seasonTurn(): number {
+    return Math.floor((this.clock - this.epoch) / Math.max(1, this.r('season_turn_minutes')));
+  }
+
   season(): Season {
-    return seasonOf(this.turn, this.rules);
+    return seasonOf(this.seasonTurn, this.rules);
   }
 
   isNight(): boolean {
@@ -209,7 +236,7 @@ export class RtWorld {
         const elev = biome === 'water' ? 0 : 1 + Math.floor(clamp((e - m.waterBelow) / (1 - m.waterBelow), 0, 0.999) * m.elevationSteps);
         const fill = m.initialFill[0] + this.rng.next() * (m.initialFill[1] - m.initialFill[0]);
         const cap = m.capacity[biome];
-        this.tiles.push({ x, y, biome, elev, food: round2(cap.food * fill), wood: round2(cap.wood * fill), shelter: 0 });
+        this.tiles.push({ x, y, biome, elev, food: round2(cap.food * fill), wood: round2(cap.wood * fill), shelter: 0, structures: {}, shelterWear: 0 });
       }
     }
   }
@@ -265,7 +292,7 @@ export class RtWorld {
     const e: RtEntity = {
       id, name: spec.name, role: spec.role, tier: spec.tier, model: spec.model, kind: spec.kind, personality: spec.personality ?? '',
       groupId: null, x: at.x, y: at.y, dir: 's', anim: 'idle', hp: maxHp, maxHp, hunger: 0, inventory: { food: 0, wood: 0 },
-      alive: true, input: { dx: 0, dy: 0 }, memory: [], inbox: [], lastBirthTurn: this.turn,
+      tools: [], spoilAcc: {}, alive: true, input: { dx: 0, dy: 0 }, memory: [], inbox: [], lastBirthTurn: this.turn,
     };
     this.entities.set(id, e);
     this.namesUsed.add(spec.name);
@@ -323,7 +350,8 @@ export class RtWorld {
         const t = this.find(who);
         return t && t.alive ? tileOf(t) : undefined;
       },
-      durations: { gather: this.r('gather_minutes'), build: this.r('build_minutes'), eat: this.r('eat_minutes') },
+      durations: { gather: this.r('gather_minutes'), build: this.r('build_minutes'), eat: this.r('eat_minutes'), experiment: this.r('experiment_minutes'), use: this.r('use_minutes') },
+      craftMinutes: (code) => this.catalog.recipes.get(code)?.minutes,
       maxWaitMinutes: Math.max(1, this.r('plan_horizon_minutes')),
     };
   }
@@ -334,25 +362,80 @@ export class RtWorld {
     return this.season() === 'winter' ? this.r('winter_food_yield_multiplier') : 1;
   }
 
+  /** Tiles from the centre of the world (where the wilds and the far resources begin). */
+  distanceFromCenter(p: Point): number {
+    return Math.max(Math.abs(p.x - Math.floor(this.width / 2)), Math.abs(p.y - Math.floor(this.height / 2)));
+  }
+
   gather(e: RtEntity, resource: Resource, at: Point = tileOf(e)): ActResult {
     const t = this.tile(at.x, at.y);
     if (!t) return { ok: false, reason: 'outside' };
-    const base = this.r(resource === 'food' ? 'gather_food_yield' : 'gather_wood_yield');
-    const amount = Math.floor(Math.min(base * this.winterFactor(), t[resource]));
-    if (amount < 1) return { ok: false, reason: 'not_enough' };
-    t[resource] = round2(t[resource] - amount);
-    e.inventory[resource] += amount;
-    this.onEvent({ type: 'tile', tile: t });
+    const tool = gatherTool(this.catalog, e, resource);
+    const boost = tool?.boost ?? 1;
+    let amount: number;
+    if (resource === 'food' || resource === 'wood') {
+      const base = this.r(resource === 'food' ? 'gather_food_yield' : 'gather_wood_yield');
+      amount = Math.floor(Math.min(base * boost * this.winterFactor(), t[resource]));
+      if (amount < 1) return { ok: false, reason: 'not_enough' };
+      t[resource] = round2(t[resource] - amount);
+      this.onEvent({ type: 'tile', tile: t });
+    } else {
+      const def = this.catalog.resources.get(resource);
+      if (!def) return { ok: false, reason: 'unknown_item' };
+      if (!gatherableAt(def, t.biome, this.distanceFromCenter(t))) return { ok: false, reason: 'not_here' };
+      amount = Math.floor(def.gatherYield * boost * this.winterFactor());
+      if (amount < 1) return { ok: false, reason: 'not_enough' };
+    }
+    addItems(e, resource, amount, this.catalog.resources.get(resource));
+    if (tool) this.wear(e, tool.tool);
     return { ok: true, amount };
   }
 
-  eat(e: RtEntity, amount?: number): ActResult {
+  private wear(e: RtEntity, tool: ToolInstance): void {
+    if (wearTool(e, tool, this.r('tool_wear_per_use'))) this.onEvent({ type: 'decay', id: e.id, item: tool.item, amount: 1, reason: 'broken' });
+  }
+
+  craft(e: RtEntity, recipe: string): ActResult {
+    const here = tileOf(e);
+    const t = this.tile(here.x, here.y);
+    if (!t) return { ok: false, reason: 'outside' };
+    const check = canCraft(this.catalog, e, recipe, { stations: stationsOf(t), discovered: new Set(this.discovered.keys()) });
+    if ('error' in check) return { ok: false, reason: check.error };
+    const out = applyCraft(this.catalog, e, check.recipe, this.r('tool_wear_per_use'));
+    for (const [k] of Object.entries(out.structures)) t.structures[k] = this.catalog.resources.get(k)?.durability || 1;
+    if (Object.keys(out.structures).length) this.onEvent({ type: 'tile', tile: t });
+    this.onEvent({ type: 'craft', id: e.id, recipe, inputs: out.inputs, outputs: out.outputs, at: here, broken: out.broken });
+    for (const b of out.broken) this.onEvent({ type: 'decay', id: e.id, item: b, amount: 1, reason: 'broken' });
+    return { ok: true, amount: 1 };
+  }
+
+  experiment(e: RtEntity, items: string[], minItems: number): ActResult {
+    const out = experiment(this.catalog, e, items, new Set(this.discovered.keys()), minItems);
+    if (!out.ok) return { ok: false, reason: out.error };
+    this.onEvent({ type: 'experiment', id: e.id, items: Object.keys(out.consumed), ...(out.found ? { found: out.found } : {}) });
+    return { ok: true };
+  }
+
+  use(e: RtEntity, item: string): ActResult {
+    const fx = useEffect(this.catalog, e, item);
+    if ('error' in fx) return { ok: false, reason: fx.error };
+    addItems(e, item, -1, fx.def);
+    e.hunger = round2(Math.max(0, e.hunger - fx.def.nourish));
+    e.hp = Math.min(e.maxHp, e.hp + fx.def.heal);
+    this.onEvent({ type: 'used', id: e.id, item });
+    return { ok: true, amount: 1 };
+  }
+
+  eat(e: RtEntity, amount?: number, item?: string): ActResult {
     if (e.hunger <= 0) return { ok: false, reason: 'not_hungry' };
-    if (e.inventory.food < 1) return { ok: false, reason: 'no_food' };
-    const want = Math.max(1, Math.floor(amount ?? Math.ceil(e.hunger)));
-    const n = Math.min(want, e.inventory.food, Math.ceil(e.hunger));
-    e.inventory.food -= n;
-    e.hunger = round2(Math.max(0, e.hunger - n));
+    const food = item ?? defaultFood(this.catalog, e) ?? 'food';
+    const per = this.catalog.resources.get(food)?.nourish ?? (food === 'food' ? 1 : 0);
+    if (per <= 0) return { ok: false, reason: 'not_usable' };
+    if (count(e, food) < 1) return { ok: false, reason: 'no_food' };
+    const want = Math.max(1, Math.floor(amount ?? Math.ceil(e.hunger / per)));
+    const n = Math.min(want, Math.floor(count(e, food)), Math.ceil(e.hunger / per));
+    addItems(e, food, -n, this.catalog.resources.get(food));
+    e.hunger = round2(Math.max(0, e.hunger - n * per));
     return { ok: true, amount: n };
   }
 
@@ -374,10 +457,8 @@ export class RtWorld {
     const b = this.find(to);
     if (!b || !b.alive || b.id === e.id) return { ok: false, reason: 'no_such_person' };
     if (Math.hypot(b.x - e.x, b.y - e.y) > this.move.interactRange) return { ok: false, reason: 'too_far' };
-    const n = Math.floor(Math.min(amount, e.inventory[resource]));
+    const n = transfer(this.catalog, e, b, resource, amount);
     if (n < 1) return { ok: false, reason: 'nothing_to_give' };
-    e.inventory[resource] -= n;
-    b.inventory[resource] += n;
     this.onEvent({ type: 'gave', from: e.id, to: b.id, resource, amount: n });
     return { ok: true, amount: n };
   }
@@ -403,14 +484,39 @@ export class RtWorld {
 
   /** Advances the world by `dtSeconds` of real time. */
   step(dtSeconds: number, nowMs: number): void {
-    const minutes = dtSeconds * Math.max(0, this.r('game_minutes_per_real_second'));
+    const minutes = dtSeconds * Math.max(0, this.r('game_minutes_per_real_second')) * this.timeScale;
     this.clock += minutes;
     this.calendar();
     const ctx = this.execContext();
     for (const e of this.living()) {
       if (e.kind === 'player') this.movePlayer(e, dtSeconds);
-      else this.runPlan(e, dtSeconds, minutes, ctx);
+      else this.runPlan(e, dtSeconds * this.timeScale, minutes, ctx);
       this.body(e, minutes, nowMs);
+      if (e.alive) for (const [item, n] of Object.entries(spoil(this.catalog, e, e.spoilAcc, minutes, DAY_MINUTES))) this.onEvent({ type: 'decay', id: e.id, item, amount: n, reason: 'spoiled' });
+    }
+    this.wearTiles(minutes);
+  }
+
+  /** Shelters and structures wear with the days. */
+  private wearTiles(minutes: number): void {
+    const shelterRate = this.r('shelter_decay_per_day') * (minutes / DAY_MINUTES);
+    for (const t of this.tiles) {
+      if (t.shelter <= 0 && !Object.keys(t.structures).length) continue;
+      let changed = false;
+      if (t.shelter > 0 && shelterRate > 0) {
+        t.shelterWear += shelterRate;
+        if (t.shelterWear >= 1) {
+          t.shelterWear -= 1;
+          t.shelter--;
+          changed = true;
+          this.onEvent({ type: 'decay', id: `tile:${t.x},${t.y}`, item: 'shelter', amount: 1, reason: 'worn' });
+        }
+      }
+      for (const gone of wearStructures(this.catalog, t.structures, minutes, DAY_MINUTES)) {
+        changed = true;
+        this.onEvent({ type: 'decay', id: `tile:${t.x},${t.y}`, item: gone, amount: 1, reason: 'worn' });
+      }
+      if (changed) this.onEvent({ type: 'tile', tile: t });
     }
   }
 
@@ -473,13 +579,19 @@ export class RtWorld {
   private complete(e: RtEntity, action: string, args: Record<string, unknown>): ActResult {
     switch (action) {
       case 'gather':
-        return this.gather(e, args.resource === 'wood' ? 'wood' : 'food');
+        return this.gather(e, String(args.resource));
       case 'eat':
-        return this.eat(e, typeof args.amount === 'number' ? args.amount : undefined);
+        return this.eat(e, typeof args.amount === 'number' ? args.amount : undefined, typeof args.item === 'string' ? args.item : undefined);
       case 'build':
         return this.build(e);
       case 'give':
-        return this.give(e, String(args.to), args.resource === 'wood' ? 'wood' : 'food', Number(args.amount));
+        return this.give(e, String(args.to), String(args.item ?? args.resource), Number(args.amount));
+      case 'craft':
+        return this.craft(e, String(args.recipe));
+      case 'experiment':
+        return this.experiment(e, Array.isArray(args.items) ? args.items.map(String) : [], this.minExperimentItems);
+      case 'use':
+        return this.use(e, String(args.item));
       case 'say':
         return this.say(e, String(args.to ?? 'all'), String(args.text ?? ''));
       default:
@@ -519,8 +631,20 @@ export class RtWorld {
       e.hp -= this.r('starvation_damage') * perTurn;
       cause = 'starved';
     }
-    if (this.season() === 'winter' && !this.isSheltered(e)) {
-      const dmg = this.r('cold_damage_unsheltered') * perTurn;
+    const sheltered = this.isSheltered(e);
+    const exposure = (this.season() === 'winter' && !sheltered ? this.r('cold_damage_unsheltered') : 0)
+      + (!sheltered && this.distanceFromCenter(tileOf(e)) > this.r('wild_distance') ? this.r('wild_damage') : 0);
+    if (exposure > 0) {
+      const guard = protectionOf(this.catalog, e);
+      const dmg = exposure * (1 - guard.share) * perTurn;
+      // A protective item wears with each turn it spends warding off harm.
+      if (guard.tool) {
+        guard.tool.durability -= this.r('tool_wear_per_use') * perTurn;
+        if (guard.tool.durability <= 0) {
+          guard.tool.durability = 0.001;
+          this.wear(e, guard.tool);
+        }
+      }
       if (dmg > 0) {
         e.hp -= dmg;
         cause ??= 'frozen';

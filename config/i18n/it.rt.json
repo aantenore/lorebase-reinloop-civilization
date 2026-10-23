@@ -3,7 +3,7 @@
     "Sei {name}. Il tuo carattere: {personality}",
     "Il tuo ruolo nella società: {roleTitle} ({role}).",
     "La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).",
-    "Il tempo scorre senza pause. Quando ti fermi a pensare fissi con commit_plan ciò che farai nei prossimi minuti, da {minSteps} a {maxSteps} passi per circa {horizon} minuti; mentre pensi continui a fare ciò che stavi facendo.",
+    "Il tempo scorre senza pause. Quando ti fermi a pensare fissi con commit_plan ciò che farai per circa {horizon} minuti; mentre pensi continui a fare ciò che stavi facendo.",
     "Pensi e parli in italiano."
   ],
   "replyInstructions": "Qualcuno ti ha appena rivolto la parola. Rispondi a voce, in una o due frasi, come la persona che sei. Se dopo questa conversazione vuoi ripensare a cosa fare, usa lo strumento rethink.",
@@ -32,7 +32,7 @@
     "winterNow": "è inverno",
     "winterIn": "l'inverno arriva tra {minutes} minuti",
     "noWinter": "con le leggi attuali non c'è inverno",
-    "self": "TU: salute {hp}/{maxHp}, fame {hunger}, porti {food} cibo e {wood} legna; sei in ({x},{y}); {shelter}; cammini a {speed} caselle al minuto e lavori a rapidità {work}.",
+    "self": "TU: salute {hp}/{maxHp}, fame {hunger}; porti: {items}; attrezzi: {tools}; sei in ({x},{y}); {shelter}; cammini a {speed} caselle al minuto e lavori a rapidità {work}.",
     "sheltered": "sei al riparo",
     "unsheltered": "non sei al riparo",
     "group": "IL TUO GRUPPO: {name} ({pattern}); membri: {members}.",
@@ -51,7 +51,11 @@
     "lawLine": "- {key} = {value} {unit}: {text}",
     "changed": "LEGGI CAMBIATE DALL'ULTIMA VOLTA CHE CI HAI PENSATO:\n{changes}",
     "changeLine": "- {key}: {old} -> {new}",
-    "none": "nessuna"
+    "none": "nessuna",
+    "nothingCarried": "niente",
+    "noTools": "nessuno",
+    "itemLine": "{amount} {name} ({code})",
+    "toolLine": "{name} ({code}) usura {durability}/{max}"
   },
   "why": {
     "start": "ti guardi intorno per la prima volta",
@@ -80,7 +84,18 @@
     "too_far": "era troppo lontano",
     "nothing_to_give": "non avevi niente da dare",
     "outside": "fuori dal mondo",
-    "failed": "non è riuscito"
+    "failed": "non è riuscito",
+    "unknown_recipe": "non conosci quella ricetta",
+    "wrong_role": "quella ricetta non è del tuo ruolo",
+    "tech_unknown": "non si conosce ancora come farlo",
+    "missing_station": "qui manca ciò che serve per farlo",
+    "missing_inputs": "non avevi tutto ciò che serve",
+    "missing_tool": "ti mancava l'attrezzo",
+    "too_few_items": "servono almeno due cose diverse",
+    "unknown_item": "non esiste una cosa con quel codice",
+    "not_usable": "non si può usare così",
+    "no_item": "non la portavi",
+    "not_here": "qui non se ne trova"
   },
   "look": {
     "here": "Sei in ({x},{y}) su {biome}, altitudine {elev}: cibo {food}, legna {wood}{shelter}.",
@@ -100,10 +115,13 @@
     "noShelter": "nessun rifugio esiste",
     "groups": "Gruppi qui intorno: {groups}.",
     "groupLine": "{name} ({pattern}, membri: {members})",
-    "noGroups": "nessuno"
+    "noGroups": "nessuno",
+    "structures": ", strutture: {list}",
+    "structureLine": "{name} ({code})",
+    "wild": " Sei nelle terre selvagge."
   },
   "tools": {
-    "commitPlan": "Fissa ciò che farai da ora in avanti: una lista di passi eseguiti in ordine, in tempo reale. Azioni: move_to(x,y) cammina fino a una casella; approach(to) avvicinati a una persona; gather(resource: food|wood) raccogli sulla tua casella; eat(amount?) mangia cibo che porti; build costruisci o amplia un rifugio sulla tua casella; give(to, resource, amount) dai a chi ti sta accanto; say(to, text) parla a una persona o a \"all\"; rest(minutes) riposa; sleep(minutes) dormi; wait(minutes) aspetta.",
+    "commitPlan": "Fissa ciò che farai da ora in avanti: una lista di passi eseguiti in ordine, in tempo reale. Azioni: move_to(x,y) cammina fino a una casella; approach(to) avvicinati a una persona; gather(resource) raccogli sulla tua casella una cosa per codice (food, wood o altro); eat(amount?, item?) mangia; build costruisci o amplia un rifugio sulla tua casella; dai(to, item, amount) dai a chi ti sta accanto; say(to, text) parla a una persona o a \"all\"; rest(minutes) riposa; sleep(minutes) dormi; wait(minutes) aspetta; crea(recipe) segui una ricetta per codice; sperimenta(items) combina alcune cose che porti, una per tipo, che si consumano; usa(item) usa una cosa che porti.",
     "planReason": "il tuo pensiero: perché fai questo, in una frase",
     "planSteps": "i passi, in ordine",
     "stepLabel": "breve descrizione del passo, in italiano",
@@ -126,7 +144,13 @@
     "judgeInsight": "Approva o respingi un'idea condivisa da un'altra persona del tuo ruolo.",
     "insightCode": "codice dell'idea",
     "insightVerdict": "approve per approvare, reject per respingere",
-    "insightReason": "perché, in una frase"
+    "insightReason": "perché, in una frase",
+    "planStepsUpTo": "i passi, in ordine (di solito non più di {maxSteps})",
+    "stepResource": "codice della cosa da raccogliere",
+    "stepItem": "codice di una cosa",
+    "stepItems": "codici delle cose da combinare",
+    "stepRecipe": "codice della ricetta",
+    "rememberImportance": "quanto conta per te, da 0 a 1"
   },
   "act": {
     "planned": "piano fissato ({n} passi)",
@@ -146,7 +170,13 @@
     "insightNone": "nessuna idea del tuo ruolo aspetta un giudizio",
     "insightLine": "- {code}: \"{text}\" (di {author}, sicurezza {confidence})",
     "insightJudged": "giudizio registrato",
-    "insightJudgeFailed": "giudizio non registrato: {reason}"
+    "insightJudgeFailed": "giudizio non registrato: {reason}",
+    "remembered": "annotato nella tua memoria",
+    "memoryUnavailable": "la tua memoria ora non risponde",
+    "recallLine": "- giorno {day} ({vivid}): {text}",
+    "vivid": "ricordo nitido",
+    "faded": "ricordo sbiadito",
+    "recallNone": "non ricordi niente del genere"
   },
   "group": {
     "header": "SIETE IL GRUPPO {name} ({pattern}). Ora decidete insieme cosa farà ciascuno nei prossimi {horizon} minuti.",
@@ -155,7 +185,7 @@
     "memberIdle": "non sta facendo niente",
     "members": "MEMBRI:\n{members}",
     "you": "Tu sei {name} (id {id}).",
-    "format": "Rispondi solo con JSON: {\"summary\": \"il piano comune in una frase, in italiano\", \"steps\": [{\"who\": \"id del membro\", \"action\": \"...\", ...argomenti, \"label\": \"breve descrizione\"}]}. Da {minSteps} a {maxSteps} passi per membro. Azioni: move_to(x,y), approach(to), gather(resource: food|wood), eat(amount?), build, give(to, resource, amount), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
+    "format": "Rispondi solo con JSON: {\"summary\": \"il piano comune in una frase, in italiano\", \"steps\": [{\"who\": \"id del membro\", \"action\": \"...\", ...argomenti, \"label\": \"breve descrizione\"}]}. Di solito non più di {maxSteps} passi per membro. Azioni: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
     "worker": "Sei {name} (id {id}), membro del gruppo {group}. {task}\n\nDi' in poche frasi cosa proponi di fare tu, in italiano.",
     "workerTool": "Chiedi a {name} [{role}] cosa propone di fare",
     "route": "{name} [{role}]: {description}",
@@ -174,7 +204,9 @@
       "route": "Chi del gruppo è più adatto a decidere il piano comune in questa situazione?\n\nMembri:\n{{routes}}\n\nSituazione:\n{{task}}",
       "evaluate": "Giudica il piano comune proposto. Metti \"pass\" a true solo se va bene così; altrimenti scrivi in \"feedback\" cosa cambiare, in italiano. Rispondi solo con JSON: {\"pass\": true|false, \"feedback\": \"...\"}.\n\nSituazione:\n{{task}}\n\nPiano proposto:\n{{candidate}}",
       "revise": "Situazione:\n{{task}}\n\nPiano precedente:\n{{candidate}}\n\nRivedilo tenendo conto di questo: {{feedback}}"
-    }
+    },
+    "commitPlan": "Fissa il piano comune proposto: una lista di passi, ognuno con who (id del membro che lo fa).",
+    "planCaptured": "piano registrato"
   },
   "events": {
     "formed": "Nasce il gruppo {name} ({pattern}): {members}",
@@ -194,7 +226,14 @@
     "night": "Cala la notte",
     "dawn": "Sorge il sole",
     "rules": "Il libro delle leggi è cambiato: {changes}",
-    "decided": "Il gruppo {name} ha deciso: {summary}"
+    "decided": "Il gruppo {name} ha deciso: {summary}",
+    "craft": "{name} ha fatto: {outputs}",
+    "discovery": "{name} ({role}) ha scoperto: {tech}! Ora si conosce: {recipes}",
+    "experimentFailed": "{name} ha sperimentato con {items}, senza risultato",
+    "decay": "{name}: {amount} {item} {reason}",
+    "spoiled": "si è guastato",
+    "broken": "si è rotto",
+    "worn": "si è logorato"
   },
   "memory": {
     "planned": "Ho deciso: {reason}",
@@ -207,7 +246,12 @@
     "left": "Ho lasciato il gruppo {group}",
     "gave": "Ho dato {amount} {resource} a {name}",
     "got": "{name} mi ha dato {amount} {resource}",
-    "everyone": "tutti"
+    "everyone": "tutti",
+    "crafted": "Ho fatto {outputs} con {inputs}",
+    "discovered": "Ho scoperto {tech} combinando {items}!",
+    "experimented": "Ho combinato {items}, ma non è successo niente",
+    "decayed": "Mi si è {reason} {amount} {item}",
+    "learned": "Si è scoperto {tech} (lo ha scoperto {name})"
   },
   "mock": {
     "reason": {
@@ -218,7 +262,8 @@
       "shelter": "Fa buio e freddo: vado al riparo.",
       "care": "Qualcuno sta male: vado ad aiutarlo.",
       "explore": "Vado a vedere cosa c'è più in là.",
-      "idle": "Mi guardo intorno e raccolgo ciò che trovo."
+      "idle": "Mi guardo intorno e raccolgo ciò che trovo.",
+      "work": "Faccio la mia parte nel villaggio."
     },
     "say": {
       "greet": "Ciao {name}, come va da queste parti?",
@@ -238,7 +283,11 @@
       "say": "parlo",
       "rest": "riposo",
       "sleep": "dormo",
-      "wait": "aspetto"
+      "wait": "aspetto",
+      "use": "uso un rimedio",
+      "craft": "faccio: {name}",
+      "experiment": "provo a combinare delle cose",
+      "gatherItem": "raccolgo {name}"
     },
     "groupName": "Compagnia di {name}",
     "summary": "Ognuno fa la sua parte: {parts}.",
@@ -259,7 +308,8 @@
     "stateGroup": "Sto con il gruppo {group}.",
     "consult": "leggi del mondo",
     "insight": "Intorno a ({x},{y}) il cibo abbonda.",
-    "insightEvidence": "L'ho visto con i miei occhi il giorno {day}."
+    "insightEvidence": "L'ho visto con i miei occhi il giorno {day}.",
+    "discoveryInsight": "Combinando {items} si scopre {tech}."
   },
   "memberInstructions": [
     "Sei {name}. Il tuo carattere: {personality}",

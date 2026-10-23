@@ -3,7 +3,7 @@
     "You are {name}. Your character: {personality}",
     "Your role in society: {roleTitle} ({role}).",
     "Your mind is connected to Lorebase (tools lorebase_*): there you can consult the laws of the world, the shared consciousness of your role and the chronicle. You also have a private memory (remember/recall).",
-    "Time flows without pause. When you stop to think you fix with commit_plan what you will do in the next minutes, from {minSteps} to {maxSteps} steps for about {horizon} minutes; while you think you keep doing what you were doing.",
+    "Time flows without pause. When you stop to think you fix with commit_plan what you will do for about {horizon} minutes; while you think you keep doing what you were doing.",
     "You think and speak in English."
   ],
   "replyInstructions": "Someone has just spoken to you. Reply aloud, in one or two sentences, as the person you are. If after this conversation you want to reconsider what to do, use the rethink tool.",
@@ -32,7 +32,7 @@
     "winterNow": "it is winter",
     "winterIn": "winter arrives in {minutes} minutes",
     "noWinter": "under the current laws there is no winter",
-    "self": "YOU: health {hp}/{maxHp}, hunger {hunger}, carrying {food} food and {wood} wood; you are at ({x},{y}); {shelter}; you walk at {speed} tiles per minute and work at speed {work}.",
+    "self": "YOU: health {hp}/{maxHp}, hunger {hunger}; carrying: {items}; tools: {tools}; you are at ({x},{y}); {shelter}; you walk {speed} tiles per minute and work at speed {work}.",
     "sheltered": "you are sheltered",
     "unsheltered": "you are not sheltered",
     "group": "YOUR GROUP: {name} ({pattern}); members: {members}.",
@@ -51,7 +51,11 @@
     "lawLine": "- {key} = {value} {unit}: {text}",
     "changed": "LAWS CHANGED SINCE THE LAST TIME YOU THOUGHT ABOUT THEM:\n{changes}",
     "changeLine": "- {key}: {old} -> {new}",
-    "none": "none"
+    "none": "none",
+    "nothingCarried": "nothing",
+    "noTools": "none",
+    "itemLine": "{amount} {name} ({code})",
+    "toolLine": "{name} ({code}) wear {durability}/{max}"
   },
   "why": {
     "start": "you look around for the first time",
@@ -80,7 +84,18 @@
     "too_far": "it was too far away",
     "nothing_to_give": "you had nothing to give",
     "outside": "outside the world",
-    "failed": "it did not work"
+    "failed": "it did not work",
+    "unknown_recipe": "you do not know that recipe",
+    "wrong_role": "that recipe is not of your role",
+    "tech_unknown": "nobody knows how to do it yet",
+    "missing_station": "what is needed to do it is not here",
+    "missing_inputs": "you did not have everything needed",
+    "missing_tool": "you lacked the tool",
+    "too_few_items": "at least two different items are needed",
+    "unknown_item": "there is no item with that code",
+    "not_usable": "it cannot be used like that",
+    "no_item": "you did not carry it",
+    "not_here": "none to be found here"
   },
   "look": {
     "here": "You are at ({x},{y}) on {biome}, altitude {elev}: food {food}, wood {wood}{shelter}.",
@@ -100,10 +115,13 @@
     "noShelter": "no shelter exists",
     "groups": "Groups around here: {groups}.",
     "groupLine": "{name} ({pattern}, members: {members})",
-    "noGroups": "none"
+    "noGroups": "none",
+    "structures": ", structures: {list}",
+    "structureLine": "{name} ({code})",
+    "wild": " You are in the wilds."
   },
   "tools": {
-    "commitPlan": "Fix what you will do from now on: a list of steps executed in order, in real time. Actions: move_to(x,y) walks to a tile; approach(to) moves close to a person; gather(resource: food|wood) collects on your tile; eat(amount?) eats food you carry; build builds or extends a shelter on your tile; give(to, resource, amount) gives to someone next to you; say(to, text) speaks to a person or to \"all\"; rest(minutes) rests; sleep(minutes) sleeps; wait(minutes) waits.",
+    "commitPlan": "Fix what you will do from now on: a list of steps executed in order, in real time. Actions: move_to(x,y); approach(to); gather(resource) gather an item by code on your tile (food, wood or other); eat(amount?, item?); build a shelter on your tile; dai(to, item, amount) give to someone next to you; say(to, text); rest(minutes); sleep(minutes); wait(minutes); crea(recipe) follow a recipe by code; sperimenta(items) combine some items you carry, one of each, which are used up; usa(item) use an item you carry.",
     "planReason": "your thinking: why you do this, in one sentence",
     "planSteps": "the steps, in order",
     "stepLabel": "short description of the step, in English",
@@ -126,7 +144,13 @@
     "judgeInsight": "Approve or reject an idea shared by another person of your role.",
     "insightCode": "code of the idea",
     "insightVerdict": "approve or reject",
-    "insightReason": "why, in one sentence"
+    "insightReason": "why, in one sentence",
+    "planStepsUpTo": "the steps, in order (usually no more than {maxSteps})",
+    "stepResource": "code of the item to gather",
+    "stepItem": "code of an item",
+    "stepItems": "codes of the items to combine",
+    "stepRecipe": "code of the recipe",
+    "rememberImportance": "how much it matters to you, 0 to 1"
   },
   "act": {
     "planned": "plan fixed ({n} steps)",
@@ -146,7 +170,13 @@
     "insightNone": "no idea of your role waits for a judgement",
     "insightLine": "- {code}: \"{text}\" (by {author}, confidence {confidence})",
     "insightJudged": "judgement recorded",
-    "insightJudgeFailed": "judgement not recorded: {reason}"
+    "insightJudgeFailed": "judgement not recorded: {reason}",
+    "remembered": "noted in your memory",
+    "memoryUnavailable": "your memory does not answer now",
+    "recallLine": "- day {day} ({vivid}): {text}",
+    "vivid": "vivid",
+    "faded": "faded",
+    "recallNone": "you remember nothing like that"
   },
   "group": {
     "header": "YOU ARE THE GROUP {name} ({pattern}). Now decide together what each of you will do in the next {horizon} minutes.",
@@ -155,7 +185,7 @@
     "memberIdle": "is doing nothing",
     "members": "MEMBERS:\n{members}",
     "you": "You are {name} (id {id}).",
-    "format": "Reply only with JSON: {\"summary\": \"the common plan in one sentence, in English\", \"steps\": [{\"who\": \"member id\", \"action\": \"...\", ...arguments, \"label\": \"short description\"}]}. From {minSteps} to {maxSteps} steps per member. Actions: move_to(x,y), approach(to), gather(resource: food|wood), eat(amount?), build, give(to, resource, amount), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
+    "format": "Reply only with JSON: {\"summary\": \"the common plan in one sentence, in English\", \"steps\": [{\"who\": \"member id\", \"action\": \"...\", ...arguments, \"label\": \"short description\"}]}. Usually no more than {maxSteps} steps per member. Actions: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
     "worker": "You are {name} (id {id}), a member of the group {group}. {task}\n\nIn a few sentences, say what you propose to do yourself, in English.",
     "workerTool": "Ask {name} [{role}] what they propose to do",
     "route": "{name} [{role}]: {description}",
@@ -174,7 +204,9 @@
       "route": "Who in the group is best suited to decide the common plan in this situation?\n\nMembers:\n{{routes}}\n\nSituation:\n{{task}}",
       "evaluate": "Judge the proposed common plan. Set \"pass\" to true only if it is fine as it is; otherwise write in \"feedback\" what to change, in English. Reply only with JSON: {\"pass\": true|false, \"feedback\": \"...\"}.\n\nSituation:\n{{task}}\n\nProposed plan:\n{{candidate}}",
       "revise": "Situation:\n{{task}}\n\nPrevious plan:\n{{candidate}}\n\nRevise it taking this into account: {{feedback}}"
-    }
+    },
+    "commitPlan": "Fix the proposed common plan: a list of steps, each with who (id of the member doing it).",
+    "planCaptured": "plan recorded"
   },
   "events": {
     "formed": "The group {name} ({pattern}) is born: {members}",
@@ -194,7 +226,14 @@
     "night": "Night falls",
     "dawn": "The sun rises",
     "rules": "The book of laws has changed: {changes}",
-    "decided": "The group {name} has decided: {summary}"
+    "decided": "The group {name} has decided: {summary}",
+    "craft": "{name} made: {outputs}",
+    "discovery": "{name} ({role}) discovered: {tech}! Now known: {recipes}",
+    "experimentFailed": "{name} experimented with {items}, to no avail",
+    "decay": "{name}: {amount} {item} {reason}",
+    "spoiled": "spoiled",
+    "broken": "broke",
+    "worn": "wore out"
   },
   "memory": {
     "planned": "I decided: {reason}",
@@ -207,7 +246,12 @@
     "left": "I left the group {group}",
     "gave": "I gave {amount} {resource} to {name}",
     "got": "{name} gave me {amount} {resource}",
-    "everyone": "everyone"
+    "everyone": "everyone",
+    "crafted": "I made {outputs} from {inputs}",
+    "discovered": "I discovered {tech} by combining {items}!",
+    "experimented": "I combined {items}, but nothing happened",
+    "decayed": "My {amount} {item} {reason}",
+    "learned": "{tech} was discovered (by {name})"
   },
   "mock": {
     "reason": {
@@ -218,7 +262,8 @@
       "shelter": "It is dark and cold: I go to shelter.",
       "care": "Someone is unwell: I go to help them.",
       "explore": "I go to see what lies further on.",
-      "idle": "I look around and gather what I find."
+      "idle": "I look around and gather what I find.",
+      "work": "I do my part in the village."
     },
     "say": {
       "greet": "Hello {name}, how are things around here?",
@@ -238,7 +283,11 @@
       "say": "speaking",
       "rest": "resting",
       "sleep": "sleeping",
-      "wait": "waiting"
+      "wait": "waiting",
+      "use": "I use a remedy",
+      "craft": "I make: {name}",
+      "experiment": "I try combining things",
+      "gatherItem": "I gather {name}"
     },
     "groupName": "Company of {name}",
     "summary": "Everyone does their part: {parts}.",
@@ -259,7 +308,8 @@
     "stateGroup": "I am with the group {group}.",
     "consult": "laws of the world",
     "insight": "Around ({x},{y}) food is plentiful.",
-    "insightEvidence": "I saw it with my own eyes on day {day}."
+    "insightEvidence": "I saw it with my own eyes on day {day}.",
+    "discoveryInsight": "Combining {items} reveals {tech}."
   },
   "memberInstructions": [
     "You are {name}. Your character: {personality}",

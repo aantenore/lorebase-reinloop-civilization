@@ -1,0 +1,343 @@
+# The economy of the real-time world, loaded into Lorebase by `npm run lorebase:seed`.
+# Resources and the recipes known from the start go to `main` through a Proposal; every
+# Technology and the recipes it unlocks go to the hidden branch (`economy.hiddenBranch` in
+# config/game.json), which agents cannot read. A discovery merges the Technology and its
+# recipes into `main`. Codes are identifiers; names and descriptions are what people read.
+resources:
+  - code: food
+    name: "Cibo"
+    category: food
+    perishable: true
+    decay_per_day: 0.12
+    nourish: 1
+    source: tile
+    description: "Bacche, radici e frutti raccolti dalla terra. Si guasta in pochi giorni."
+  - code: wood
+    name: "Legna"
+    category: material
+    perishable: false
+    source: tile
+    description: "Rami e tronchi raccolti nei boschi."
+  - code: flint
+    name: "Selce"
+    category: material
+    perishable: false
+    source: biome
+    biomes: [sand]
+    gather_yield: 1
+    description: "Pietra dura e tagliente che si trova sulla sabbia."
+  - code: fiber
+    name: "Fibre vegetali"
+    category: material
+    perishable: false
+    source: biome
+    biomes: [grass]
+    gather_yield: 2
+    description: "Steli lunghi e resistenti strappati dai prati."
+  - code: herbs
+    name: "Erbe medicinali"
+    category: material
+    perishable: true
+    decay_per_day: 0.25
+    source: biome
+    biomes: [forest]
+    gather_yield: 1
+    description: "Foglie e radici amare del sottobosco. Appassiscono presto."
+  - code: clay
+    name: "Argilla"
+    category: material
+    perishable: false
+    source: biome
+    biomes: [sand]
+    gather_yield: 2
+    min_distance: 9
+    description: "Terra grassa e plastica che si trova solo lontano dal cuore del mondo."
+  - code: seeds
+    name: "Semi selvatici"
+    category: material
+    perishable: false
+    source: biome
+    biomes: [grass, forest]
+    gather_yield: 1
+    min_distance: 9
+    description: "Piccoli semi di piante che crescono solo lontano dal cuore del mondo."
+  - code: rope
+    name: "Corda"
+    category: material
+    perishable: false
+    source: craft
+    description: "Fibre intrecciate in una corda robusta."
+  - code: knife
+    name: "Coltello di selce"
+    category: tool
+    perishable: false
+    source: craft
+    durability: 10
+    boosts: [food, fiber, herbs]
+    boost: 1.5
+    description: "Una lama di selce. Si consuma con l'uso."
+  - code: axe
+    name: "Ascia di selce"
+    category: tool
+    perishable: false
+    source: craft
+    durability: 12
+    boosts: [wood, flint]
+    boost: 2
+    description: "Una pietra affilata legata a un manico. Si consuma con l'uso."
+  - code: basket
+    name: "Cesto"
+    category: tool
+    perishable: false
+    source: craft
+    durability: 15
+    boosts: [food, herbs, seeds]
+    boost: 2
+    description: "Un cesto di fibre per portare molto più raccolto. Si consuma con l'uso."
+  - code: hearth
+    name: "Focolare"
+    category: structure
+    perishable: false
+    source: craft
+    durability: 4
+    decay_per_day: 1
+    description: "Un fuoco protetto da pietre, costruito su una casella. Col tempo si spegne e crolla."
+  - code: storehouse
+    name: "Magazzino"
+    category: structure
+    perishable: false
+    source: craft
+    durability: 8
+    decay_per_day: 1
+    description: "Un deposito asciutto costruito su una casella. Col tempo si degrada."
+  - code: medicine
+    name: "Medicina"
+    category: medicine
+    perishable: true
+    decay_per_day: 0.05
+    heal: 4
+    source: craft
+    description: "Un decotto di erbe che restituisce salute."
+  - code: dried_herbs
+    name: "Erbe essiccate"
+    category: material
+    perishable: false
+    source: craft
+    description: "Erbe seccate che non appassiscono più."
+  - code: dried_food
+    name: "Cibo essiccato"
+    category: food
+    perishable: true
+    decay_per_day: 0.02
+    nourish: 1
+    source: craft
+    description: "Cibo seccato al fuoco: dura molto più a lungo."
+  - code: pot
+    name: "Vaso di terracotta"
+    category: material
+    perishable: false
+    source: craft
+    description: "Un vaso di argilla cotta."
+  - code: preserved_food
+    name: "Cibo conservato"
+    category: food
+    perishable: false
+    nourish: 1
+    source: craft
+    description: "Cibo chiuso nei vasi: non si guasta."
+  - code: salve
+    name: "Unguento d'argilla"
+    category: medicine
+    perishable: false
+    heal: 6
+    source: craft
+    description: "Un impiastro di erbe e argilla che guarisce a fondo."
+  - code: cloak
+    name: "Mantello di fibre"
+    category: tool
+    perishable: false
+    source: craft
+    durability: 30
+    protection: 0.6
+    description: "Un mantello che ripara dal freddo e dai pericoli delle terre lontane. Si logora."
+
+# Known from the start (tech empty).
+recipes:
+  - code: rope
+    name: "Intrecciare una corda"
+    inputs:
+      fiber: 3
+    outputs:
+      rope: 1
+    minutes: 15
+    description: "Chiunque può intrecciare fibre in una corda."
+  - code: knife
+    name: "Scheggiare un coltello"
+    role: crafter
+    inputs:
+      flint: 2
+    outputs:
+      knife: 1
+    minutes: 25
+    description: "Un coltello di selce."
+  - code: axe
+    name: "Fare un'ascia"
+    role: crafter
+    inputs:
+      flint: 2
+      wood: 1
+      rope: 1
+    outputs:
+      axe: 1
+    minutes: 40
+    description: "Un'ascia di selce legata a un manico."
+  - code: basket
+    name: "Intrecciare un cesto"
+    role: crafter
+    inputs:
+      fiber: 4
+      rope: 1
+    outputs:
+      basket: 1
+    minutes: 35
+    description: "Un cesto di fibre."
+  - code: hearth
+    name: "Costruire un focolare"
+    role: builder
+    inputs:
+      flint: 2
+      wood: 4
+    outputs:
+      hearth: 1
+    tools: [axe]
+    minutes: 40
+    description: "Un focolare sulla casella in cui ci si trova."
+  - code: storehouse
+    name: "Costruire un magazzino"
+    role: builder
+    inputs:
+      wood: 10
+      rope: 2
+    outputs:
+      storehouse: 1
+    tools: [axe]
+    station: shelter
+    minutes: 90
+    description: "Un magazzino accanto a un rifugio."
+  - code: medicine
+    name: "Preparare una medicina"
+    role: healer
+    inputs:
+      herbs: 3
+    outputs:
+      medicine: 1
+    station: hearth
+    minutes: 25
+    description: "Un decotto di erbe fresche cotto sul focolare."
+  - code: dried_herbs
+    name: "Essiccare le erbe"
+    role: healer
+    inputs:
+      herbs: 2
+    outputs:
+      dried_herbs: 2
+    station: storehouse
+    minutes: 15
+    description: "Erbe messe a seccare in un magazzino."
+  - code: medicine_dried
+    name: "Medicina dalle erbe secche"
+    role: healer
+    inputs:
+      dried_herbs: 3
+    outputs:
+      medicine: 1
+    station: hearth
+    minutes: 25
+    description: "Un decotto di erbe essiccate cotto sul focolare."
+  - code: dried_food
+    name: "Essiccare il cibo"
+    role: gatherer
+    inputs:
+      food: 3
+    outputs:
+      dried_food: 3
+    station: hearth
+    minutes: 30
+    description: "Cibo seccato al focolare."
+
+# Hidden until discovered: combining the inputs of one of its recipes (sperimenta) discovers it.
+technologies:
+  - code: farming
+    name: "Coltivazione"
+    description: "Seminare i semi selvatici per far crescere molto cibo."
+    recipes:
+      - code: sowing
+        name: "Seminare"
+        role: gatherer
+        inputs:
+          seeds: 2
+          food: 1
+        outputs:
+          food: 8
+        tools: [knife]
+        minutes: 60
+        description: "Semi piantati e curati fino al raccolto."
+  - code: pottery
+    name: "Ceramica"
+    description: "Cuocere l'argilla al fuoco per farne vasi."
+    recipes:
+      - code: pot
+        name: "Modellare un vaso"
+        role: crafter
+        inputs:
+          clay: 3
+          wood: 1
+        outputs:
+          pot: 1
+        station: hearth
+        minutes: 40
+        description: "Un vaso di argilla cotto sul focolare."
+  - code: preserving
+    name: "Conservazione"
+    description: "Chiudere il cibo nei vasi perché non si guasti."
+    prerequisites: [pottery]
+    recipes:
+      - code: preserve
+        name: "Conservare il cibo"
+        role: gatherer
+        inputs:
+          food: 4
+          pot: 1
+        outputs:
+          preserved_food: 4
+        station: storehouse
+        minutes: 20
+        description: "Cibo chiuso in un vaso e riposto in magazzino."
+  - code: poultice
+    name: "Unguenti"
+    description: "Impastare erbe e argilla in un impiastro che guarisce."
+    recipes:
+      - code: salve
+        name: "Preparare un unguento"
+        role: healer
+        inputs:
+          herbs: 2
+          clay: 1
+        outputs:
+          salve: 1
+        minutes: 20
+        description: "Un impiastro di erbe e argilla."
+  - code: weaving
+    name: "Tessitura"
+    description: "Intrecciare fibre e corde in stoffa."
+    recipes:
+      - code: cloak
+        name: "Tessere un mantello"
+        role: crafter
+        inputs:
+          fiber: 4
+          rope: 2
+        outputs:
+          cloak: 1
+        minutes: 40
+        description: "Un mantello di fibre intrecciate."

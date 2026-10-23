@@ -2,18 +2,19 @@
 // tools) or from the roster config; its pattern is chosen by its founder. Each pattern is a
 // reinloop multi-agent pattern producing ONE joint plan, split into each member's sub-plan:
 //   orchestrator  reinloop `orchestrator`: the leader delegates to members (as tools) and decides
-//   council       `evaluator` over a `parallel` team: members propose, the elder harmonizes and judges
+//   council       custom pattern over a `parallel` team: members propose, the elder harmonizes and judges
+//                 (tolerant verdict: an unreadable judgement counts as approval)
 //   router        `router`: the leader picks the member best suited to decide
 //   chain         `chain`: scout -> planner -> doer
 //   mentor        `evaluator`: the apprentice plans, the mentor critiques until satisfied
 //   assembly      custom `definePattern`: everyone proposes, everyone votes, majority wins
 //   crowd         one call plans for many extras
 // How they decided is reconstructed from reinloop run events (a sink) into `lastDecision.trace`.
-import { agent, definePattern, type EasyAgent, type MockTurn, type ModelRequest, type RunEvent, safeToolName, type Sink, team } from 'reinloop';
+import { agent, definePattern, type EasyAgent, type MockTurn, type ModelRequest, type RunEvent, safeToolName, type Sink, team, tool } from 'reinloop';
 import type { Translate } from '../i18n.ts';
 import type { GameConfig, GroupPattern } from './config.ts';
 import { AGENT_PATTERNS } from './config.ts';
-import { type DecideHost, decisionTier, faculties, limitsOf, modelRef, normalizeSteps } from './decide.ts';
+import { type DecideHost, decisionTier, faculties, limitsOf, modelRef, normalizeSteps, planSchema } from './decide.ts';
 import { flatSteps, mockGroupPlan, mockSteps } from './mock.ts';
 import type { PlanStep } from './plan.ts';
 import { inboxBlock, look, memberLine, timeLine } from './prompt.ts';
@@ -191,7 +192,7 @@ export class GroupManager {
   private counts(members: RtEntity[]): { min: number; max: number; horizon: number; maxTokens: number } {
     const tc = this.cfg.decisions.tiers[decisionTier(members[0]!, this.cfg)];
     const horizon = this.host.world().r('plan_horizon_minutes') * tc.horizonFactor;
-    return { min: tc.minSteps, max: tc.maxSteps, horizon, maxTokens: tc.maxOutputTokens };
+    return { min: Math.min(this.host.cfg.mock.planSteps, tc.maxSteps), max: tc.maxSteps, horizon, maxTokens: tc.maxOutputTokens };
   }
 
   /** The situation every member reads (the team's task). */
@@ -218,20 +219,42 @@ export class GroupManager {
     return this.t('rt.memberInstructions', { name: m.name, personality: m.personality || '-', roleTitle: role?.title ?? m.role, role: m.role, group: g.name });
   }
 
+  /**
+   * Joint plans committed through a tool by JSON-writing members, by agent name: the Anthropic
+   * provider does not enforce structured output, so a tool schema is the reliable channel.
+   */
+  private readonly captured = new Map<string, string>();
+
+  private planTool(name: string, max: number) {
+    return tool<{ reason: string; steps: unknown[] }>('commit_plan', this.t('rt.group.commitPlan'), planSchema(this.t, this.cfg.decisions.textMaxChars, true, max), (args) => {
+      if (!Array.isArray(args?.steps) || !args.steps.length) return { content: this.t('rt.act.noSteps'), isError: true };
+      this.captured.set(name, JSON.stringify({ summary: String(args.reason ?? ''), steps: args.steps }));
+      return this.t('rt.group.planCaptured');
+    });
+  }
+
+  private capturedPlan(name: string): Record<string, unknown> | undefined {
+    const raw = this.captured.get(name);
+    return raw ? parseJsonObject(raw) : undefined;
+  }
+
   /** One member acting in one capacity: its own model, identity and (when offline) a scripted mock. */
   private member(
     m: RtEntity, g: Group, role: TraceRole, opts: { json?: boolean; extra?: string; description?: string; mock: (req: ModelRequest, i: number) => MockTurn; turns?: number },
   ): EasyAgent {
     const counts = this.counts([m]);
     const tc = this.cfg.decisions.tiers[decisionTier(m, this.cfg)];
+    const name = `${m.id}${SEP}${role}`;
+    // A judge answers with a verdict only: no faculties, so its last word is the verdict.
+    const tools = role === 'critic' ? [] : [...(opts.json ? [this.planTool(name, counts.max)] : []), ...faculties(this.host, m, tc.maxConsults)];
     return agent({
-      name: `${m.id}${SEP}${role}`,
+      name,
       description: opts.description,
       model: modelRef(this.host, m.model, this.mockWithConsult(g, m, opts.json === true, opts.mock), this.cfg.mock.thinkDelayMs),
       params: { maxTokens: opts.json ? counts.maxTokens : this.cfg.groups.proseMaxOutputTokens },
       instructions: [this.instructionsOf(m, g), opts.extra].filter(Boolean).join('\n'),
-      tools: faculties(this.host, m, tc.maxConsults),
-      budget: { maxTurns: (opts.turns ?? this.cfg.groups.maxTurns) + tc.maxConsults },
+      tools,
+      budget: { maxTurns: (opts.turns ?? this.cfg.groups.maxTurns) + tc.maxConsults + (opts.json ? 1 : 0) },
     });
   }
 
@@ -249,7 +272,7 @@ export class GroupManager {
 
   private mockPlanText(members: RtEntity[]): string {
     const c = this.counts(members);
-    const p = mockGroupPlan(this.t, this.host.world(), members, { min: c.min, max: c.max }, this.cfg.mock.wanderRadius);
+    const p = mockGroupPlan(this.t, this.host.world(), members, { min: c.min, max: c.max }, this.cfg.mock.wanderRadius, this.cfg.mock.experimentChance);
     return JSON.stringify({ summary: p.summary, steps: flatSteps(p.steps).map((s) => ({ who: (s as { who?: string }).who, ...s })) });
   }
 
@@ -288,7 +311,7 @@ export class GroupManager {
           mock: (_r, i) => ({ text: JSON.stringify(i === 0 && opts.maxRounds > 1 ? { pass: false, feedback: t('rt.mock.judgeFix') } : { pass: true, feedback: t('rt.mock.judgeOk') }) }),
         });
         const proposals = team(`${g.id}-proposals`, 'parallel', { workers: proposers, aggregator: merge }, { template: tpl('aggregate') });
-        return { runner: team(`${g.id}-council`, 'evaluator', { generator: proposals, evaluator: judge }, { ...opts, template: tpl('evaluate'), reviseTemplate: tpl('revise') }) };
+        return { runner: team(`${g.id}-council`, this.councilPattern(merge.name, opts.maxRounds), { generator: proposals, evaluator: judge }) };
       }
       case 'router': {
         const routes = members.map((m) => this.member(m, g, 'proposer', {
@@ -332,7 +355,7 @@ export class GroupManager {
         const judge = this.member(mentor, g, 'critic', {
           mock: (_r, i) => ({ text: JSON.stringify(i === 0 && opts.maxRounds > 1 ? { pass: false, feedback: t('rt.mock.judgeFix') } : { pass: true, feedback: t('rt.mock.judgeOk') }) }),
         });
-        return { runner: team(`${g.id}-mentor`, 'evaluator', { generator: gen, evaluator: judge }, { ...opts, template: tpl('evaluate'), reviseTemplate: tpl('revise') }) };
+        return { runner: team(`${g.id}-mentor`, this.councilPattern(gen.name, opts.maxRounds), { generator: gen, evaluator: judge }) };
       }
       case 'assembly': {
         const proposers = members.map((m) => this.member(m, g, 'proposer', { json: true, mock: () => ({ text: planText() }) }));
@@ -354,6 +377,32 @@ export class GroupManager {
     }
   }
 
+  /**
+   * Generator + judge rounds like reinloop's `evaluator`, but the verdict is read tolerantly
+   * (JSON anywhere in the text; unreadable = approved) instead of failing the whole council.
+   */
+  private councilPattern(mergeName: string, maxRounds: number) {
+    const t = this.t;
+    const fill = (tplText: string, vars: Record<string, string>) => tplText.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => vars[k] ?? '');
+    return definePattern({
+      description: 'Members propose, the elder harmonizes; the elder judges and the council revises until approved.',
+      roles: { generator: { description: 'Proposals and their harmonization' }, evaluator: { description: 'The elder judging', kind: 'agent' } },
+      build: ({ generator, evaluator }) => async (input, ctx) => {
+        let cand = await ctx.call(generator as EasyAgent, input);
+        for (let round = 1; ; round++) {
+          if (cand.status !== 'completed') return { output: '', status: 'failed', reason: `proposals: ${cand.status}${cand.reason ? ` (${cand.reason})` : ''}` };
+          const plan = parseJsonObject(cand.output) ?? this.capturedPlan(mergeName);
+          const output = plan ? JSON.stringify(plan) : cand.output;
+          if (round >= maxRounds) return { output, data: { rounds: round } };
+          const v = await ctx.call(evaluator as EasyAgent, fill(t('rt.group.tpl.evaluate'), { task: ctx.task, candidate: output }));
+          const verdict = v.status === 'completed' ? parseJsonObject(v.output) : undefined;
+          if (!verdict || verdict.pass !== false) return { output, data: { rounds: round, passed: true } };
+          cand = await ctx.call(generator as EasyAgent, fill(t('rt.group.tpl.revise'), { task: ctx.task, candidate: output, feedback: String(verdict.feedback ?? '') }));
+        }
+      },
+    });
+  }
+
   /** Custom reinloop pattern: everyone proposes a joint plan, everyone votes, majority wins. */
   private assemblyPattern(g: Group, members: RtEntity[]) {
     const t = this.t;
@@ -362,7 +411,9 @@ export class GroupManager {
       roles: { proposers: { description: 'Members proposing', many: true }, voters: { description: 'Members voting', many: true } },
       build: ({ proposers, voters }) => async (input, ctx) => {
         const results = await Promise.all((proposers as EasyAgent[]).map((p) => ctx.call(p, input)));
-        const plans = results.map((r, i) => ({ i, r, plan: r.status === 'completed' ? parseJsonObject(r.output) : undefined })).filter((p) => p.plan);
+        const plans = results
+          .map((r, i) => ({ i, r, plan: (r.status === 'completed' ? parseJsonObject(r.output) : undefined) ?? this.capturedPlan((proposers as EasyAgent[])[i]!.name) }))
+          .filter((p) => p.plan);
         if (!plans.length) return { output: '', status: 'failed', reason: 'no valid proposal' };
         const list = plans.map((p, k) => t('rt.group.proposalLine', { n: k + 1, name: members[p.i]?.name ?? '?', summary: String(p.plan!.summary ?? '') })).join('\n');
         const ballots = await Promise.all((voters as EasyAgent[]).map((v, k) => ctx.call(v, t('rt.group.vote', { group: g.name, proposals: list, name: members[k]?.name ?? '', id: members[k]?.id ?? '' }))));
@@ -373,7 +424,7 @@ export class GroupManager {
         });
         const result = tally(votes, plans.length, [0]);
         const win = plans[result.winner]!;
-        return { output: win.r.output, data: { votes: result.counts, winner: result.winner + 1, majority: result.majority } };
+        return { output: JSON.stringify(win.plan), data: { votes: result.counts, winner: result.winner + 1, majority: result.majority } };
       },
     });
   }
@@ -384,6 +435,7 @@ export class GroupManager {
     if (!members.length) return undefined;
     const trace: TraceEntry[] = [];
     const names = new Map<string, string>();
+    const failures: string[] = [];
     const max = this.cfg.groups.traceMaxChars;
     const sink: Sink = {
       name: 'group-trace',
@@ -391,22 +443,31 @@ export class GroupManager {
         if (ev.type === 'run_start') names.set(ev.runId, (ev.data as { agent: string }).agent);
         if (ev.type !== 'run_end') return;
         const name = names.get(ev.runId) ?? '';
-        const out = String((ev.data as { output?: string }).output ?? '');
+        const end = ev.data as { output?: string; status?: string; reason?: string };
+        // Keep why a member's run failed: the pattern itself only says "all workers failed".
+        if (end.status && end.status !== 'completed' && end.status !== 'stopped') failures.push(`${name || ev.runId}: ${end.status}${end.reason ? ` (${end.reason})` : ''}`);
+        const out = String(end.output ?? '');
         const cut = name.lastIndexOf(SEP);
         if (cut < 0 || !out.trim()) return;
         const member = name.slice(0, cut);
         const role = name.slice(cut + SEP.length) as TraceRole;
-        trace.push({ member: g.pattern === 'crowd' ? g.id : member, role, text: this.traceText(out, members).slice(0, max) });
+        const said = this.traceText(out, members).slice(0, max);
+        trace.push({ member: g.pattern === 'crowd' ? g.id : member, role, text: said });
+        this.host.deliberated(g, g.pattern === 'crowd' ? g.id : member, role, said);
       },
     };
+    for (const k of [...this.captured.keys()]) if (members.some((m) => k.startsWith(`${m.id}${SEP}`))) this.captured.delete(k);
     const { runner } = this.build(g, members);
     const task = this.situation(g, members, why, g.pattern === 'crowd');
     const res = await runner.run(task, { sinks: [sink], signal: AbortSignal.timeout(this.cfg.decisions.timeoutMs) });
+    const lead = members[0]!;
+    this.host.ranModel({ id: g.id, name: g.name, model: lead.model, tier: `group:${g.pattern}` }, res);
     if (res.status !== 'completed' && res.status !== 'stopped') {
-      console.warn(`[group ${g.name}] ${g.pattern} ${res.status}: ${res.reason ?? ''}`);
+      console.warn(`[group ${g.name}] ${g.pattern} ${res.status}: ${res.reason ?? ''}${failures.length ? ` <- ${failures.slice(0, 4).join('; ')}` : ''}`);
       return undefined;
     }
-    const json = parseJsonObject(res.output) ?? (res.data && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : undefined);
+    const leadName = [...this.captured.keys()].find((k) => members.some((m) => k.startsWith(`${m.id}${SEP}`)));
+    const json = parseJsonObject(res.output) ?? (leadName ? this.capturedPlan(leadName) : undefined) ?? (res.data && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : undefined);
     if (!json) return undefined;
     const c = this.counts(members);
     const byRef = (ref: unknown) => {

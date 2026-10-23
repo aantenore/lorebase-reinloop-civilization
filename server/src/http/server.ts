@@ -6,8 +6,8 @@ import { ROOT, type RosterEntry, type SimConfig } from '../config.ts';
 import type { LorebaseClient } from '../lorebase/client.ts';
 import type { Rule } from '../lorebase/rules.ts';
 import { loadScenarios } from '../lorebase/scenarios.ts';
-import { createRule, writeRules } from '../lorebase/writer.ts';
-import { allowedOrigins, checkMutation, isMutation } from './security.ts';
+import { amendRule, createRule, repealRule, writeRules } from '../lorebase/writer.ts';
+import { allowedOrigins, bearer, checkMutation, isMutation, tokenMatches } from './security.ts';
 
 /** What the HTTP API needs from a world: the tick simulation (v1) or the real-time game (v2). */
 export interface HttpHost {
@@ -27,6 +27,13 @@ export interface HttpHost {
   setSpeed?(tickMs: number): void;
   insightList?(role?: string): Promise<unknown>;
   consciousness?(): Promise<unknown>;
+  economyView?(): unknown;
+  memories?(id: string): Promise<unknown[] | undefined>;
+  observatory?(path: string, q: URLSearchParams): Promise<{ status: number; body: unknown } | undefined>;
+  conversations?(q: URLSearchParams): Promise<unknown[]>;
+  mind?(id: string): Promise<unknown | undefined>;
+  /** Law keys the engine needs: they can be changed but not repealed. */
+  engineKeys?(): readonly string[];
 }
 
 const CATEGORIES = ['survival', 'economy', 'climate', 'society', 'time'];
@@ -105,6 +112,36 @@ export function createHttpServer(sim: HttpHost): Server {
         const refused = checkMutation(req, guard);
         if (refused) return send(res, refused.status, { ok: false, error: refused.error });
       }
+      // God mode reads (minds, memories, conversations, observatory) need the token too when one is set.
+      if (method === 'GET' && guard.apiToken && /^\/api\/(conversations|observatory\/|agents\/[^/]+\/(mind|memories))/.test(path) && !tokenMatches(bearer(req), guard.apiToken)) {
+        return send(res, 401, { ok: false, error: 'missing or invalid token' });
+      }
+      if (method === 'GET' && path === '/api/conversations') return sim.conversations ? send(res, 200, await sim.conversations(url.searchParams)) : unsupported();
+      const mind = method === 'GET' ? /^\/api\/agents\/([^/]+)\/mind$/.exec(path) : null;
+      if (mind) {
+        if (!sim.mind) return unsupported();
+        const out = await sim.mind(decodeURIComponent(mind[1]!));
+        return out ? send(res, 200, out) : send(res, 404, { ok: false, error: 'no such agent' });
+      }
+      const ruleKey = /^\/api\/rules\/([a-z][a-z0-9_]*)$/.exec(path);
+      if (ruleKey && (method === 'DELETE' || method === 'PATCH')) {
+        const key = ruleKey[1]!;
+        const rule = sim.rules().find((r) => r.key === key);
+        if (!rule) return send(res, 404, { ok: false, error: `unknown rule "${key}"` });
+        if (method === 'DELETE') {
+          if (sim.engineKeys?.().includes(key)) return send(res, 409, { ok: false, error: `"${key}" is a law the world's physics needs: change its value instead` });
+          const mode = url.searchParams.get('mode') === 'proposal' ? 'proposal' : 'direct';
+          const out = await repealRule(sim.client, writerCfg, key, mode, url.searchParams.get('message')?.slice(0, 200) || `Repeal ${key}`);
+          return send(res, out.ok ? 200 : 502, out);
+        }
+        const body = (await readBody(req)) as { text?: string; category?: string; unit?: string; mode?: string; message?: string };
+        const category = body.category ?? rule.category;
+        if (!CATEGORIES.includes(String(category))) return send(res, 400, { ok: false, error: `category must be one of ${CATEGORIES.join(', ')}` });
+        const text = typeof body.text === 'string' && body.text.trim() ? body.text.trim().slice(0, 1000) : rule.text;
+        const unit = typeof body.unit === 'string' ? body.unit.slice(0, 40) : rule.unit || undefined;
+        const out = await amendRule(sim.client, writerCfg, { key, text, category: String(category), unit }, body.mode === 'proposal' ? 'proposal' : 'direct', body.message?.trim() || `Amend ${key}`);
+        return send(res, out.ok ? 200 : 502, out);
+      }
       const unsupported = () => send(res, 404, { ok: false, error: 'not supported in this mode' });
       if (method === 'GET' && path === '/api/stream') return stream(req, res);
       if (method === 'GET' && path === '/api/status') return send(res, 200, sim.status());
@@ -143,6 +180,17 @@ export function createHttpServer(sim: HttpHost): Server {
       }
       if (method === 'GET' && path === '/api/rules') return send(res, 200, { revision: sim.status().lorebase.revision, rules: sim.rules() });
       if (method === 'GET' && path === '/api/insights') return sim.insightList ? send(res, 200, await sim.insightList(url.searchParams.get('role') ?? undefined)) : unsupported();
+      if (method === 'GET' && path.startsWith('/api/observatory/')) {
+        const out = sim.observatory ? await sim.observatory(path, url.searchParams) : undefined;
+        return out ? send(res, out.status, out.body) : unsupported();
+      }
+      if (method === 'GET' && path === '/api/economy') return sim.economyView ? send(res, 200, sim.economyView()) : unsupported();
+      const mem = method === 'GET' ? /^\/api\/agents\/([^/]+)\/memories$/.exec(path) : null;
+      if (mem) {
+        if (!sim.memories) return unsupported();
+        const list = await sim.memories(decodeURIComponent(mem[1]!));
+        return list ? send(res, 200, list) : send(res, 404, { ok: false, error: 'no such agent' });
+      }
       if (method === 'GET' && path === '/api/consciousness') return sim.consciousness ? send(res, 200, await sim.consciousness()) : unsupported();
       if (method === 'POST' && path === '/api/rules') {
         const body = (await readBody(req)) as { key?: string; value?: unknown; mode?: string; message?: string; text?: string; category?: string; unit?: string };
