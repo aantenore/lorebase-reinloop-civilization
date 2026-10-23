@@ -19,7 +19,7 @@ export function mountDialog(): void {
   const render = () => {
     if (!target) return;
     const e = store.entities.get(target);
-    title.replaceChildren(e ? tierBadge(e.tier) : '', h('span', { class: 'px-title' }, t('dialog.with', { name: store.name(target) })));
+    title.replaceChildren(e ? tierBadge(e.effectiveTier ?? e.tier) : '', h('span', { class: 'px-title' }, t('dialog.with', { name: store.name(target) })));
     const you = store.youId;
     const lines = (store.logs.get(target) ?? []).filter((l) => l.kind === 'speech' && (l.from === you || l.to === you)).slice(-12);
     log.replaceChildren(

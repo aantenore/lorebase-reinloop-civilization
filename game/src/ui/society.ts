@@ -169,7 +169,7 @@ function rankingTable(sort: { col: SortCol; dir: 1 | -1 }, onSort: (c: SortCol) 
       h('span', { class: 'soc-rank' }, p.rank > 0 ? `#${p.rank}` : '–'),
       h('span', { class: 'soc-name' }, p.name),
       h('span', {}, roleLabel(p.role)),
-      h('span', {}, tierBadge(p.tier)),
+      h('span', {}, tierBadge(p.effectiveTier ?? p.tier)),
       h('span', { class: 'soc-fam' }, p.family ? h('i', { class: 'fam-sw', style: `background:${familyColor(p.family, fam?.color)}` }) : null, fam?.name ?? (p.family ? p.family : t('soc.noFamily'))),
       h('span', {}, esteemBar(p.esteem)),
       h('span', { class: 'soc-num' }, String(Math.round(p.fame))),

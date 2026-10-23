@@ -93,7 +93,7 @@ export function mountInspector(): void {
           'div',
           {},
           h('div', { class: 'name' }, isYou ? `${e.name} (${t('insp.you')})` : e.name),
-          h('div', { class: 'sub' }, tierBadge(e.tier), roleLabel(e.role), ' · ', t(`kind.${e.kind}` as I18nKey)),
+          h('div', { class: 'sub' }, tierBadge(e.effectiveTier ?? e.tier), roleLabel(e.role), ' · ', t(`kind.${e.kind}` as I18nKey)),
           h('div', { class: 'sub muted' }, `${t('insp.model')}: ${e.model || t('insp.none')}`),
           h('div', { class: 'sub' }, e.alive ? t(`anim.${e.anim}` as I18nKey) : t('insp.dead'), ' ', e.thinking ? h('span', { class: 'thinking-tag' }, t('insp.thinking')) : null),
         ),

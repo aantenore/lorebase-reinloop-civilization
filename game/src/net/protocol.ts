@@ -76,6 +76,8 @@ export interface Entity {
   name: string;
   role: string;
   tier: Tier;
+  /** Tier of the model actually in use (differs from `tier` under a model override); display only. */
+  effectiveTier?: Tier;
   model: string;
   kind: EntityKind;
   groupId: string | null;
@@ -162,6 +164,8 @@ export interface Person {
   name: string;
   role: string;
   tier: Tier;
+  /** See Entity.effectiveTier. */
+  effectiveTier?: Tier;
   age: Age;
   esteem: number;
   fame: number;

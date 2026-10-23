@@ -274,7 +274,7 @@ export class Store {
     if (p) return p;
     const e = this.entities.get(id);
     if (!e || !e.age) return undefined;
-    return { id: e.id, name: e.name, role: e.role, tier: e.tier, age: e.age, esteem: e.esteem ?? 0, fame: e.fame ?? 0, rank: e.rank ?? 0, family: e.family ?? null, parents: e.parents ?? null, alive: e.alive };
+    return { id: e.id, name: e.name, role: e.role, tier: e.tier, effectiveTier: e.effectiveTier, age: e.age, esteem: e.esteem ?? 0, fame: e.fame ?? 0, rank: e.rank ?? 0, family: e.family ?? null, parents: e.parents ?? null, alive: e.alive };
   }
 
   /** Name of a person even after death. */
@@ -291,6 +291,7 @@ export class Store {
       name: e.name,
       role: e.role,
       tier: e.tier,
+      effectiveTier: e.effectiveTier ?? prev?.effectiveTier,
       age: e.age,
       esteem: e.esteem ?? prev?.esteem ?? 0,
       fame: e.fame ?? prev?.fame ?? 0,

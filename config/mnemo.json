@@ -4,6 +4,9 @@
     "port": 4410,
     "maxBodyBytes": 65536
   },
+  "lifecycle": {
+    "parentCheckMs": 2000
+  },
   "db": {
     "path": "data/mnemo.db",
     "maxBytes": 200000000,

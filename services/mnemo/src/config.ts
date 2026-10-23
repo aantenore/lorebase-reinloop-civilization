@@ -48,6 +48,8 @@ export interface RecallWeights {
 
 export interface MnemoConfig {
   http: { host: string; port: number; maxBodyBytes: number };
+  /** With MNEMO_PARENT_PID set: how often to check the launcher is still alive. */
+  lifecycle: { parentCheckMs: number };
   db: { path: string; maxBytes: number; capBatch: number };
   embedder: {
     provider: EmbedderProvider;

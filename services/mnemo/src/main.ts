@@ -222,6 +222,26 @@ async function main(): Promise<void> {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // Started by a launcher that passes its pid: stop when that process is gone (e.g. killed hard),
+  // so the port is not left held by an orphan.
+  const parentPid = Number(process.env.MNEMO_PARENT_PID);
+  if (Number.isInteger(parentPid) && parentPid > 0) {
+    setInterval(() => {
+      let alive = process.ppid === parentPid;
+      if (alive) return;
+      try {
+        process.kill(parentPid, 0);
+        alive = true;
+      } catch (err) {
+        alive = (err as NodeJS.ErrnoException).code === 'EPERM';
+      }
+      if (!alive) {
+        console.log('mnemo: parent process is gone, shutting down');
+        shutdown();
+      }
+    }, cfg.lifecycle.parentCheckMs).unref();
+  }
 }
 
 main().catch((err) => {

@@ -65,7 +65,7 @@ function details(g: Group): HTMLElement {
       return h(
         'div',
         { class: 'group-row', onclick: () => store.select(id) },
-        e ? tierBadge(e.tier) : null,
+        e ? tierBadge(e.effectiveTier ?? e.tier) : null,
         h('span', {}, store.name(id)),
         g.leader === id ? h('span', { class: 'pattern' }, t('insp.leader')) : null,
         e?.thinking ? h('span', { class: 'thinking-tag' }, t('insp.thinking')) : null,

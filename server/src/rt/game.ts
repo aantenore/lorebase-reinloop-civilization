@@ -559,7 +559,7 @@ export class Game {
     const e = this.world.entities.get(id);
     const stage = e?.stage ?? (days < this.world.r('age_child_days') ? 'child' : days >= this.world.r('age_elder_days') ? 'elder' : 'adult');
     return {
-      id: p.id, name: p.name, role: p.role, tier: p.tier, age: { stage, days: Math.round(days * 10) / 10 }, esteem: this.society.esteemOf(p.id),
+      id: p.id, name: p.name, role: p.role, tier: p.tier, effectiveTier: this.effectiveTier(p.tier, e?.model ?? this.modelFor({ tier: p.tier })), age: { stage, days: Math.round(days * 10) / 10 }, esteem: this.society.esteemOf(p.id),
       fame: this.society.fameOf(p.id, clock), rank: this.society.ranks.get(p.id) ?? 0, family: p.family, parents: p.parents, alive: p.alive,
     };
   }
@@ -770,6 +770,12 @@ export class Game {
 
   modelFor(entry: Pick<RosterEntry, 'tier' | 'model'>): string {
     return this.cfg.modelOverride ?? entry.model ?? this.cfg.models[entry.tier];
+  }
+
+  /** Display only: the tier whose configured model is the one actually used (roster tier when none matches). */
+  effectiveTier(tier: RtEntity['tier'], model: string): RtEntity['tier'] {
+    const models = this.cfg.models as Record<string, string>;
+    return tier === 'human' ? tier : ((Object.keys(models).find((t) => models[t] === model) as RtEntity['tier'] | undefined) ?? tier);
   }
 
   private spawnAgent(entry: RosterEntry): RtEntity {
@@ -1430,7 +1436,7 @@ export class Game {
 
   entityDto(e: RtEntity) {
     return {
-      id: e.id, name: e.name, role: e.role, tier: e.tier, model: e.model, kind: e.kind, groupId: e.groupId,
+      id: e.id, name: e.name, role: e.role, tier: e.tier, effectiveTier: this.effectiveTier(e.tier, e.model), model: e.model, kind: e.kind, groupId: e.groupId,
       x: r2(e.x), y: r2(e.y), dir: e.dir, anim: e.anim, hp: r1(e.hp), maxHp: e.maxHp, hunger: r1(e.hunger),
       inventory: { ...e.inventory }, tools: e.tools.map((x) => ({ ...x })), speed: e.alive ? this.world.speedOf(e) : 0, alive: e.alive,
       age: { stage: e.stage, days: Math.round(this.world.ageDays(e) * 10) / 10 }, esteem: this.society.esteemOf(e.id), fame: this.society.fameOf(e.id, this.world.clock),
@@ -1562,7 +1568,7 @@ export class Game {
     const mems = await this.mnemo.list(memoryKey(e.name)).catch(() => []);
     const avg = mems.length ? mems.reduce((s, m) => s + m.fidelity, 0) / mems.length : 0;
     return {
-      id: e.id, name: e.name, role: e.role, tier: e.tier, model: e.model, alive: e.alive,
+      id: e.id, name: e.name, role: e.role, tier: e.tier, effectiveTier: this.effectiveTier(e.tier, e.model), model: e.model, alive: e.alive,
       plan: e.plan ? { steps: e.plan.steps, current: e.plan.current, reason: e.plan.reason, createdAt: e.plan.createdAt } : null,
       recentThoughts: this.thoughts.get(e.id) ?? [],
       shortTermMemory: [...e.memory],

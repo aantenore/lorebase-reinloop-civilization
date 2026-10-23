@@ -41,7 +41,7 @@ export function mountGodMinds(): GodTab {
         h(
           'div',
           { class: `god-agent${e.id === agentId ? ' on' : ''}${e.alive ? '' : ' dead'}`, onclick: () => pick(e.id) },
-          h('div', {}, tierBadge(e.tier), h('b', {}, e.name)),
+          h('div', {}, tierBadge(e.effectiveTier ?? e.tier), h('b', {}, e.name)),
           h('div', { class: 'muted' }, `${roleLabel(e.role)} · ${status(e)}`),
         ),
       ),
@@ -63,7 +63,7 @@ export function mountGodMinds(): GodTab {
         'div',
         { class: 'god-row' },
         h('div', { class: 'name' }, e.name),
-        tierBadge(e.tier),
+        tierBadge(e.effectiveTier ?? e.tier),
         h('span', { class: 'sub' }, `${roleLabel(e.role)} · ${status(e)}`),
         e.thinking ? h('span', { class: 'thinking-tag' }, t('insp.thinking')) : null,
         h('button', { class: 'btn', onclick: () => focusEntity(e.id) }, t('god.focus')),
