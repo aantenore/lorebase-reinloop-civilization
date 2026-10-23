@@ -518,9 +518,9 @@ function zzz(): Pix {
   return p;
 }
 
-/** Group banner on a pole, cloth in the group colour. Generated per colour on demand. */
-export function ensureBanner(scene: Phaser.Scene, color: string): string {
-  const key = `banner_${color}`;
+/** Group banner on a pole, cloth in the group colour, optional family stripe. Generated per colour on demand. */
+export function ensureBanner(scene: Phaser.Scene, color: string, stripe?: string): string {
+  const key = `banner_${color}${stripe ? `_${stripe}` : ''}`;
   if (scene.textures.exists(key)) return key;
   const p = new Pix(12, 22);
   p.rect(1, 1, 1, 20, P.log[1]);
@@ -532,6 +532,20 @@ export function ensureBanner(scene: Phaser.Scene, color: string): string {
   p.set(5, 5, P.white);
   p.set(6, 5, P.white);
   p.set(5, 6, P.white);
+  if (stripe) for (let x = 2; x < 11; x++) for (const y of [8, 9]) if (p.get(x, y)) p.set(x, y, y === 8 ? lighten(stripe, 0.1) : stripe);
+  p.outline(P.outline);
+  addStrip(scene, key, [p]);
+  return key;
+}
+
+/** Small laurel pip for the most esteemed (white: tinted gold/silver/bronze by rank). */
+export function ensureLaurel(scene: Phaser.Scene): string {
+  const key = 'laurel';
+  if (scene.textures.exists(key)) return key;
+  const p = new Pix(11, 8);
+  const rows = ['x.......x', 'xx.....xx', '.xx...xx.', '..xx.xx..', '...xxx...'];
+  rows.forEach((row, y) => [...row].forEach((ch, x) => ch === 'x' && p.set(x + 1, y + 1, x % 2 ? '#ffffff' : '#d8d8d8')));
+  p.set(5, 6, '#ffffff');
   p.outline(P.outline);
   addStrip(scene, key, [p]);
   return key;

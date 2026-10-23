@@ -29,6 +29,14 @@ import type {
   Tile,
   WorldEventMsg,
   WorldTime,
+  AgedMsg,
+  Family,
+  LawProposalMsg,
+  OfferMsg,
+  OpinionMsg,
+  Person,
+  Society,
+  SkillMsg,
 } from '../net/protocol';
 import type { ConnStatus } from '../net/transport';
 
@@ -83,6 +91,11 @@ export interface EconomyState {
   known: boolean;
 }
 
+export type LawProposal = Omit<LawProposalMsg, 'type'>;
+export type Offer = Omit<OfferMsg, 'type'> & { at: number };
+export interface OpinionState { from: string; to: string; score: number; reason?: string }
+export interface EsteemChange { id: string; prev: number; esteem: number }
+
 /** Events the store emits after applying a message. */
 export interface StoreEvents {
   hello: HelloMsg;
@@ -114,6 +127,15 @@ export interface StoreEvents {
   memory: MemoryMsg;
   memories: { agentId: string };
   deliberation: DeliberationMsg;
+  /** Any change to people, families or opinions (panel refresh). */
+  society: void;
+  reputation: { changes: EsteemChange[] };
+  opinion: OpinionMsg;
+  aged: AgedMsg;
+  skill: SkillMsg;
+  family: Family;
+  law_proposal: LawProposal;
+  offer: Offer;
   any: void;
 }
 
@@ -147,6 +169,14 @@ export class Store {
   consults = new Map<string, ConsultEntry[]>();
   /** Private memories per agent: filled by REST on demand and kept current by `memory` events. */
   memories = new Map<string, Map<string, Memory>>();
+  /** Society: everyone who ever lived, families, opinions (god only), skills, barter offers, agents' law proposals. */
+  people = new Map<string, Person>();
+  families = new Map<string, Family>();
+  opinions = new Map<string, OpinionState>();
+  skills = new Map<string, Map<string, number>>();
+  offers = new Map<string, Offer>();
+  lawProposals = new Map<string, LawProposal>();
+  societyKnown = false;
   private stateInterval = 100;
   private lastStateAt = 0;
   private chronId = 0;
@@ -225,6 +255,52 @@ export class Store {
     for (const i of list) this.insights.set(i.code, { ...this.insights.get(i.code), ...i });
   }
 
+  /** Merge a society snapshot (hello or REST); opinions are replaced only when present. */
+  setSociety(soc: Society): void {
+    this.societyKnown = true;
+    for (const p of soc.people ?? []) {
+      this.people.set(p.id, { ...this.people.get(p.id), ...p });
+      const e = this.entities.get(p.id);
+      if (e) Object.assign(e, { age: p.age, esteem: p.esteem, fame: p.fame, rank: p.rank, family: p.family, parents: p.parents });
+    }
+    for (const f of soc.families ?? []) this.families.set(f.id, f);
+    if (soc.opinions) this.opinions = new Map(soc.opinions.map((o) => [`${o.from}>${o.to}`, { ...this.opinions.get(`${o.from}>${o.to}`), ...o }]));
+    this.emit('society', undefined);
+  }
+
+  /** Person record of an id (society first, else derived from the live entity). */
+  person(id: string): Person | undefined {
+    const p = this.people.get(id);
+    if (p) return p;
+    const e = this.entities.get(id);
+    if (!e || !e.age) return undefined;
+    return { id: e.id, name: e.name, role: e.role, tier: e.tier, age: e.age, esteem: e.esteem ?? 0, fame: e.fame ?? 0, rank: e.rank ?? 0, family: e.family ?? null, parents: e.parents ?? null, alive: e.alive };
+  }
+
+  /** Name of a person even after death. */
+  personName(id: string): string {
+    return this.entities.get(id)?.name ?? this.people.get(id)?.name ?? id;
+  }
+
+  /** Keep the person record in step with entity-borne society fields. */
+  private syncPerson(e: Entity): void {
+    if (!e.age) return;
+    const prev = this.people.get(e.id);
+    this.people.set(e.id, {
+      id: e.id,
+      name: e.name,
+      role: e.role,
+      tier: e.tier,
+      age: e.age,
+      esteem: e.esteem ?? prev?.esteem ?? 0,
+      fame: e.fame ?? prev?.fame ?? 0,
+      rank: e.rank ?? prev?.rank ?? 0,
+      family: e.family ?? prev?.family ?? null,
+      parents: e.parents ?? prev?.parents ?? null,
+      alive: e.alive,
+    });
+  }
+
   setMemories(agentId: string, list: Memory[]): void {
     this.memories.set(agentId, new Map(list.map((m) => [m.id, m])));
     this.emit('memories', { agentId });
@@ -263,6 +339,7 @@ export class Store {
   private addEntity(raw: Entity): EntityState {
     const e: EntityState = { ...raw, snaps: [{ t: performance.now(), x: raw.x, y: raw.y }], thinking: false };
     this.entities.set(e.id, e);
+    this.syncPerson(e);
     return e;
   }
 
@@ -297,6 +374,7 @@ export class Store {
         if (msg.roles?.length) this.roles = msg.roles;
         this.lorebase = msg.lorebase;
         if (msg.economy) this.setEconomy(msg.economy);
+        if (msg.society) this.setSociety(msg.society);
         this.emit('hello', msg);
         break;
       }
@@ -315,6 +393,8 @@ export class Store {
       case 'entity_removed': {
         const e = this.entities.get(msg.id);
         this.entities.delete(msg.id);
+        const person = this.people.get(msg.id);
+        if (person && /death|died|morto|starv|cold/i.test(msg.reason)) person.alive = false;
         if (this.selectedId === msg.id) this.select(null);
         this.emit('entity_removed', { id: msg.id, reason: msg.reason, entity: e });
         break;
@@ -380,14 +460,65 @@ export class Store {
         this.plans.delete(msg.id);
         this.emit('group_removed', { id: msg.id });
         break;
-      case 'tile': {
-        const t = this.tileAt(msg.x, msg.y);
-        if (t) {
-          t.food = msg.food;
-          t.wood = msg.wood;
-          t.shelter = msg.shelter;
-          this.emit('tile', t);
+      case 'tile':
+        this.applyTile(msg);
+        break;
+      case 'tiles':
+        for (const it of msg.items ?? []) this.applyTile(it);
+        break;
+      case 'reputation': {
+        const changes: EsteemChange[] = [];
+        for (const r of msg.people) {
+          const p = this.people.get(r.id);
+          const e = this.entities.get(r.id);
+          const prev = p?.esteem ?? e?.esteem ?? r.esteem;
+          if (p) Object.assign(p, { esteem: r.esteem, fame: r.fame, rank: r.rank });
+          if (e) Object.assign(e, { esteem: r.esteem, fame: r.fame, rank: r.rank });
+          changes.push({ id: r.id, prev, esteem: r.esteem });
         }
+        this.emit('reputation', { changes });
+        this.emit('society', undefined);
+        break;
+      }
+      case 'opinion':
+        this.opinions.set(`${msg.from}>${msg.to}`, { from: msg.from, to: msg.to, score: msg.score, reason: msg.reason });
+        this.emit('opinion', msg);
+        this.emit('society', undefined);
+        break;
+      case 'aged': {
+        const p = this.people.get(msg.id);
+        const e = this.entities.get(msg.id);
+        if (p) p.age = { ...p.age, stage: msg.stage };
+        if (e) e.age = { days: e.age?.days ?? 0, stage: msg.stage };
+        this.emit('aged', msg);
+        this.emit('society', undefined);
+        break;
+      }
+      case 'skill': {
+        let m = this.skills.get(msg.id);
+        if (!m) this.skills.set(msg.id, (m = new Map()));
+        m.set(msg.recipe, msg.level);
+        this.emit('skill', msg);
+        break;
+      }
+      case 'family':
+        this.families.set(msg.family.id, msg.family);
+        this.emit('family', msg.family);
+        this.emit('society', undefined);
+        break;
+      case 'law_proposal': {
+        const { type: _t, ...lp } = msg;
+        this.lawProposals.set(lp.id, lp);
+        this.emit('law_proposal', lp);
+        break;
+      }
+      case 'offer': {
+        const { type: _t, ...o } = msg;
+        const offer: Offer = { ...o, at: Date.now() };
+        this.offers.set(o.id, offer);
+        // resolved offers are kept briefly for the inspector, then dropped
+        for (const [id, x] of this.offers) if (x.status !== 'pending' && Date.now() - x.at > config.society.offerKeepMs) this.offers.delete(id);
+        this.emit('offer', offer);
         break;
       }
       case 'time': {
@@ -474,6 +605,15 @@ export class Store {
     }
   }
 
+  private applyTile(m: { x: number; y: number; food: number; wood: number; shelter: Tile['shelter'] }): void {
+    const t = this.tileAt(m.x, m.y);
+    if (!t) return;
+    t.food = m.food;
+    t.wood = m.wood;
+    t.shelter = m.shelter;
+    this.emit('tile', t);
+  }
+
   private lastStreamed = new Map<string, { text: string; at: number }>();
   private recentlyStreamed(from: string, text: string): boolean {
     const s = this.lastStreamed.get(from);
@@ -493,6 +633,10 @@ export class Store {
     e.hp = d.hp;
     e.hunger = d.hunger;
     e.alive = d.alive;
+    if (prevAlive !== d.alive) {
+      const p = this.people.get(e.id);
+      if (p) p.alive = d.alive;
+    }
     if (d.inventory) e.inventory = d.inventory;
     if (d.tools) e.tools = d.tools;
     e.snaps.push({ t: now, x: d.x, y: d.y });

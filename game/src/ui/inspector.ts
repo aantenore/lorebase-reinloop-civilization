@@ -4,7 +4,9 @@ import { drawPortrait } from '../render/portrait';
 import { store, type EntityState, type Plan } from '../state/store';
 import { bus } from './bus';
 import { fmtClock, h, throttle, uiRoot } from './dom';
-import { inventoryChips, toolRows } from './inventory';
+import { bagText, inventoryChips, toolRows } from './inventory';
+import { familyColor } from '../render/palette';
+import { ageLabel, esteemBar, societyNav } from './society';
 import { MemoryView } from './memoryView';
 import { panels } from './panels';
 
@@ -69,9 +71,9 @@ export function mountInspector(): void {
     const id = store.selectedId;
     const e = id ? store.entities.get(id) : undefined;
     if (!e) return;
-    if (portraitFor !== e.id) {
+    if (portraitFor !== `${e.id}:${e.age?.stage}`) {
       drawPortrait(portrait, e);
-      portraitFor = e.id;
+      portraitFor = `${e.id}:${e.age?.stage}`;
     }
     const g = e.groupId ? store.groups.get(e.groupId) : undefined;
     const plan = store.plans.get(e.id);
@@ -104,6 +106,7 @@ export function mountInspector(): void {
       ),
       h('div', { class: 'sub inv-line' }, `${t('insp.inventory')}: `, ...inventoryChips(e)),
       toolRows(e.tools),
+      societySection(e),
       g
         ? h(
             'div',
@@ -171,6 +174,57 @@ export function mountInspector(): void {
     renderConsults();
   });
   store.on('any', schedule);
+}
+
+/** Age, esteem/fame/rank, family and parents, skills, barter offers in progress. */
+function societySection(e: EntityState): HTMLElement | null {
+  const p = store.person(e.id);
+  const skills = [...(store.skills.get(e.id) ?? [])].sort((a, b) => b[1] - a[1]);
+  const offers = [...store.offers.values()].filter((o) => o.from === e.id || o.to === e.id).sort((a, b) => b.at - a.at).slice(0, 4);
+  if (!p && !skills.length && !offers.length) return null;
+  const fam = p?.family ? store.families.get(p.family) : undefined;
+  const personLink = (id: string) => {
+    const alive = store.entities.get(id)?.alive;
+    return h('a', { class: `insp-link${alive ? '' : ' dead'}`, onclick: () => (store.entities.has(id) ? store.select(id) : undefined) }, store.personName(id));
+  };
+  return h(
+    'div',
+    { class: 'insp-soc' },
+    h('div', { class: 'section-title' }, t('insp.society')),
+    p
+      ? h(
+          'div',
+          { class: 'insp-soc-grid' },
+          h('span', { class: 'muted' }, t('insp.age')),
+          h('span', {}, `${ageLabel(p.age?.stage)} · ${t('insp.days', { n: Math.round(p.age?.days ?? 0) })}`),
+          h('span', { class: 'muted' }, t('soc.esteem')),
+          h('span', {}, esteemBar(p.esteem), ` ${Math.round(p.esteem * 100)}%`, p.rank > 0 ? h('b', { class: 'insp-rank' }, ` #${p.rank}`) : null),
+          h('span', { class: 'muted' }, t('soc.col.fame')),
+          h('span', {}, String(Math.round(p.fame))),
+          h('span', { class: 'muted' }, t('soc.col.family')),
+          h(
+            'span',
+            {},
+            p.family
+              ? h('a', { class: 'insp-link', onclick: () => societyNav.openFamily(p.family!) }, h('i', { class: 'fam-sw', style: `background:${familyColor(p.family)}` }), fam?.name ?? p.family)
+              : t('soc.noFamily'),
+          ),
+          p.parents ? h('span', { class: 'muted' }, t('insp.parents')) : null,
+          p.parents ? h('span', {}, personLink(p.parents[0]), ' · ', personLink(p.parents[1])) : null,
+        )
+      : null,
+    skills.length ? h('div', { class: 'insp-skills' }, h('span', { class: 'muted' }, `${t('insp.skills')}: `), ...skills.map(([r, lvl]) => h('span', { class: 'skill-chip' }, `${store.economy.recipes.get(r)?.name ?? store.itemName(r)} `, h('b', {}, `${t('insp.level')} ${lvl}`)))) : null,
+    offers.length ? h('div', { class: 'muted' }, t('insp.offers')) : null,
+    ...offers.map((o) =>
+      h(
+        'div',
+        { class: `insp-offer st-${o.status}` },
+        `🤝 ${store.personName(o.from)} → ${store.personName(o.to)}: `,
+        t('offer.bubble', { give: bagText(o.give), want: bagText(o.want) }),
+        h('span', { class: 'offer-st' }, t(`offer.st.${o.status}` as I18nKey)),
+      ),
+    ),
+  );
 }
 
 function planSection(e: EntityState, plan: Plan | undefined, groupPlan: Plan | undefined): HTMLElement {

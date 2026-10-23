@@ -46,6 +46,17 @@ export const config = {
   lorebaseUi: {
     base: String(env.VITE_LOREBASE_UI_URL || 'http://localhost:5180').replace(/\/$/, ''),
     explorerPath: '/world/explorer',
+    /** Review page where agents' law proposals are approved or rejected. */
+    reviewPath: String(env.VITE_LOREBASE_REVIEW_PATH || '/review'),
+  },
+  society: {
+    /** Esteem change (0-1 scale) that earns a floating "esteem up/down" label. */
+    esteemFloatDelta: 0.05,
+    /** How many top-ranked people get the laurel pip on the map. */
+    laurelTop: 3,
+    /** Pending barter offer bubble lifetime (ms), and how long resolved offers stay in the inspector. */
+    offerBubbleMs: 6000,
+    offerKeepMs: 30000,
   },
   god: {
     /** How long a law edit waits for `rules_changed` before it is reported as failed (ms). */

@@ -1,14 +1,15 @@
 import Phaser from 'phaser';
 import { config } from '../config';
-import { t } from '../i18n';
+import { t, type I18nKey } from '../i18n';
 import { Atmosphere, burst } from '../render/effects';
 import { EntityView } from '../render/entityView';
 import { toScreen } from '../render/iso';
 import { WorldView } from '../render/worldView';
-import { store } from '../state/store';
+import { store, type Offer } from '../state/store';
 import { bus } from '../ui/bus';
 import { getPref, setPref } from '../ui/prefs';
 import { itemIcon } from '../ui/itemIcons';
+import { bagText } from '../ui/inventory';
 import { WorldLabels, type Anchor } from '../ui/worldLabels';
 import type { ItemBag, TilePos } from '../net/protocol';
 
@@ -143,6 +144,21 @@ export class WorldScene extends Phaser.Scene {
         burst(this, p.x, p.y - 14, 'build');
       }
     }));
+    u.push(store.on('reputation', ({ changes }) => {
+      for (const c of changes) {
+        const d = c.esteem - c.prev;
+        if (!this.views.has(c.id) || Math.abs(d) < config.society.esteemFloatDelta) continue;
+        this.labels.floater(this.anchorFor(c.id), t(d > 0 ? 'float.esteemUp' : 'float.esteemDown'), d > 0 ? '#9ae07a' : '#ff8a7a', 1900);
+      }
+    }));
+    u.push(store.on('aged', ({ id, stage }) => {
+      const v = this.views.get(id);
+      if (!v) return;
+      this.labels.floater(this.anchorFor(id), t(`float.aged.${stage}` as I18nKey), '#c9d8ff', 2200);
+      burst(this, v.sx, v.sy - 10, 'birth');
+    }));
+    u.push(store.on('family', () => this.views.forEach((v) => v.refreshGroup())));
+    u.push(store.on('offer', (o) => this.showOffer(o)));
     u.push(store.on('rules_changed', ({ revision }) => {
       bus.emit('toast', { text: t('laws.changed', { rev: revision.slice(0, 7) }), big: true });
       this.cameras.main.flash(250, 255, 216, 74, false);
@@ -199,6 +215,28 @@ export class WorldScene extends Phaser.Scene {
     const tile = store.tileAt(at.x, at.y);
     const p = toScreen(at.x, at.y, tile?.elev ?? 1);
     return { pos: () => ({ x: p.sx, y: p.sy }) };
+  }
+
+  /** Barter offer: a bubble while pending, then the outcome (goods change hands when accepted). */
+  private showOffer(o: Offer): void {
+    if (!this.views.has(o.from)) return;
+    const key = `${o.from}#offer`;
+    const a = this.anchorFor(o.from);
+    const to = store.personName(o.to);
+    if (o.status === 'pending') {
+      const text = `🤝 ${t('offer.bubble', { give: bagText(o.give), want: bagText(o.want) })}`;
+      this.labels.bubble(key, a, text, { kind: 'offer', to, ms: config.society.offerBubbleMs });
+      return;
+    }
+    const ok = o.status === 'accepted';
+    this.labels.bubble(key, a, `🤝 ${t(`offer.${o.status}` as I18nKey)}`, { kind: ok ? 'offer-ok' : 'offer-no', to, ms: 2200 });
+    const b = this.anchorFor(o.to);
+    if (ok && b.pos()) {
+      this.labels.traveler(a, b, this.bagNodes(o.give, ''), 1400);
+      setTimeout(() => this.labels.traveler(b, a, this.bagNodes(o.want, ''), 1400), 350);
+      const p = a.pos();
+      if (p) burst(this, p.x, p.y - 8, 'act');
+    } else if (!ok) this.labels.floater(a, '✗', '#ff8a7a', 1200);
   }
 
   /** "+2 [icon] +1 [icon]" nodes for an item bag. */

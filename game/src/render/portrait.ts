@@ -9,7 +9,7 @@ export function setPortraitScene(s: Phaser.Scene): void {
   scene = s;
 }
 
-export function drawPortrait(canvas: HTMLCanvasElement, e: Pick<Entity, 'name' | 'role' | 'kind'>): void {
+export function drawPortrait(canvas: HTMLCanvasElement, e: Pick<Entity, 'name' | 'role' | 'kind' | 'age'>): void {
   if (!scene) return;
   const key = ensureCharacter(scene, e);
   const src = scene.textures.get(key).getSourceImage() as HTMLCanvasElement;

@@ -92,6 +92,16 @@ export interface Entity {
   /** Tiles per second. */
   speed: number;
   alive: boolean;
+  /** Society fields (absent on servers without the society layer). */
+  age?: Age;
+  /** 0-1 standing in the eyes of the others. */
+  esteem?: number;
+  fame?: number;
+  /** 1 = most esteemed. */
+  rank?: number;
+  family?: string | null;
+  /** Ids of the two parents (they may be dead and no longer entities). */
+  parents?: [string, string] | null;
 }
 
 export interface Group {
@@ -135,6 +145,58 @@ export interface PlanStep {
   args: Record<string, unknown>;
   label: string;
 }
+
+// ---------------------------------------------------------------- society
+
+export type AgeStage = 'child' | 'adult' | 'elder';
+
+export interface Age {
+  stage: AgeStage;
+  /** Age in game days. */
+  days: number;
+}
+
+/** Everyone who ever lived, entities or not (`alive: false` for the dead). */
+export interface Person {
+  id: string;
+  name: string;
+  role: string;
+  tier: Tier;
+  age: Age;
+  esteem: number;
+  fame: number;
+  rank: number;
+  family: string | null;
+  parents: [string, string] | null;
+  alive: boolean;
+}
+
+export interface Family {
+  id: string;
+  name: string;
+  /** Person id. */
+  founder: string;
+  members: string[];
+  /** Living members. */
+  alive: number;
+  esteem: number;
+}
+
+/** How much `from` esteems `to` (-1..1). Only sent to authorized (god) clients. */
+export interface Opinion {
+  from: string;
+  to: string;
+  score: number;
+}
+
+export interface Society {
+  people: Person[];
+  families: Family[];
+  opinions?: Opinion[];
+}
+
+export type LawProposalStatus = 'open' | 'merged' | 'rejected';
+export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 
 export interface EntityDelta {
   id: string;
@@ -258,6 +320,8 @@ export interface HelloMsg {
   lorebase: LorebaseStatus;
   /** Absent on servers without the economy. */
   economy?: Economy;
+  /** Absent on servers without the society layer. */
+  society?: Society;
 }
 export interface StateMsg { type: 'state'; t: number; entities: EntityDelta[] }
 export interface EntityAddedMsg { type: 'entity_added'; entity: Entity }
@@ -321,6 +385,37 @@ export interface DeliberationMsg {
   text: string;
 }
 
+export interface ReputationMsg { type: 'reputation'; people: { id: string; esteem: number; fame: number; rank: number }[] }
+/** God/authorized clients only. */
+export interface OpinionMsg { type: 'opinion'; from: string; to: string; score: number; reason: string }
+export interface AgedMsg { type: 'aged'; id: string; stage: AgeStage }
+export interface SkillMsg { type: 'skill'; id: string; recipe: string; level: number }
+export interface FamilyMsg { type: 'family'; family: Family }
+/** A law change proposed by an agent; it is reviewed (merged/rejected) in Lorebase. */
+export interface LawProposalMsg {
+  type: 'law_proposal';
+  id: string;
+  /** Entity id of the proposer. */
+  by: string;
+  text: string;
+  key: string;
+  category: string;
+  value: RuleValue;
+  branch: string;
+  status: LawProposalStatus;
+}
+export interface OfferMsg {
+  type: 'offer';
+  id: string;
+  from: string;
+  to: string;
+  give: Record<string, number>;
+  want: Record<string, number>;
+  status: OfferStatus;
+}
+/** Batched tile updates (`tile` stays valid for single updates). */
+export interface TilesMsg { type: 'tiles'; items: { x: number; y: number; food: number; wood: number; shelter: ShelterLevel }[] }
+
 export type ServerMsg =
   | HelloMsg
   | StateMsg
@@ -346,7 +441,15 @@ export type ServerMsg =
   | DecayMsg
   | FlowsMsg
   | MemoryMsg
-  | DeliberationMsg;
+  | DeliberationMsg
+  | ReputationMsg
+  | OpinionMsg
+  | AgedMsg
+  | SkillMsg
+  | FamilyMsg
+  | LawProposalMsg
+  | OfferMsg
+  | TilesMsg;
 
 // ---------------------------------------------------------------- client -> server
 
@@ -381,6 +484,8 @@ export type Consciousness = Record<string, Insight[]>;
 export interface MemoryList {
   memories: Memory[];
 }
+/** GET /api/society (opinions only for authorized clients). */
+export type SocietyResponse = Society;
 /** GET /api/economy */
 export type EconomyResponse = Economy & { flows?: FlowEdge[] };
 

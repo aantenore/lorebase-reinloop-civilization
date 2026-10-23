@@ -6,6 +6,7 @@ import { mountGodConversations } from './godConversations';
 import { mountGodLaws } from './godLaws';
 import { mountGodMinds } from './godMinds';
 import { mountGodObservatory } from './godObservatory';
+import { mountGodProposals } from './godProposals';
 
 /** One god-mode tab: its body plus visibility hooks (fetch on show, stop timers on hide). */
 export interface GodTab {
@@ -18,6 +19,7 @@ const TABS: { id: string; label: I18nKey; mount: () => GodTab }[] = [
   { id: 'laws', label: 'god.tab.laws', mount: mountGodLaws },
   { id: 'minds', label: 'god.tab.minds', mount: mountGodMinds },
   { id: 'convos', label: 'god.tab.convos', mount: mountGodConversations },
+  { id: 'props', label: 'god.tab.props', mount: mountGodProposals },
   { id: 'obs', label: 'god.tab.obs', mount: mountGodObservatory },
 ];
 

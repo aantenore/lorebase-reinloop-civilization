@@ -93,3 +93,18 @@ export function rng(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** Family colours: stable per family id (the protocol carries no colour). */
+const FAMILY_COLORS = ['#e8b04a', '#5ac0a8', '#d86aa0', '#7a9ae8', '#c8d860', '#e07a5a', '#a07ad8', '#60c0e0'];
+
+export function familyColor(id: string): string {
+  return FAMILY_COLORS[hash(id) % FAMILY_COLORS.length];
+}
+
+/** Opinion score (-1..1) to a red -> grey -> green colour. */
+export function scoreColor(score: number): string {
+  const s = Math.max(-1, Math.min(1, score));
+  const mix = (a: number, b: number, k: number) => Math.round(a + (b - a) * k);
+  const [r, g, b] = s < 0 ? [mix(150, 230, -s), mix(140, 80, -s), mix(150, 60, -s)] : [mix(150, 110, s), mix(140, 210, s), mix(150, 90, s)];
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}

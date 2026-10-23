@@ -12,6 +12,7 @@ const TOOLBAR: { id: string; label: I18nKey; key: string }[] = [
   { id: 'laws', label: 'laws.title', key: 'l' },
   { id: 'consciousness', label: 'hud.consciousness', key: 'c' },
   { id: 'economy', label: 'hud.economy', key: 'e' },
+  { id: 'society', label: 'hud.society', key: 'o' },
   { id: 'groups', label: 'hud.groups', key: 'k' },
   { id: 'chronicle', label: 'hud.chronicle', key: 'j' },
   { id: 'minimap', label: 'hud.minimap', key: 'm' },

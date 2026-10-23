@@ -114,9 +114,9 @@ export function installControls(): void {
       return;
     }
     if (ev.repeat) return;
-    // C and E are actions while playing: panels then answer to Shift+C / Shift+E
-    if ((ev.shiftKey || !store.youId || godOn()) && (ev.code === 'KeyC' || ev.code === 'KeyE')) {
-      const p = panels.byKey(ev.code === 'KeyC' ? 'c' : 'e');
+    // C and E are actions while playing: panels then answer to Shift+C / Shift+E (Shift+O mirrors them)
+    if ((ev.shiftKey || !store.youId || godOn()) && (ev.code === 'KeyC' || ev.code === 'KeyE' || ev.code === 'KeyO')) {
+      const p = panels.byKey(ev.code.slice(3).toLowerCase());
       if (p) return panels.toggle(p.id);
     }
     if (ev.code === 'KeyE' || ev.code === 'Space') {

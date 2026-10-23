@@ -27,7 +27,7 @@ export class WorldLabels {
   private tags = new Map<string, Label>();
   private floaters: Label[] = [];
 
-  bubble(id: string, anchor: Anchor, text: string, opts: { kind?: 'speech' | 'thought' | 'stream' | 'consult'; to?: string; ms?: number; dy?: number } = {}): void {
+  bubble(id: string, anchor: Anchor, text: string, opts: { kind?: 'speech' | 'thought' | 'stream' | 'consult' | 'offer' | 'offer-ok' | 'offer-no'; to?: string; ms?: number; dy?: number } = {}): void {
     let b = this.bubbles.get(id);
     if (!b) {
       b = { el: h('div', { class: 'bubble' }), anchor, dy: -46, until: 0 };

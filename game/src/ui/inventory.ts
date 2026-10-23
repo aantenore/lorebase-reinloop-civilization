@@ -50,3 +50,11 @@ export function bagChips(bag: Record<string, number> | undefined): HTMLElement[]
     .filter(([, n]) => n > 0)
     .map(([code, n]) => h('span', { class: 'chip', title: store.itemName(code) }, itemIcon(code, store.itemName(code)), n > 1 ? h('b', {}, `${n}`) : null));
 }
+
+/** "2 legna, 1 coltello" for a bag of goods. */
+export function bagText(bag: Record<string, number>): string {
+  return Object.entries(bag ?? {})
+    .filter(([, n]) => n > 0)
+    .map(([code, n]) => `${n} ${store.itemName(code).toLowerCase()}`)
+    .join(', ');
+}

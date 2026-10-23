@@ -38,6 +38,7 @@ import { consultFor, Minds } from './mockMinds';
 import { CRAFTS, EconomyState, fmtBag, FIRE, FLOW_WINDOW, PERISHABLE, PRODUCE, RES_NAME, ROUTES, START_INVENTORY, START_TOOLS, TECHS, TOOL_ITEMS } from './mockEconomy';
 import type { TechDef } from './mockEconomy';
 import { BUILD_SITE, generateMap, HUTS, STOCKPILE, VILLAGE } from './mockMap';
+import { SocietySim } from './mockSociety';
 
 const params = new URLSearchParams(location.search);
 /** Simulation speed multiplier (`?mockSpeed=4`). */
@@ -56,6 +57,9 @@ const BAG_CAP = 8;
 /** Real seconds before a proposal is merged, and the minimum gap between two deliberations of a group. */
 const PROPOSAL_MERGE_SEC = 4;
 const DELIBERATION_GAP_SEC = 20;
+/** Real seconds between batched regrowth of a few berry tiles (`tiles`). */
+const REGROW_EVERY = 15;
+const REGROW_MAX_FOOD = 4;
 const RULE_KEY_RE = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/;
 
 type RuleOp =
@@ -111,6 +115,8 @@ export class MockServer implements Transport {
   private flowsAt = FLOWS_EVERY;
   private spoilAt = SPOIL_EVERY[0];
   private god: GodLedger;
+  private society: SocietySim;
+  private regrowAt = REGROW_EVERY;
 
   constructor() {
     this.map = generateMap();
@@ -124,6 +130,8 @@ export class MockServer implements Transport {
       const spot = this.freeNear(VILLAGE.x - 3 + i * 2, VILLAGE.y + 3);
       this.actors.set(`c-${i}`, this.makeActor({ id: `c-${i}`, name, role: 'villager', tier: 'haiku', kind: 'crowd', groupId: 'g-crowd', speed: 1.1, ...spot }, ''));
     });
+    this.society = new SocietySim({ emit: (m) => this.emit(m), r: () => this.r(), actors: () => [...this.actors.values()], speed: SPEED });
+    for (const a of this.actors.values()) this.society.decorate(a);
     this.minds = new Minds(
       {
         emit: (m) => this.emit(m),
@@ -228,7 +236,8 @@ export class MockServer implements Transport {
     let out: unknown;
     const mem = /^\/agents\/([^/]+)\/memories$/.exec(clean);
     const mind = /^\/agents\/([^/]+)\/mind$/.exec(clean);
-    if (clean === '/economy') out = { ...this.econ.economy(), flows: this.econ.flows(this.elapsed) };
+    if (clean === '/society') out = this.society.society();
+    else if (clean === '/economy') out = { ...this.econ.economy(), flows: this.econ.flows(this.elapsed) };
     else if (mem) {
       const memories = this.minds.memories(decodeURIComponent(mem[1]));
       if (!memories) return Promise.reject(new Error('404'));
@@ -358,8 +367,10 @@ export class MockServer implements Transport {
       roles: ['gatherer', 'woodcutter', 'builder', 'healer', 'scout', 'wanderer'],
       lorebase: this.lorebase,
       economy: this.econ.economy(),
+      society: this.society.society(),
     });
     this.emitFlows();
+    this.society.replay();
     // replay current plans so a late joiner sees them
     for (const a of this.actors.values()) if (a.steps.length && a.kind === 'agent') this.sendPlan(a, 'Piano in corso');
     this.groupPlans();
@@ -370,6 +381,7 @@ export class MockServer implements Transport {
     const spot = this.freeNear(VILLAGE.x + 1, VILLAGE.y + 1);
     const p = this.makeActor({ id, name: name || 'Viandante', role: role || 'wanderer', tier: 'human', kind: 'player', groupId: null, speed: 2.4, ...spot }, '');
     this.actors.set(id, p);
+    this.society.decorate(p);
     this.youId = id;
     this.hello();
     this.emit({ type: 'world_event', kind: 'birth', text: `${p.name} è arrivato al villaggio.`, at: spot });
@@ -568,6 +580,11 @@ export class MockServer implements Transport {
       else if (this.elapsed >= a.busyUntil && this.elapsed >= a.thinkingUntil) this.runStep(a, dt);
     }
     this.minds.tick(dt);
+    this.society.tick(dt, this.elapsed);
+    if (this.elapsed >= this.regrowAt) {
+      this.regrowAt = this.elapsed + REGROW_EVERY;
+      this.regrow();
+    }
     for (const t of TECHS) if (t.at !== null && t.at > 0 && this.elapsed >= t.at && !this.econ.isDiscovered(t.code)) this.discover(t);
     if (this.elapsed >= this.spoilAt) {
       this.spoilAt = this.elapsed + SPOIL_EVERY[0] + this.r() * (SPOIL_EVERY[1] - SPOIL_EVERY[0]);
@@ -606,6 +623,18 @@ export class MockServer implements Transport {
         alive: a.alive,
       })),
     });
+  }
+
+  /** A few berry bushes grow back, sent as one batched `tiles` message. */
+  private regrow() {
+    const items = this.tiles
+      .filter((t) => t.food > 0 && t.food < REGROW_MAX_FOOD && this.r() < 0.25)
+      .slice(0, 6)
+      .map((t) => {
+        t.food += 1;
+        return { x: t.x, y: t.y, food: t.food, wood: t.wood, shelter: t.shelter };
+      });
+    if (items.length) this.emit({ type: 'tiles', items });
   }
 
   private advanceTime(dt: number) {
