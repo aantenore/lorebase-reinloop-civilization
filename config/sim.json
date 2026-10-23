@@ -1,0 +1,152 @@
+{
+  "language": "it",
+  "seed": 1337,
+  "tickMs": 4000,
+  "autoStart": false,
+  "http": {
+    "port": 4400,
+    "corsOrigins": [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
+    "staticDir": "web/dist"
+  },
+  "lorebase": {
+    "url": "http://127.0.0.1:8180",
+    "domain": "world",
+    "branch": "main",
+    "ruleKind": "Rule",
+    "roleKind": "Role",
+    "directOperation": "set_rule",
+    "updateOperation": "update_rule",
+    "proposalBranchPrefix": "law/",
+    "pollMs": 5000,
+    "reconnectMs": 3000
+  },
+  "models": {
+    "opus": "anthropic/claude-opus-5-5",
+    "sonnet": "anthropic/claude-sonnet-5-5",
+    "haiku": "anthropic/claude-haiku-5-5"
+  },
+  "agents": {
+    "maxTurns": 3,
+    "maxOutputTokens": 600,
+    "timeoutMs": 60000,
+    "compactionThresholdTokens": 6000,
+    "compactionKeepLast": 8,
+    "lookMaxTiles": 12,
+    "messageMaxChars": 240,
+    "historyLimit": 500,
+    "minRoster": 1,
+    "maxRoster": 16,
+    "memory": true
+  },
+  "roster": [
+    {
+      "name": "Ilse",
+      "role": "elder",
+      "tier": "opus",
+      "personality": "Calma, lungimirante; parla poco ma con chiarezza."
+    },
+    {
+      "name": "Tomas",
+      "role": "builder",
+      "tier": "opus",
+      "personality": "Pratico e testardo; detesta gli sprechi."
+    },
+    {
+      "name": "Mara",
+      "role": "healer",
+      "tier": "sonnet",
+      "personality": "Affettuosa, si preoccupa per i più deboli."
+    },
+    {
+      "name": "Okon",
+      "role": "gatherer",
+      "tier": "sonnet",
+      "personality": "Gran lavoratore, un po' avido."
+    },
+    {
+      "name": "Saba",
+      "role": "explorer",
+      "tier": "sonnet",
+      "personality": "Curiosa e irrequieta."
+    },
+    {
+      "name": "Pell",
+      "role": "gatherer",
+      "tier": "haiku",
+      "personality": "Allegro, vive alla giornata."
+    },
+    {
+      "name": "Rudi",
+      "role": "builder",
+      "tier": "haiku",
+      "personality": "Entusiasta, impaziente."
+    },
+    {
+      "name": "Nia",
+      "role": "explorer",
+      "tier": "haiku",
+      "personality": "Audace, raramente si volta indietro."
+    }
+  ],
+  "world": {
+    "width": 20,
+    "height": 14,
+    "noiseScale": 4,
+    "waterBelow": 0.28,
+    "rockAbove": 0.8,
+    "forestAbove": 0.58,
+    "capacity": {
+      "grass": {
+        "food": 6,
+        "wood": 0
+      },
+      "forest": {
+        "food": 2,
+        "wood": 8
+      },
+      "water": {
+        "food": 0,
+        "wood": 0
+      },
+      "rock": {
+        "food": 0,
+        "wood": 1
+      }
+    },
+    "initialFill": [
+      0.5,
+      1
+    ],
+    "spawnRadius": 2,
+    "maxPopulation": 16,
+    "namePool": [
+      "Ari",
+      "Bex",
+      "Cato",
+      "Dila",
+      "Eno",
+      "Fen",
+      "Gia",
+      "Hob",
+      "Ivo",
+      "Juno",
+      "Kit",
+      "Lio",
+      "Mo",
+      "Nell",
+      "Oz",
+      "Pia",
+      "Quin",
+      "Rhea",
+      "Sol",
+      "Tam"
+    ]
+  },
+  "mock": {
+    "thinkDelayMs": 150,
+    "reserveFoodTicks": 3
+  }
+}

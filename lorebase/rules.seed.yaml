@@ -1,0 +1,105 @@
+# Default laws and social roles of the world, loaded into Lorebase by `npm run lorebase:seed`.
+# This file is the only place where gameplay numbers have defaults; the simulation reads the
+# live values from Lorebase. Texts are what the people of the world read (Italian).
+rules:
+  - code: max_hp
+    value: 10
+    unit: salute
+    category: survival
+    text: "Ogni persona ha al massimo questa salute. Con la salute a zero si muore."
+  - code: food_per_tick
+    value: 1
+    unit: fame/turno
+    category: survival
+    text: "A ogni turno la fame di ogni persona cresce di questa quantità. Mangiare un cibo toglie uno di fame."
+  - code: starvation_threshold
+    value: 4
+    unit: fame
+    category: survival
+    text: "Quando la fame supera questo livello si comincia a morire di fame."
+  - code: starvation_damage
+    value: 2
+    unit: salute/turno
+    category: survival
+    text: "Chi muore di fame perde questa salute a ogni turno."
+  - code: rest_heal
+    value: 1
+    unit: salute
+    category: survival
+    text: "Riposare restituisce questa salute, ma solo a chi non sta morendo di fame."
+  - code: actions_per_tick
+    value: 2
+    unit: azioni
+    category: society
+    text: "A ogni turno una persona può compiere questo numero di azioni (muoversi, raccogliere, costruire, dare, riposare). Guardare, mangiare e parlare non costano azioni."
+  - code: gather_food_yield
+    value: 2
+    unit: cibo
+    category: economy
+    text: "Raccogliere cibo prende fino a questa quantità di cibo dalla casella su cui ci si trova."
+  - code: gather_wood_yield
+    value: 2
+    unit: legna
+    category: economy
+    text: "Raccogliere legna prende fino a questa quantità di legna dalla casella su cui ci si trova."
+  - code: regrowth_per_tick
+    value: 0.08
+    unit: quota/turno
+    category: economy
+    text: "A ogni turno la terra ricresce di questa quota del cibo e della legna che può naturalmente portare."
+  - code: shelter_wood_cost
+    value: 6
+    unit: legna
+    category: economy
+    text: "Costruire un rifugio sulla propria casella costa questa legna. Chiunque stia su una casella con un rifugio è al riparo."
+  - code: winter_every_ticks
+    value: 16
+    unit: turni
+    category: climate
+    text: "Un anno dura questo numero di turni; l'ultima parte di ogni anno è inverno."
+  - code: winter_length_ticks
+    value: 4
+    unit: turni
+    category: climate
+    text: "L'inverno dura questo numero di turni alla fine di ogni anno."
+  - code: winter_food_yield_multiplier
+    value: 0.5
+    unit: x
+    category: climate
+    text: "D'inverno la raccolta e la ricrescita sono moltiplicate per questo fattore."
+  - code: cold_damage_unsheltered
+    value: 1
+    unit: salute/turno
+    category: climate
+    text: "D'inverno chi non sta su un rifugio perde questa salute a ogni turno."
+  - code: birth_food_cost
+    value: 6
+    unit: cibo
+    category: society
+    text: "Due persone sazie sulla stessa casella con rifugio che insieme portano questo cibo mettono al mondo un figlio, consumando quel cibo (al massimo una volta all'anno ciascuna)."
+  - code: sharing_allowed
+    value: 1
+    unit: 0/1
+    category: society
+    text: "Se vale 1, si può dare cibo e legna a chi sta sulla stessa casella o su una adiacente. Se vale 0, dare è vietato."
+  - code: vision_radius
+    value: 3
+    unit: caselle
+    category: society
+    text: "Una persona vede caselle e persone entro questo numero di caselle."
+roles:
+  - code: gatherer
+    title: Raccoglitore
+    description: "Nella società sei chi conosce la terra: dove cresce il cibo e come trovarlo."
+  - code: builder
+    title: Costruttore
+    description: "Nella società sei chi sa costruire: la legna, i rifugi, le cose che durano."
+  - code: explorer
+    title: Esploratore
+    description: "Nella società sei chi si spinge lontano e vede ciò che gli altri non vedono."
+  - code: elder
+    title: Anziano
+    description: "Nella società sei chi ha visto molti inverni; quando parli, gli altri ascoltano."
+  - code: healer
+    title: Guaritore
+    description: "Nella società sei chi si prende cura degli altri e si accorge di chi è debole, affamato o ferito."

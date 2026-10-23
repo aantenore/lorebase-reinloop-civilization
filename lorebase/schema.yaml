@@ -1,0 +1,81 @@
+# Domain `world`: the laws and the social roles of a small simulated civilization. Every
+# gameplay number of the simulation is a Rule Record here; roles are Role Records. The
+# simulation reads both from the `main` branch and follows its change feed.
+format: lorebase.schema/v1
+
+domain:
+  id: world
+  display_name: World laws
+  description: The rules a small colony of agents must live by.
+  default_branch: main
+
+kinds:
+  Rule:
+    description: One law of the world, read by the simulation every tick and shown to the agents.
+    primary_key: [code]
+    title_attribute: code
+    attributes:
+      code:
+        description: Stable rule identifier used by the simulation engine, snake_case.
+        type: string
+        required: true
+        constraints:
+          pattern: '^[a-z][a-z0-9_]*$'
+      value:
+        description: Numeric value of the rule.
+        type: decimal(12,4)
+        required: true
+      text:
+        description: Narrative wording of the rule as the agents read it.
+        type: text
+        required: true
+        searchable: true
+      category:
+        description: Area of life the rule governs.
+        type: {enum: [survival, economy, climate, society]}
+        required: true
+        indexed: true
+      unit:
+        description: Unit of the value, for display.
+        type: string
+
+  Role:
+    description: A role a person can hold in society, with the description the person reads about it.
+    primary_key: [code]
+    title_attribute: title
+    attributes:
+      code:
+        description: Stable role identifier used by the roster, snake_case.
+        type: string
+        required: true
+        constraints:
+          pattern: '^[a-z][a-z0-9_]*$'
+      title:
+        description: Name of the role as people read it.
+        type: string
+        required: true
+      description:
+        description: What holding this role means in society, as people read it.
+        type: text
+        required: true
+
+operations:
+  set_rule:
+    description: Change the value of one law directly on the live branch (no review).
+    parameters:
+      - name: rule
+        type: ref(Rule)
+        required: true
+        description: The rule to change.
+      - name: value
+        type: decimal(12,4)
+        required: true
+        description: The new value.
+    steps:
+      - step: update_record
+        kind: Rule
+        target: params.rule
+        values:
+          value: params.value
+    review_policy:
+      mode: never

@@ -1,0 +1,21 @@
+{
+  "name": "lorebase-reinloop-civilization",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A tiny civilization of LLM agents living by laws kept in a versioned knowledge graph.",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "lorebase:up": "bash scripts/lorebase-up.sh up",
+    "lorebase:down": "bash scripts/lorebase-up.sh down",
+    "lorebase:seed": "node scripts/lorebase-seed.ts",
+    "dev": "node server/src/main.ts",
+    "sim:mock": "node server/src/main.ts --mock",
+    "rule": "node scripts/change-rule.ts",
+    "scenario": "node scripts/apply-scenario.ts",
+    "test": "node --test \"server/src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "reinloop": "file:../reinloop"
+  }
+}

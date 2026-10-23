@@ -1,0 +1,10 @@
+# Settings layered on top of the upstream Lorebase compose file for this demo.
+# - self approval: the demo runs with auth mode none (one anonymous principal), so the author
+#   of a rule-change Proposal must be allowed to approve it.
+# - direct commits on protected branches: the `set_rule` Operation has review policy `never`,
+#   so it commits straight to the protected `main` branch; every other change needs a Proposal.
+services:
+  keeper:
+    environment:
+      LOREBASE__KEEPER__PROPOSALS__ALLOW_SELF_APPROVAL: "true"
+      LOREBASE__KEEPER__OPERATIONS__DIRECT_COMMIT_ON_PROTECTED: "true"

@@ -1,0 +1,91 @@
+// Loads config/sim.json and applies environment overrides. Also loads `.env` (secrets stay in
+// the environment; nothing here prints them).
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { Tier, WorldGenConfig } from './world/types.ts';
+
+export const ROOT = resolve(import.meta.dirname, '../..');
+
+export interface RosterEntry {
+  id?: string;
+  name: string;
+  role: string;
+  tier: Tier;
+  model?: string;
+  personality?: string;
+}
+
+export interface SimConfig {
+  /** Language of everything people read and say: config/i18n/<language>.json. */
+  language: string;
+  seed: number;
+  tickMs: number;
+  autoStart: boolean;
+  http: { port: number; corsOrigins: string[]; staticDir: string };
+  lorebase: {
+    url: string;
+    domain: string;
+    branch: string;
+    ruleKind: string;
+    roleKind: string;
+    directOperation: string;
+    updateOperation: string;
+    proposalBranchPrefix: string;
+    pollMs: number;
+    reconnectMs: number;
+  };
+  models: Record<Tier, string>;
+  agents: {
+    maxTurns: number;
+    maxOutputTokens: number;
+    timeoutMs: number;
+    compactionThresholdTokens: number;
+    compactionKeepLast: number;
+    lookMaxTiles: number;
+    messageMaxChars: number;
+    historyLimit: number;
+    minRoster: number;
+    maxRoster: number;
+    /** Gives every person a personal notebook (reinloop remember/recall, one per agent). */
+    memory: boolean;
+  };
+  roster: RosterEntry[];
+  world: WorldGenConfig;
+  mock: { thinkDelayMs: number; reserveFoodTicks: number };
+  /** Resolved at load time. */
+  modelOverride?: string;
+  forceMock: boolean;
+  rosterFile: string;
+}
+
+const num = (v: string | undefined) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : undefined);
+
+export function loadEnvFile(): void {
+  const file = resolve(ROOT, '.env');
+  if (existsSync(file)) process.loadEnvFile(file);
+}
+
+export function loadConfig(argv: string[] = process.argv.slice(2), env: NodeJS.ProcessEnv = process.env): SimConfig {
+  loadEnvFile();
+  const path = resolve(ROOT, env.SIM_CONFIG ?? 'config/sim.json');
+  const cfg = JSON.parse(readFileSync(path, 'utf8')) as SimConfig;
+  cfg.language = env.SIM_LANGUAGE ?? cfg.language;
+  cfg.seed = num(env.SIM_SEED) ?? cfg.seed;
+  cfg.tickMs = num(env.SIM_TICK_MS) ?? cfg.tickMs;
+  cfg.autoStart = env.SIM_AUTOSTART ? env.SIM_AUTOSTART === '1' : argv.includes('--start') || cfg.autoStart;
+  cfg.http.port = num(env.PORT ?? env.SIM_PORT) ?? cfg.http.port;
+  cfg.lorebase.url = env.LOREBASE_URL ?? cfg.lorebase.url;
+  cfg.lorebase.domain = env.LOREBASE_DOMAIN ?? cfg.lorebase.domain;
+  cfg.lorebase.branch = env.LOREBASE_BRANCH ?? cfg.lorebase.branch;
+  cfg.agents.maxTurns = num(env.SIM_MAX_TURNS) ?? cfg.agents.maxTurns;
+  for (const t of ['opus', 'sonnet', 'haiku'] as const) {
+    const v = env[`SIM_MODEL_${t.toUpperCase()}`];
+    if (v) cfg.models[t] = v;
+  }
+  // SIM_MODEL_OVERRIDE forces every agent onto one model: a tier name or a full model id.
+  const override = env.SIM_MODEL_OVERRIDE;
+  cfg.modelOverride = override ? (cfg.models[override as Tier] ?? override) : undefined;
+  cfg.forceMock = argv.includes('--mock') || env.SIM_MOCK === '1';
+  cfg.rosterFile = resolve(ROOT, env.SIM_ROSTER_FILE ?? 'data/roster.json');
+  return cfg;
+}

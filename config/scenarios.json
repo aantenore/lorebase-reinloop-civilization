@@ -1,0 +1,41 @@
+{
+  "long-winter": {
+    "title": "Il lungo inverno",
+    "description": "Gli inverni durano di più, d'inverno la terra dà poco e il freddo morde di più.",
+    "changes": {
+      "winter_length_ticks": 6,
+      "winter_food_yield_multiplier": 0.25,
+      "cold_damage_unsheltered": 1.5
+    }
+  },
+  "drought": {
+    "title": "Siccità",
+    "description": "La terra ricresce lentamente e la raccolta dà meno cibo.",
+    "changes": {
+      "regrowth_per_tick": 0.02,
+      "gather_food_yield": 1
+    }
+  },
+  "abundance": {
+    "title": "L'età dell'abbondanza",
+    "description": "Terra fertile, inverni miti, rifugi che costano poco.",
+    "changes": {
+      "regrowth_per_tick": 0.15,
+      "gather_food_yield": 3,
+      "winter_food_yield_multiplier": 0.8,
+      "shelter_wood_cost": 4
+    }
+  },
+  "no-sharing": {
+    "title": "Ognuno per sé",
+    "description": "È vietato dare cibo o legna agli altri.",
+    "changes": {
+      "sharing_allowed": 0
+    }
+  },
+  "defaults": {
+    "title": "Le leggi antiche",
+    "description": "Ripristina il valore originale di ogni legge.",
+    "changes": "seed"
+  }
+}
