@@ -2,8 +2,8 @@
 
 A handful of LLM agents must survive on a grid world: hunger, winters, shelters, births and
 deaths. The **laws of the world** (every gameplay number and its wording) and the **social roles**
-live in [Lorebase](../lorebase), a versioned knowledge graph. The agents run on
-[reinloop](../reinloop). Change a law in Lorebase while the simulation runs, directly or through a
+live in [Lorebase](https://github.com/aantenore/lorebase), a versioned knowledge graph. The agents run on
+[reinloop](https://github.com/aantenore/reinloop). Change a law in Lorebase while the simulation runs, directly or through a
 branch → Proposal → merge, and the colony learns of it from Lorebase's change feed and adapts.
 
 ## Screenshots
@@ -22,9 +22,6 @@ branch → Proposal → merge, and the colony learns of it from Lorebase's chang
 
 ![Agent memory](docs/screenshots/memory.png)
 *La memoria privata di un agente / An agent's private memory*
-
-![Dashboard](docs/screenshots/dashboard.png)
-*Dashboard v1: leggi e stato del mondo / v1 dashboard: laws and world state*
 
 ## Architecture
 
