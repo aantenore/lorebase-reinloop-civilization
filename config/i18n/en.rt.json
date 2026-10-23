@@ -62,7 +62,9 @@
     "offerForYou": "- {id}: {from} offers you {give} for {want}",
     "offerByYou": "- {id}: you offered {to} {give} for {want}",
     "hearsay": "WHAT PEOPLE SAY:\n{lines}",
-    "hearsayLine": "- {from} said of {about}: \"{text}\""
+    "hearsayLine": "- {from} said of {about}: \"{text}\"",
+    "askForYou": "- {id}: {from} asks you for {want}, offering nothing in return",
+    "askByYou": "- {id}: you asked {to} for {want}"
   },
   "why": {
     "start": "you look around for the first time",
@@ -78,7 +80,8 @@
     "groupChanged": "your group has changed",
     "conversation": "you have just spoken with {name}",
     "offer": "{name} offers you an exchange",
-    "offerAnswered": "your exchange offer to {name} was {status}"
+    "offerAnswered": "your exchange offer to {name} was {status}",
+    "ask": "{name} asks you for something"
   },
   "reason": {
     "unreachable": "that place cannot be reached",
@@ -116,7 +119,11 @@
     "empty": "empty text",
     "too_many": "you already have too many proposals waiting",
     "self": "you cannot judge yourself",
-    "duplicate": "the same proposal is already waiting"
+    "duplicate": "the same proposal is already waiting",
+    "empty_ask": "a request asks for at least one item",
+    "no_such_law": "there is no law with that code in the book of laws",
+    "engine_law": "that is a law of nature: nobody can break it",
+    "duplicate_testimony": "you already told this about that person"
   },
   "look": {
     "here": "You are at ({x},{y}) on {biome}, altitude {elev}: food {food}, wood {wood}{shelter}.",
@@ -180,7 +187,7 @@
     "offerTo": "the person's name",
     "offerGive": "what you give: item code -> amount",
     "offerWant": "what you ask for: item code -> amount",
-    "answerOffer": "Answer an exchange offered to you: accept it (the exchange happens at once, if you are close and both have the items) or reject it.",
+    "answerOffer": "Answer an exchange or a request made to you: accept it (the exchange or the gift happens at once, if you are close and have the items) or reject it.",
     "offerId": "code of the offer",
     "offerAccept": "true to accept, false to reject",
     "judge": "Say what you think of a person: it stays in your memory, and those near you hear what you say of them.",
@@ -190,7 +197,13 @@
     "proposeLaw": "Propose a new law or a change to a law of the law book. It comes into force only if it is approved.",
     "lawKey": "code of the law (snake_case); if it exists the proposal changes it",
     "lawText": "the text of the law",
-    "lawValue": "numeric value of the law, if it has one"
+    "lawValue": "numeric value of the law, if it has one",
+    "ask": "Ask a person nearby for something without offering anything in return. The person answers when it thinks about it (rispondi_scambio): if it accepts it gives it to you; otherwise the request expires.",
+    "askItem": "code of the item you ask for",
+    "askAmount": "amount",
+    "testify": "Tell what you saw: whether a person kept or broke a law of the community (not a law of nature). Whoever is near you hears what you say.",
+    "testifyLaw": "code of the law",
+    "testifyKept": "true if it was kept, false if it was broken"
   },
   "act": {
     "planned": "plan fixed ({n} steps)",
@@ -227,7 +240,12 @@
     "judgeFailed": "judgement not noted: {reason}",
     "lawProposed": "law proposed ({key}): it now waits for approval",
     "lawFailed": "law not proposed: {reason}",
-    "lawNotEsteemed": "your voice does not carry enough weight yet to propose a law"
+    "lawNotEsteemed": "your voice does not carry enough weight yet to propose a law",
+    "askMade": "request {id} made to {name}: wait for the answer",
+    "askFailed": "request not made: {reason}",
+    "askGiven": "you gave {name} what they asked for",
+    "testified": "what you saw of {name} has been told",
+    "testifyFailed": "not told: {reason}"
   },
   "group": {
     "header": "YOU ARE THE GROUP {name} ({pattern}). Now decide together what each of you will do in the next {horizon} minutes.",
@@ -291,7 +309,9 @@
     "aged": "{name} is now {stage}",
     "lawProposed": "{name} proposes a law: \"{text}\"",
     "lawMerged": "The law proposed by {name} enters the law book: {key}",
-    "lawRejected": "The law proposed by {name} is rejected: {key}"
+    "lawRejected": "The law proposed by {name} is rejected: {key}",
+    "lawBreach": "{name} broke the law {law}: so say {witnesses}",
+    "budget": "Time to think is over: {spent} $ spent of {max} $, every mind stops"
   },
   "memory": {
     "planned": "I decided: {reason}",
@@ -313,7 +333,10 @@
     "offered": "I offered {name}: {give} for {want}",
     "traded": "I exchanged with {name}: gave {give} and got {get}",
     "judged": "I judged {name}: {reason}",
-    "offerClosed": "My exchange offer to {name} was {status}"
+    "offerClosed": "My exchange offer to {name} was {status}",
+    "asked": "I asked {name} for {want}",
+    "testifiedKept": "I told that {name} kept the law {law}: {reason}",
+    "testifiedBroken": "I told that {name} broke the law {law}: {reason}"
   },
   "mock": {
     "reason": {
@@ -422,5 +445,6 @@
   "offerInbox": "I offer you an exchange ({id}): I give you {give}, for {want}.",
   "society": {
     "familyName": "House of {name}"
-  }
+  },
+  "askInbox": "I ask you ({id}): {want}. I have nothing to give you in return."
 }

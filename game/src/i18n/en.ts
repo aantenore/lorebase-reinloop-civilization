@@ -333,6 +333,7 @@ export const en: Dict = {
   'float.aged.adult': 'now an adult',
   'float.aged.elder': 'now an elder',
   'offer.bubble': 'offers {give} for {want}',
+  'offer.ask': 'asks for {want}',
   'offer.accepted': '✓ accepted',
   'offer.rejected': '✗ rejected',
   'offer.expired': '… expired',

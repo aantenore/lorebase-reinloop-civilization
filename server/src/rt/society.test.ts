@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { offerError, OfferBook, offerMinutes, swap } from './barter.ts';
+import { askError, giveAsked, offerError, OfferBook, offerMinutes, swap } from './barter.ts';
 import { type Catalog, resourceFrom } from './economy.ts';
 import { lawDraft } from './law-proposals.ts';
 import { bagOf } from './plan.ts';
-import { computeEsteem, esteemWeight, rankPeople, Society, weightedWinner } from './society.ts';
+import { computeEsteem, esteemWeight, rankPeople, Society, Testimonies, weightedWinner } from './society.ts';
 import { type RtEntity, type RtRuleKey, tooComplexForChild } from './world.ts';
 
 const RULES: Partial<Record<RtRuleKey, number>> = {
   esteem_prior: 0.5, esteem_prior_weight: 2, opinion_half_life_days: 3, esteem_judge_weight: 1, elder_esteem_weight: 1.5,
   reputation_inheritance: 0.3, fame_gift: 1, fame_recipe_supply: 2, fame_insight_accepted: 3, fame_discovery: 5, fame_law_enacted: 4,
+  fame_law_respected: 0.5, fame_law_breached: -1.5,
   fame_half_life_days: 10, esteem_vote_weight: 1,
 };
 const r = (k: RtRuleKey) => RULES[k] ?? 0;
@@ -117,4 +118,57 @@ test('law drafts and children recipes', () => {
   assert.equal(tooComplexForChild({ tools: [], station: null, inputs: { a: 1, b: 1 } }, 2), false);
   assert.equal(tooComplexForChild({ tools: ['knife'], station: null, inputs: { a: 1 } }, 2), true);
   assert.equal(tooComplexForChild({ tools: [], station: null, inputs: { a: 3 } }, 2), true);
+});
+
+test('ask: nothing offered, the target gives what was asked all or nothing', () => {
+  const c = catalog();
+  const a = person('a', {});
+  const b = person('b', { food: 2, flint: 1 });
+  const limits = { maxKinds: 2, maxPending: 1 };
+  assert.equal(askError(c, a, b, { food: 1 }, limits, 0), undefined);
+  assert.equal(askError(c, a, b, {}, limits, 0), 'empty_ask');
+  assert.equal(askError(c, a, b, { stone: 1 }, limits, 0), 'unknown_item');
+  assert.equal(askError(c, a, a, { food: 1 }, limits, 0), 'no_such_person');
+  assert.equal(askError(c, a, b, { food: 1 }, limits, 1), 'too_many_offers');
+  assert.equal(giveAsked(c, { food: 1, flint: 2 }, b, a), 'nothing_to_give');
+  assert.deepEqual([a.inventory.food, b.inventory.food], [0, 2]);
+  assert.equal(giveAsked(c, { food: 2 }, b, a), undefined);
+  assert.deepEqual([a.inventory.food, b.inventory.food], [2, 0]);
+});
+
+test('society: snapshot and restore by name, with clocks shifted and the dead left out', () => {
+  const s = new Society(r, { maxOpinions: 100, hearsayKept: 5, familyColors: ['#111', '#222'] });
+  for (const id of ['a', 'b', 'c']) s.add({ id, name: id.toUpperCase(), role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });
+  s.opinion({ from: 'a', to: 'b', score: 1, reason: 'brava', at: 900 });
+  s.opinion({ from: 'c', to: 'a', score: -1, reason: 'avaro', at: 950 });
+  s.deed('a', 'discovery', 1000);
+  s.died('c', 1000);
+  const snap = s.snapshot(1000, (id) => (id === 'a' ? { bread: 3 } : {}));
+  assert.deepEqual(snap.people.map((p) => p.name), ['A', 'B']);
+  assert.equal(snap.opinions.length, 2);
+  const t = new Society(r, { maxOpinions: 100, hearsayKept: 5 });
+  for (const id of ['x', 'y']) t.add({ id, name: id === 'x' ? 'A' : 'B', role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });
+  const skills = t.restore(snap, 400);
+  assert.deepEqual(skills.get('x'), { bread: 3 });
+  assert.equal(t.fameOf('x', 400), 5);
+  assert.deepEqual(t.opinions.map((o) => [o.from, o.to, o.at]), [['x', 'y', 300]]);
+  const fam = s.familyForBirth('a', 'a', 'b', 1, (n) => `Casa ${n}`, 's');
+  assert.equal(s.familyDto(fam.family).color, '#111');
+});
+
+test('testimonies: one per witness, fame both ways, a breach chronicled once at enough witnesses', () => {
+  const s = new Society(r, { maxOpinions: 100, hearsayKept: 5 });
+  s.add({ id: 'a', name: 'A', role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });
+  s.deed('a', 'law_respected', 0);
+  assert.equal(s.fameOf('a', 0), 0.5);
+  s.deed('a', 'law_breached', 0);
+  assert.equal(s.fameOf('a', 0), 0);
+  const tm = new Testimonies({ windowMinutes: 100, minWitnesses: 2, maxKept: 50 });
+  const tell = (witness: string, at: number, kept = false) => tm.add({ witness, who: 'a', law: 'tithe', kept, reason: '', at });
+  assert.deepEqual(tell('w1', 10), { breachWitnesses: null });
+  assert.deepEqual(tell('w1', 20), { error: 'duplicate' });
+  assert.deepEqual(tell('w2', 30), { breachWitnesses: ['w1', 'w2'] });
+  assert.deepEqual(tell('w3', 40), { breachWitnesses: null });
+  assert.deepEqual(tell('w4', 50, true), { breachWitnesses: null });
+  assert.deepEqual(tell('w1', 300), { breachWitnesses: null });
 });

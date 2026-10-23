@@ -129,7 +129,8 @@ Real-time world: `GAME_CONFIG` (default `config/game.json`), `GAME_CROWD` (extra
 (no seeded groups), `GAME_CHRONICLE=0`, `HERALD_URL` (empty: no Lorebase tools), `HERALD_API_KEY` (sent as bearer
 when set; locally Herald forwards credential-less calls);
 `--seconds N` stops the server after N seconds; `GAME_TIME_SCALE` (game time multiplier, config
-`loop.timeScale`), `GAME_FLOWS_MS`, `MNEMO_URL` (empty: no private memory), `MNEMO_PORT`, `MNEMO_DB`,
+`loop.timeScale`), `GAME_BUDGET_USD` (config `budget.maxUsd`: when the model cost of the run reaches it every
+mind is paused, the world keeps turning; 0 = no cap), `GAME_FLOWS_MS`, `MNEMO_URL` (empty: no private memory), `MNEMO_PORT`, `MNEMO_DB`,
 `MNEMO_CONFIG`, `MNEMO_COMPACT_MS`, `MNEMO_EMBEDDER`, `MNEMO_LLM` (`anthropic`|`heuristic`).
 The web UI (in `web/`) is served from `web/dist` when built; in development it runs on :5173.
 
@@ -183,12 +184,11 @@ but people can read it like every law, so it works as a social law they may foll
   `insights.reconcile.maxAgeHours`, or with mode `close`, they are closed) and leaked `role/` and `law/`
   branches are deleted. Without Herald the agents run with no Lorebase tools (and so without knowing the laws).
 - Economy: catalog edits made in Lorebase while the world runs are read at the next start only.
-  Discoveries persist in `main` across worlds (`npm run world:reset` hides them again). `chiedi` (asking
-  without offering) is not built. Births still count years in body turns (`turn_minutes`).
-- Society: fame counts gifts, supplies, accepted insights, discoveries and enacted laws; "obeying a law
-  under others' eyes" is not counted (engine laws are enforced physically, social laws are not
-  checkable). Opinions, esteem and families live in the server's memory (a restart starts a new
-  world); Family records and lineage (Chronicle births) are kept in Lorebase.
+  Discoveries persist in `main` across worlds (`npm run world:reset` hides them again). Births still count
+  years in body turns (`turn_minutes`).
+- Society: obeying a social law counts only through witnesses' accounts (`testimonia`), never checked by
+  the world. Families live in the server's memory (a restart founds new ones); Family records and lineage
+  (Chronicle births) are kept in Lorebase.
 - Herald pins agents to `main` (server-side argument override plus `LOREBASE_BRANCH` on Herald); a
   `lorebase_diff` between two revision ids of the hidden branch is not blocked, but those ids are
   never shown to agents.
@@ -292,6 +292,12 @@ Offers expire after the rule `offer_minutes` × (1 + `trade_trust_esteem` × (2�
 offerer (trusted people's offers last longer); the offerer perceives the answer (`offerAnswered`).
 At most `decisions.offersMax` pending offers per person.
 
+`chiedi {a, item, amount}` asks for something without offering anything: an offer with `kind:'ask'` and an
+empty `give` (`offer` events carry `kind: 'barter' | 'ask'`; the game shows "🙏 chiede …"). The target sees
+it under "PROPOSTE DI SCAMBIO" ("ti chiede …, senza offrire niente in cambio") and decides in its own loop
+with `rispondi_scambio`: accepted, the items move as a gift (`gave`: memories, flows, `fame_gift`; needs
+`sharing_allowed`); refused or ignored, it expires like an offer.
+
 ### Society: reputation, fame, ages, skills, families
 
 - **Opinions.** `giudica {chi, voto -1..1, motivo}` is optional: the judgement goes to the judge's private
@@ -300,8 +306,9 @@ At most `decisions.offersMax` pending offers per person.
   plus a prior (`esteem_prior`, worth `esteem_prior_weight` opinions); a judge weighs
   `max(0, 1 + esteem_judge_weight·(2e−1))`, ×`elder_esteem_weight` for elders; opinions halve every
   `opinion_half_life_days`. **Fame** = deeds (`fame_gift`, `fame_recipe_supply` for an item a recipe of the
-  receiver's other role consumes, `fame_insight_accepted`, `fame_discovery`, `fame_law_enacted`) halving
-  every `fame_half_life_days`. **Rank** 1 = highest esteem (fame breaks ties). All are Lorebase rules.
+  receiver's other role consumes, `fame_insight_accepted`, `fame_discovery`, `fame_law_enacted`, and the
+  testimonies below: `fame_law_respected`, `fame_law_breached` < 0) halving every `fame_half_life_days`,
+  never below 0. **Rank** 1 = highest esteem (fame breaks ties). All are Lorebase rules.
 - **Perception without numbers.** People in view carry phrases from i18n by band (`society.hearsay`:
   "gode di molta stima", "tutti parlano di ciò che ha fatto") and what one heard ("di Bruno si dice: …");
   the observation adds "CIÒ CHE SI DICE IN GIRO" and the person's age ("ETÀ: hai 18 giorni, sei adulto").
@@ -314,6 +321,17 @@ At most `decisions.offersMax` pending offers per person.
   or the Lorebase web app at `/<domain>/review/<proposal id>`, e.g. `/world/review/prp_…`; god mode links
   there, `VITE_LOREBASE_REVIEW_PATH` in `game/.env` is the `/<domain>/review` part). The world polls it (`society.lawProposals.pollMs`)
   and the merged law reaches everyone through the change feed. Trade trust: see barter.
+- **Testimonies.** Social laws (laws that are not engine rules: not in `RT_RULE_KEYS` or the turn engine's
+  keys, e.g. laws enacted from `proponi_legge`) are not enforced by the world. `testimonia {chi, legge,
+  rispettata, motivo}` (optional; nothing in prompts asks for it) is a witness's account: fame moves by
+  `fame_law_respected`/`fame_law_breached`, those nearby hear the reason as hearsay, one account per witness,
+  person and law within `society.testimony.windowMinutes`; a breach told by
+  `society.testimony.chronicleMinWitnesses` distinct witnesses enters the Chronicle (`law_breach`).
+- **Persistence.** Opinions, esteem (and prior), fame and skills are saved in mnemo's SQLite
+  (`society_*` tables, per world id `society.persist.world`, default `<domain>/<branch>`) every
+  `society.persist.flushMs` and at shutdown, and brought back by name at start (game clocks shifted so ages
+  are kept). A death deletes that person's standing and the opinions it held; others' opinions about it
+  stay (memories of others). `npm run world:reset` wipes them with the rest of mnemo unless `--keep-memory`.
 - **Ages.** `child` until `age_child_days`, `elder` from `age_elder_days` (game days); founders arrive at
   `founder_age_days` (the elder role already elder). Children work at `child_work_factor`, walk at
   `child_move_factor` and cannot follow recipes with tools, a station or more than
@@ -325,7 +343,8 @@ At most `decisions.offersMax` pending offers per person.
   founds a new family ("Casata di …") and both parents join. Lineage is kept the light way: a `Family`
   Kind (code, name, founder, founded day, session; written in batches like the Chronicle) plus the
   Chronicle's `birth` (child and parents as actors) and `family_founded` entries; a death keeps them
-  (only the private memory is freed).
+  (only the private memory is freed). `family.color` comes from `society.families.colors` (founding order);
+  the game uses it when present.
 
 ### World reset
 
@@ -390,7 +409,8 @@ Economy and memory (phase 2):
 - REST: `GET /api/economy` (economy + last `flows`), `GET /api/agents/:id/memories` (bare `Memory[]`).
 - Observatory (read-only proxies, cached `observatory.cacheMs`): `GET /api/observatory/summary` (Lorebase counts per Kind
   and revision; mnemo totals and per-agent count/avg fidelity/gists; reinloop runs, decisions, failures, tokens `{input, output}` and
-  `costUsd {total, byModel, byTier}`; per-agent usage is in `/api/agents/:id/mind`), `/log?limit=` (main's revisions), `/proposals?status=`,
+  `costUsd {total, byModel, byTier}`, `budgetMaxUsd`, `budgetPaused`; a group's run is booked per member under that
+  member's model, the team's remainder under the group; per-agent usage is in `/api/agents/:id/mind`), `/log?limit=` (main's revisions), `/proposals?status=`,
   `/records/:kind?limit=` (Kinds in `observatory.kinds`), `/memories?offset=&limit=` (all agents, paged).
 
 Barter and society (phase 3):

@@ -163,15 +163,6 @@
     ],
     "seeded": [
       {
-        "name": "Clan del Fiume",
-        "pattern": "orchestrator",
-        "members": [
-          "Tomas",
-          "Rudi"
-        ],
-        "leader": "Tomas"
-      },
-      {
         "name": "Consiglio degli Anziani",
         "pattern": "council",
         "members": [
@@ -439,7 +430,31 @@
     },
     "families": {
       "kind": "Family",
+      "flushMs": 10000,
+      "colors": [
+        "#e8b04a",
+        "#5ac0a8",
+        "#d86aa0",
+        "#7a9ae8",
+        "#c8d860",
+        "#e07a5a",
+        "#a07ad8",
+        "#60c0e0"
+      ]
+    },
+    "testimony": {
+      "windowMinutes": 720,
+      "chronicleMinWitnesses": 2,
+      "maxKept": 500,
+      "reasonMaxChars": 160
+    },
+    "persist": {
+      "enabled": true,
+      "world": "",
       "flushMs": 10000
     }
+  },
+  "budget": {
+    "maxUsd": 0
   }
 }

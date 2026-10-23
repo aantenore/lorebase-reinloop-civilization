@@ -32,7 +32,7 @@ export const RT_RULE_KEYS = [
   'child_max_recipe_inputs', 'elder_work_factor', 'elder_move_factor', 'elder_esteem_weight', 'skill_gain_per_practice', 'skill_max_level',
   'esteem_prior', 'esteem_prior_weight', 'opinion_half_life_days', 'esteem_judge_weight', 'reputation_inheritance', 'fame_gift',
   'fame_recipe_supply', 'fame_insight_accepted', 'fame_discovery', 'fame_law_enacted', 'fame_half_life_days', 'esteem_vote_weight',
-  'insight_review_esteem_factor', 'insight_solo_approve_esteem', 'law_proposal_min_esteem',
+  'insight_review_esteem_factor', 'insight_solo_approve_esteem', 'law_proposal_min_esteem', 'fame_law_respected', 'fame_law_breached',
 ] as const;
 export type RtRuleKey = (typeof RT_RULE_KEYS)[number];
 

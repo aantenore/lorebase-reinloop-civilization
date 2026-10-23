@@ -35,6 +35,11 @@ export class UsageLedger {
     row.costUsd += res.costUsd ?? 0;
     this.rows.set(who.id, row);
   }
+  totalUsd(): number {
+    let sum = 0;
+    for (const r of this.rows.values()) sum += r.costUsd;
+    return sum;
+  }
   /** Totals grouped by a key (model or tier). */
   by(key: 'model' | 'tier'): Record<string, { runs: number; inputTokens: number; outputTokens: number; costUsd: number }> {
     const out: Record<string, { runs: number; inputTokens: number; outputTokens: number; costUsd: number }> = {};
@@ -46,6 +51,43 @@ export class UsageLedger {
       o.costUsd = Math.round((o.costUsd + r.costUsd) * 1e6) / 1e6;
     }
     return out;
+  }
+}
+
+type RunUsage = { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number };
+
+/**
+ * Splits the usage of a team run among the model runs nested in it, so each member's model is
+ * booked with its own cost. A member called again resumes its run and reports cumulative totals:
+ * only the increase since its previous end is booked.
+ */
+export class NestedUsage {
+  private readonly modelRuns = new Set<string>();
+  private readonly last = new Map<string, { costUsd: number; inputTokens: number; outputTokens: number }>();
+  readonly booked = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+
+  /** Feeds one run event; returns the usage to book when a nested model run ends. */
+  onEvent(ev: { type: string; runId: string; parentRunId?: string; data: unknown }): RunUsage | undefined {
+    if (ev.type === 'model_request') this.modelRuns.add(ev.runId);
+    if (ev.type !== 'run_end' || !ev.parentRunId || !this.modelRuns.has(ev.runId)) return undefined;
+    const end = ev.data as RunUsage;
+    const now = { costUsd: end.costUsd ?? 0, inputTokens: end.usage?.inputTokens ?? 0, outputTokens: end.usage?.outputTokens ?? 0 };
+    const prev = this.last.get(ev.runId) ?? { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    this.last.set(ev.runId, now);
+    const d = { costUsd: Math.max(0, now.costUsd - prev.costUsd), inputTokens: Math.max(0, now.inputTokens - prev.inputTokens), outputTokens: Math.max(0, now.outputTokens - prev.outputTokens) };
+    this.booked.costUsd += d.costUsd;
+    this.booked.inputTokens += d.inputTokens;
+    this.booked.outputTokens += d.outputTokens;
+    return { status: end.status, usage: { inputTokens: d.inputTokens, outputTokens: d.outputTokens }, costUsd: d.costUsd };
+  }
+
+  /** What the whole run cost beyond the nested runs already booked. */
+  remainder(res: RunUsage): RunUsage {
+    return {
+      status: res.status,
+      usage: { inputTokens: Math.max(0, (res.usage?.inputTokens ?? 0) - this.booked.inputTokens), outputTokens: Math.max(0, (res.usage?.outputTokens ?? 0) - this.booked.outputTokens) },
+      costUsd: Math.max(0, (res.costUsd ?? 0) - this.booked.costUsd),
+    };
   }
 }
 

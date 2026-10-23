@@ -331,6 +331,7 @@ export const it = {
   'float.aged.adult': 'ora è adulto',
   'float.aged.elder': 'ora è anziano',
   'offer.bubble': 'offre {give} per {want}',
+  'offer.ask': 'chiede {want}',
   'offer.accepted': '✓ accettato',
   'offer.rejected': '✗ rifiutato',
   'offer.expired': '… scaduto',

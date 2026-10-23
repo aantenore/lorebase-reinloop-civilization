@@ -165,6 +165,25 @@ async function main(): Promise<void> {
         limit: Math.max(1, Math.min(cfg.conversations.maxLimit, Number.isFinite(n) && n > 0 ? n : cfg.conversations.maxLimit)),
       }));
     }
+    if (parts[0] === 'society' && parts.length === 2) {
+      const world = parts[1]!;
+      if (method === 'GET') return send(res, 200, store.societyLoad(world) ?? null);
+      if (method === 'PUT') {
+        const b = await readBody(req, maxBody);
+        const fin = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+        const person = (p: unknown) => isObj(p) && typeof p.name === 'string' && p.name !== '' && fin(p.prior) && fin(p.esteem) && fin(p.fame) && fin(p.fameAt)
+          && isObj(p.skills) && Object.values(p.skills).every(fin);
+        const opinion = (o: unknown) => isObj(o) && typeof o.from === 'string' && typeof o.to === 'string' && fin(o.score) && typeof o.reason === 'string' && fin(o.at);
+        if (!isObj(b) || !fin(b.clock) || !Array.isArray(b.people) || !b.people.every(person) || !Array.isArray(b.opinions) || !b.opinions.every(opinion) || !fin(b.maxOpinions)) {
+          throw new HttpError(400, 'body must be {clock, people:[{name, prior, esteem, fame, fameAt, skills}], opinions:[{from, to, score, reason, at}], maxOpinions}');
+        }
+        store.societySave(world, b as never, Number(b.maxOpinions), Date.now());
+        return send(res, 200, { ok: true });
+      }
+    }
+    if (method === 'DELETE' && parts[0] === 'society' && parts[2] === 'people' && parts.length === 4) {
+      return send(res, 200, store.societyForget(parts[1]!, parts[3]!));
+    }
     throw new HttpError(404, 'not found');
   }
 

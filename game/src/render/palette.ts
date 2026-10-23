@@ -94,11 +94,11 @@ export function rng(seed: number): () => number {
   };
 }
 
-/** Family colours: stable per family id (the protocol carries no colour). */
+/** Family colours: the server's (`family.color`) when sent, else stable per family id. */
 const FAMILY_COLORS = ['#e8b04a', '#5ac0a8', '#d86aa0', '#7a9ae8', '#c8d860', '#e07a5a', '#a07ad8', '#60c0e0'];
 
-export function familyColor(id: string): string {
-  return FAMILY_COLORS[hash(id) % FAMILY_COLORS.length];
+export function familyColor(id: string, color?: string): string {
+  return color ?? FAMILY_COLORS[hash(id) % FAMILY_COLORS.length];
 }
 
 /** Opinion score (-1..1) to a red -> grey -> green colour. */

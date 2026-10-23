@@ -170,7 +170,7 @@ function rankingTable(sort: { col: SortCol; dir: 1 | -1 }, onSort: (c: SortCol) 
       h('span', { class: 'soc-name' }, p.name),
       h('span', {}, roleLabel(p.role)),
       h('span', {}, tierBadge(p.tier)),
-      h('span', { class: 'soc-fam' }, p.family ? h('i', { class: 'fam-sw', style: `background:${familyColor(p.family)}` }) : null, fam?.name ?? (p.family ? p.family : t('soc.noFamily'))),
+      h('span', { class: 'soc-fam' }, p.family ? h('i', { class: 'fam-sw', style: `background:${familyColor(p.family, fam?.color)}` }) : null, fam?.name ?? (p.family ? p.family : t('soc.noFamily'))),
       h('span', {}, esteemBar(p.esteem)),
       h('span', { class: 'soc-num' }, String(Math.round(p.fame))),
       h('span', { class: 'muted' }, ageLabel(p.age?.stage)),
@@ -197,7 +197,7 @@ function dynasties(): HTMLElement {
 }
 
 function familyCard(f: Family): HTMLElement {
-  const color = familyColor(f.id);
+  const color = familyColor(f.id, f.color);
   const total = new Set([...f.members, ...[...store.people.values()].filter((p) => p.family === f.id).map((p) => p.id)]).size;
   return h(
     'div',
@@ -338,7 +338,7 @@ function opinionGraph(): HTMLElement {
   for (const id of ids) {
     const p = pos.get(id)!;
     const person = store.person(id);
-    const fam = person?.family ? familyColor(person.family) : '#5e4466';
+    const fam = person?.family ? familyColor(person.family, store.families.get(person.family)?.color) : '#5e4466';
     const lx = C + Math.cos(p.a) * (R + 20);
     const ly = C + Math.sin(p.a) * (R + 20);
     const anchor = Math.abs(Math.cos(p.a)) < 0.3 ? 'middle' : Math.cos(p.a) > 0 ? 'start' : 'end';

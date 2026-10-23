@@ -206,7 +206,7 @@ function societySection(e: EntityState): HTMLElement | null {
             'span',
             {},
             p.family
-              ? h('a', { class: 'insp-link', onclick: () => societyNav.openFamily(p.family!) }, h('i', { class: 'fam-sw', style: `background:${familyColor(p.family)}` }), fam?.name ?? p.family)
+              ? h('a', { class: 'insp-link', onclick: () => societyNav.openFamily(p.family!) }, h('i', { class: 'fam-sw', style: `background:${familyColor(p.family, fam?.color)}` }), fam?.name ?? p.family)
               : t('soc.noFamily'),
           ),
           p.parents ? h('span', { class: 'muted' }, t('insp.parents')) : null,
@@ -219,8 +219,8 @@ function societySection(e: EntityState): HTMLElement | null {
       h(
         'div',
         { class: `insp-offer st-${o.status}` },
-        `🤝 ${store.personName(o.from)} → ${store.personName(o.to)}: `,
-        t('offer.bubble', { give: bagText(o.give), want: bagText(o.want) }),
+        `${o.kind === 'ask' ? '🙏' : '🤝'} ${store.personName(o.from)} → ${store.personName(o.to)}: `,
+        o.kind === 'ask' ? t('offer.ask', { want: bagText(o.want) }) : t('offer.bubble', { give: bagText(o.give), want: bagText(o.want) }),
         h('span', { class: 'offer-st' }, t(`offer.st.${o.status}` as I18nKey)),
       ),
     ),

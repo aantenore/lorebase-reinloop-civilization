@@ -63,7 +63,7 @@
     {
       "name": "Tomas",
       "role": "builder",
-      "tier": "opus",
+      "tier": "haiku",
       "personality": "Pratico e testardo; detesta gli sprechi."
     },
     {
@@ -83,12 +83,6 @@
       "role": "crafter",
       "tier": "sonnet",
       "personality": "Paziente e precisa; ama le cose fatte bene."
-    },
-    {
-      "name": "Saba",
-      "role": "explorer",
-      "tier": "sonnet",
-      "personality": "Curiosa e irrequieta."
     },
     {
       "name": "Pell",

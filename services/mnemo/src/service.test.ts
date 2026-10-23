@@ -115,3 +115,22 @@ test('forgetAgent removes the memories, events, spoken lines and runs of one age
   assert.deepEqual(store.conversations({ limit: 10 }).map((c) => c.from), ['Ilse']);
   assert.deepEqual(store.listRuns(), ['r2']);
 });
+
+test('society: saved per world, opinions capped, a dead judge forgotten but opinions about it kept', () => {
+  const { store } = setup();
+  const p = (name: string, fame = 0) => ({ name, prior: 0.5, esteem: 0.6, fame, fameAt: 100, skills: { bread: 2 } });
+  assert.equal(store.societyLoad('w/main'), undefined);
+  store.societySave('w/main', { clock: 500, people: [p('Ilse', 3), p('Mara')], opinions: [{ from: 'Ilse', to: 'Mara', score: 0.8, reason: 'generosa', at: 400 }] }, 2, 1);
+  store.societySave('w/main', { clock: 900, people: [p('Ilse', 4)], opinions: [{ from: 'Mara', to: 'Ilse', score: -0.2, reason: 'avara', at: 800 }, { from: 'Mara', to: 'Ilse', score: 0.1, reason: 'meglio', at: 850 }] }, 2, 2);
+  store.societySave('other', { clock: 1, people: [p('Ilse')], opinions: [] }, 10, 3);
+  const s = store.societyLoad('w/main')!;
+  assert.equal(s.clock, 900);
+  assert.deepEqual(s.people.map((x) => [x.name, x.fame, x.skills.bread]), [['Ilse', 4, 2], ['Mara', 0, 2]]);
+  assert.deepEqual(s.opinions.map((o) => o.reason), ['avara', 'meglio']);
+  store.societySave('w/main', { clock: 950, people: [], opinions: [{ from: 'Ilse', to: 'Mara', score: 1, reason: 'cara', at: 940 }] }, 10, 4);
+  assert.deepEqual(store.societyForget('w/main', 'Mara'), { people: 1, opinions: 2 });
+  const after = store.societyLoad('w/main')!;
+  assert.deepEqual(after.people.map((x) => x.name), ['Ilse']);
+  assert.deepEqual(after.opinions.map((o) => [o.from, o.to]), [['Ilse', 'Mara']]);
+  assert.equal(store.societyLoad('other')!.people.length, 1);
+});

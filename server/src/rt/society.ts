@@ -5,17 +5,19 @@
 //           plus a prior worth `esteem_prior_weight` opinions; a judge weighs more with its own
 //           esteem (`esteem_judge_weight`) and as an elder (`elder_esteem_weight`); opinions halve
 //           every `opinion_half_life_days`.
-//   fame    deeds (gifts, recipe supplies, accepted insights, discoveries, enacted laws) weighted by
-//           `fame_*` rules, halving every `fame_half_life_days`.
+//   fame    deeds (gifts, recipe supplies, accepted insights, discoveries, enacted laws, social laws
+//           seen kept or broken by witnesses) weighted by `fame_*` rules (a breach weighs negative),
+//           halving every `fame_half_life_days`; never below 0.
 //   rank    1 = highest esteem (fame breaks ties) among the living people.
 // People never see these numbers: perception carries hearsay phrases from i18n (bands only).
 import type { RtRuleKey } from './world.ts';
 import type { AgeStage, EntityTier, EntityKind } from './world.ts';
 
-export type DeedKind = 'gift' | 'recipe_supply' | 'insight_accepted' | 'discovery' | 'law_enacted';
+export type DeedKind = 'gift' | 'recipe_supply' | 'insight_accepted' | 'discovery' | 'law_enacted' | 'law_respected' | 'law_breached';
 
 const DEED_RULE: Record<DeedKind, RtRuleKey> = {
   gift: 'fame_gift', recipe_supply: 'fame_recipe_supply', insight_accepted: 'fame_insight_accepted', discovery: 'fame_discovery', law_enacted: 'fame_law_enacted',
+  law_respected: 'fame_law_respected', law_breached: 'fame_law_breached',
 };
 
 export interface Opinion {
@@ -50,6 +52,8 @@ export interface Family {
   founder: string;
   members: string[];
   foundedDay: number;
+  /** From the configured palette, by founding order (absent with no palette). */
+  color?: string;
 }
 
 export interface Hearsay {
@@ -118,6 +122,57 @@ export function weightedWinner(votes: Array<number | null | undefined>, weights:
   return { winner, weights: sums };
 }
 
+/** Society state kept across restarts (names, not ids; `clock` is the game clock when saved). */
+export interface SocietySnapshot {
+  clock: number;
+  people: Array<{ name: string; prior: number; esteem: number; fame: number; fameAt: number; skills: Record<string, number> }>;
+  opinions: Array<{ from: string; to: string; score: number; reason: string; at: number }>;
+}
+
+/** One witness's account: `who` kept (or broke) the social law `law`. */
+export interface Testimony {
+  witness: string;
+  who: string;
+  law: string;
+  kept: boolean;
+  reason: string;
+  at: number;
+}
+
+/**
+ * Accounts of social laws kept or broken. One account per witness, person and law within
+ * `windowMinutes`; a breach becomes public (once per window) when `minWitnesses` distinct
+ * witnesses told it.
+ */
+export class Testimonies {
+  private list: Testimony[] = [];
+  private readonly told = new Map<string, number>();
+  private readonly opts: { windowMinutes: number; minWitnesses: number; maxKept: number };
+  constructor(opts: { windowMinutes: number; minWitnesses: number; maxKept: number }) {
+    this.opts = opts;
+  }
+
+  /** 'duplicate' when this witness already told about this person and law recently. */
+  add(t: Testimony): { error: 'duplicate' } | { breachWitnesses: string[] | null } {
+    const since = t.at - this.opts.windowMinutes;
+    this.list = this.list.filter((x) => x.at >= since).slice(-this.opts.maxKept);
+    if (this.list.some((x) => x.witness === t.witness && x.who === t.who && x.law === t.law)) return { error: 'duplicate' };
+    this.list.push(t);
+    if (t.kept) return { breachWitnesses: null };
+    const witnesses = [...new Set(this.list.filter((x) => !x.kept && x.who === t.who && x.law === t.law).map((x) => x.witness))];
+    const key = `${t.who}>${t.law}`;
+    const last = this.told.get(key);
+    if (witnesses.length < this.opts.minWitnesses || (last !== undefined && t.at - last < this.opts.windowMinutes)) return { breachWitnesses: null };
+    this.told.set(key, t.at);
+    return { breachWitnesses: witnesses };
+  }
+
+  clear(): void {
+    this.list = [];
+    this.told.clear();
+  }
+}
+
 export class Society {
   readonly people = new Map<string, Person>();
   readonly families = new Map<string, Family>();
@@ -130,13 +185,15 @@ export class Society {
   private readonly r: R;
   private readonly maxOpinions: number;
   private readonly hearsayKept: number;
+  private readonly familyColors: string[];
   /** Life stage of a living person (from the world). */
   stageOf: (id: string) => AgeStage | undefined = () => undefined;
 
-  constructor(r: R, opts: { maxOpinions: number; hearsayKept: number }) {
+  constructor(r: R, opts: { maxOpinions: number; hearsayKept: number; familyColors?: string[] }) {
     this.r = r;
     this.maxOpinions = opts.maxOpinions;
     this.hearsayKept = opts.hearsayKept;
+    this.familyColors = opts.familyColors ?? [];
   }
 
   /** A person enters the society (founder: prior esteem_prior; newborn: inherited). */
@@ -172,8 +229,49 @@ export class Society {
 
   deed(id: string, kind: DeedKind, clock: number): void {
     if (!this.people.has(id)) return;
-    const value = this.fameOf(id, clock) + this.r(DEED_RULE[kind]);
+    const value = Math.max(0, this.fameOf(id, clock) + this.r(DEED_RULE[kind]));
     this.fameAcc.set(id, { value, at: clock });
+  }
+
+  /** What survives a restart of the world, by person name (see SocietySnapshot). */
+  snapshot(clock: number, skillsOf: (id: string) => Record<string, number>): SocietySnapshot {
+    const name = (id: string) => this.people.get(id)?.name;
+    const people = [...this.people.values()].filter((p) => p.alive && p.kind !== 'player').map((p) => {
+      const f = this.fameAcc.get(p.id);
+      return { name: p.name, prior: p.prior, esteem: this.esteemOf(p.id), fame: f?.value ?? 0, fameAt: f?.at ?? clock, skills: { ...skillsOf(p.id) } };
+    });
+    const opinions = this.opinions.flatMap((o) => {
+      const from = name(o.from);
+      const to = name(o.to);
+      return from && to ? [{ from, to, score: o.score, reason: o.reason, at: o.at }] : [];
+    });
+    return { clock, people, opinions };
+  }
+
+  /**
+   * Brings back a saved society into the people present now (matched by name). Clocks are shifted
+   * so that ages of opinions and fame are kept across restarts (the game clock restarts at dawn).
+   * Opinions whose judge or subject is not here stay in the store but are not loaded.
+   * Returns the skills to give back to each person id. Pure apart from this society's state.
+   */
+  restore(saved: SocietySnapshot, clock: number): Map<string, Record<string, number>> {
+    const shift = clock - saved.clock;
+    const byName = new Map([...this.people.values()].filter((p) => p.alive).map((p) => [p.name, p]));
+    const skills = new Map<string, Record<string, number>>();
+    for (const sp of saved.people) {
+      const p = byName.get(sp.name);
+      if (!p) continue;
+      p.prior = clamp01(sp.prior);
+      this.esteem.set(p.id, round3(clamp01(sp.esteem)));
+      if (sp.fame > 0) this.fameAcc.set(p.id, { value: sp.fame, at: Math.min(clock, sp.fameAt + shift) });
+      skills.set(p.id, { ...sp.skills });
+    }
+    for (const o of saved.opinions) {
+      const from = byName.get(o.from);
+      const to = byName.get(o.to);
+      if (from && to) this.opinion({ from: from.id, to: to.id, score: o.score, reason: o.reason, at: Math.min(clock, o.at + shift) });
+    }
+    return skills;
   }
 
   opinion(o: Opinion): void {
@@ -225,7 +323,9 @@ export class Society {
     if (withFamily) family = this.families.get(withFamily.family!)!;
     else {
       const founder = ordered[0];
-      family = { id: `${session}-f${++this.familySeq}`, name: name(founder?.name ?? '?'), founder: founder?.id ?? a, members: [], foundedDay: day };
+      const seq = ++this.familySeq;
+      const color = this.familyColors.length ? this.familyColors[(seq - 1) % this.familyColors.length] : undefined;
+      family = { id: `${session}-f${seq}`, name: name(founder?.name ?? '?'), founder: founder?.id ?? a, members: [], foundedDay: day, ...(color ? { color } : {}) };
       this.families.set(family.id, family);
       founded = true;
       for (const p of ordered) this.join(family, p.id);
@@ -243,7 +343,7 @@ export class Society {
   familyDto(f: Family) {
     const living = f.members.filter((id) => this.people.get(id)?.alive);
     const esteem = living.length ? living.reduce((s, id) => s + this.esteemOf(id), 0) / living.length : 0;
-    return { id: f.id, name: f.name, founder: f.founder, members: [...f.members], alive: living.length, esteem: round3(esteem) };
+    return { id: f.id, name: f.name, founder: f.founder, members: [...f.members], alive: living.length, esteem: round3(esteem), ...(f.color ? { color: f.color } : {}) };
   }
 
   clear(): void {

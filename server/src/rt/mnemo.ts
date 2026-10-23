@@ -2,6 +2,7 @@
 // directly: their remember/recall tools and the world's own memories of what they lived go
 // through here. Failures never stop the world: a memory that cannot be stored is lost.
 import type { MemoryConfig } from './config.ts';
+import type { SocietySnapshot } from './society.ts';
 
 export interface Memory {
   id: string;
@@ -115,6 +116,35 @@ export class Mnemo {
       this.fail(err);
       return undefined;
     }
+  }
+
+  /** The society of a world saved by an earlier run (undefined: none, or mnemo unavailable). */
+  async loadSociety(world: string): Promise<SocietySnapshot | undefined> {
+    if (!this.enabled) return undefined;
+    try {
+      return (await this.req<SocietySnapshot | null>('GET', `/society/${encodeURIComponent(world)}`)) ?? undefined;
+    } catch (err) {
+      this.fail(err);
+      return undefined;
+    }
+  }
+
+  /** Saves people's standing and the opinions formed since the last save. */
+  async saveSociety(world: string, s: SocietySnapshot, maxOpinions: number): Promise<boolean> {
+    if (!this.enabled) return false;
+    try {
+      await this.req('PUT', `/society/${encodeURIComponent(world)}`, { ...s, maxOpinions });
+      return true;
+    } catch (err) {
+      this.fail(err);
+      return false;
+    }
+  }
+
+  /** A person died: its standing and its opinions leave the saved society. */
+  async forgetPerson(world: string, name: string): Promise<void> {
+    if (!this.enabled) return;
+    await this.req('DELETE', `/society/${encodeURIComponent(world)}/people/${encodeURIComponent(name)}`).catch((err) => this.fail(err));
   }
 
   async list(agent: string): Promise<Memory[]> {

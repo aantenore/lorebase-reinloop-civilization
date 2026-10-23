@@ -53,6 +53,10 @@ export interface DecideHost {
   /** Barter: propose an exchange, answer one addressed to you. */
   offer(e: RtEntity, to: string, give: unknown, want: unknown): ToolOutcome;
   answerOffer(e: RtEntity, id: string, accept: boolean): ToolOutcome;
+  /** Ask for something without offering anything (answered like an offer). */
+  ask(e: RtEntity, to: string, item: string, amount: number): ToolOutcome;
+  /** A witness's account of a social law kept or broken by someone. */
+  testify(e: RtEntity, input: { chi?: unknown; legge?: unknown; rispettata?: unknown; motivo?: unknown }): ToolOutcome;
   /** An opinion about someone (kept in the judge's private memory and in the society). */
   judge(e: RtEntity, who: string, score: number, reason: string): ToolOutcome;
   /** A law proposal (a Lorebase Proposal reviewed by humans). */
@@ -189,6 +193,12 @@ function socialTools(host: DecideHost, e: RtEntity): Tool[] {
       const out = host.offer(e, String(to ?? ''), give, want);
       return { content: out.text, isError: !out.ok };
     }),
+    tool<{ a: string; item: string; amount: number }>('chiedi', t('rt.tools.ask'), {
+      a: `string: ${t('rt.tools.offerTo')}`, item: `string: ${t('rt.tools.askItem')}`, amount: `integer: ${t('rt.tools.askAmount')}`,
+    }, ({ a, item, amount }) => {
+      const out = host.ask(e, String(a ?? ''), String(item ?? ''), Number(amount ?? 1));
+      return { content: out.text, isError: !out.ok };
+    }),
     tool<{ offer: string; accept: boolean }>('rispondi_scambio', t('rt.tools.answerOffer'), {
       offer: `string: ${t('rt.tools.offerId')}`, accept: `boolean: ${t('rt.tools.offerAccept')}`,
     }, ({ offer, accept }) => {
@@ -199,6 +209,12 @@ function socialTools(host: DecideHost, e: RtEntity): Tool[] {
       chi: `string: ${t('rt.tools.judgeWho')}`, voto: `number: ${t('rt.tools.judgeScore')}`, motivo: `string: ${t('rt.tools.judgeReason')}`,
     }, ({ chi, voto, motivo }) => {
       const out = host.judge(e, String(chi ?? ''), Number(voto), String(motivo ?? ''));
+      return { content: out.text, isError: !out.ok };
+    }),
+    tool<{ chi: string; legge: string; rispettata: boolean; motivo: string }>('testimonia', t('rt.tools.testify'), {
+      chi: `string: ${t('rt.tools.judgeWho')}`, legge: `string: ${t('rt.tools.testifyLaw')}`, rispettata: `boolean: ${t('rt.tools.testifyKept')}`, motivo: `string: ${t('rt.tools.judgeReason')}`,
+    }, (args) => {
+      const out = host.testify(e, args ?? {});
       return { content: out.text, isError: !out.ok };
     }),
     tool<{ key?: string; text: string; category: string; value?: number }>('proponi_legge', t('rt.tools.proposeLaw'), {

@@ -112,7 +112,7 @@ export class EntityView {
     this.banner?.destroy();
     this.banner = null;
     if (g && carrier) {
-      const fam = this.e.family ? familyColor(this.e.family) : undefined;
+      const fam = this.e.family ? familyColor(this.e.family, this.store.families.get(this.e.family)?.color) : undefined;
       this.banner = this.scene.add.image(-9, -4, ensureBanner(this.scene, g.color, fam)).setOrigin(0.5, 1);
       this.banner.setInteractive({ useHandCursor: true });
       this.banner.setData('groupId', g.id);

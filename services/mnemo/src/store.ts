@@ -79,7 +79,26 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE INDEX IF NOT EXISTS conversations_speaker ON conversations(speaker, seq);
 CREATE INDEX IF NOT EXISTS conversations_listener ON conversations(listener, seq);
 CREATE INDEX IF NOT EXISTS conversations_group ON conversations(group_id, seq);
+CREATE TABLE IF NOT EXISTS society_worlds (
+  world TEXT PRIMARY KEY, clock REAL NOT NULL, updated_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS society_people (
+  world TEXT NOT NULL, name TEXT NOT NULL, prior REAL NOT NULL, esteem REAL NOT NULL,
+  fame REAL NOT NULL, fame_at REAL NOT NULL, skills TEXT NOT NULL, PRIMARY KEY (world, name)
+);
+CREATE TABLE IF NOT EXISTS society_opinions (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, world TEXT NOT NULL, judge TEXT NOT NULL, target TEXT NOT NULL,
+  score REAL NOT NULL, reason TEXT NOT NULL, at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS society_opinions_world ON society_opinions(world, seq);
 `;
+
+/** Society of one world kept across restarts (names, game clock). */
+export interface SocietyState {
+  clock: number;
+  people: Array<{ name: string; prior: number; esteem: number; fame: number; fameAt: number; skills: Record<string, number> }>;
+  opinions: Array<{ from: string; to: string; score: number; reason: string; at: number }>;
+}
 
 /** One line of speech, thought or group deliberation (`from`/`to` are names; `to` may be 'all'). */
 export interface ConversationLine {
@@ -323,6 +342,41 @@ export class Store {
   }
 
   // --- size -------------------------------------------------------------------------------
+
+  // --- society (opinions, esteem, fame, skills per world) ---------------------------------
+
+  societyLoad(world: string): SocietyState | undefined {
+    const meta = this.db.prepare('SELECT clock FROM society_worlds WHERE world = ?').get(world) as { clock: number } | undefined;
+    if (!meta) return undefined;
+    const people = (this.db.prepare('SELECT * FROM society_people WHERE world = ? ORDER BY name').all(world) as Raw[]).map((r) => ({
+      name: String(r.name), prior: Number(r.prior), esteem: Number(r.esteem), fame: Number(r.fame), fameAt: Number(r.fame_at), skills: JSON.parse(String(r.skills)) as Record<string, number>,
+    }));
+    const opinions = (this.db.prepare('SELECT * FROM society_opinions WHERE world = ? ORDER BY seq').all(world) as Raw[]).map((r) => ({
+      from: String(r.judge), to: String(r.target), score: Number(r.score), reason: String(r.reason), at: Number(r.at),
+    }));
+    return { clock: Number(meta.clock), people, opinions };
+  }
+
+  /** Upserts people, appends new opinions (keeping the latest `maxOpinions` of the world), records the clock. */
+  societySave(world: string, s: SocietyState, maxOpinions: number, nowMs: number): void {
+    this.tx(() => {
+      this.db.prepare('INSERT INTO society_worlds (world, clock, updated_ms) VALUES (?, ?, ?) ON CONFLICT(world) DO UPDATE SET clock = excluded.clock, updated_ms = excluded.updated_ms').run(world, s.clock, nowMs);
+      const person = this.db.prepare(`INSERT INTO society_people (world, name, prior, esteem, fame, fame_at, skills) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(world, name) DO UPDATE SET prior = excluded.prior, esteem = excluded.esteem, fame = excluded.fame, fame_at = excluded.fame_at, skills = excluded.skills`);
+      for (const p of s.people) person.run(world, p.name, p.prior, p.esteem, p.fame, p.fameAt, JSON.stringify(p.skills ?? {}));
+      const op = this.db.prepare('INSERT INTO society_opinions (world, judge, target, score, reason, at) VALUES (?, ?, ?, ?, ?, ?)');
+      for (const o of s.opinions) op.run(world, o.from, o.to, o.score, o.reason, o.at);
+      this.db.prepare('DELETE FROM society_opinions WHERE world = ? AND seq NOT IN (SELECT seq FROM society_opinions WHERE world = ? ORDER BY seq DESC LIMIT ?)').run(world, world, Math.max(0, maxOpinions));
+    });
+  }
+
+  /** A person died: its standing and the opinions it held go; opinions others hold about it stay. */
+  societyForget(world: string, name: string): { people: number; opinions: number } {
+    return this.tx(() => ({
+      people: Number(this.db.prepare('DELETE FROM society_people WHERE world = ? AND name = ?').run(world, name).changes),
+      opinions: Number(this.db.prepare('DELETE FROM society_opinions WHERE world = ? AND judge = ?').run(world, name).changes),
+    }));
+  }
 
   /** Used bytes (free pages excluded, so deletions count immediately). */
   /** Appends conversation lines; keeps at most `maxKept` (oldest dropped). */

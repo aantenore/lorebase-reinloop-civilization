@@ -318,6 +318,16 @@ rules:
     unit: fama
     category: society
     text: "Fama che si guadagna quando una legge che si è proposta entra nel libro delle leggi."
+  - code: fame_law_respected
+    value: 0.5
+    unit: fama
+    category: society
+    text: "Fama che si guadagna quando qualcuno racconta di aver visto rispettare una legge della comunità."
+  - code: fame_law_breached
+    value: -1.5
+    unit: fama
+    category: society
+    text: "Fama che si perde quando qualcuno racconta di aver visto violare una legge della comunità."
   - code: fame_half_life_days
     value: 10
     unit: giorni

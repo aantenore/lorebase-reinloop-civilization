@@ -2,16 +2,20 @@
 // answers it in its own loop (accept or reject) or it expires (rule offer_minutes, longer for
 // people held in esteem: rule trade_trust_esteem). On accept both sides swap atomically: every
 // item is checked on both sides first, then moved with economy.barter (catalog-checked transfers).
+// An ask (`chiedi`) is an offer with nothing given: on accept the target gives what was asked.
 // The ledger holds no IO: callers broadcast and deliver perceptions.
-import { type Bag, barter, type Catalog, count, knownItem } from './economy.ts';
+import { type Bag, barter, type Catalog, count, knownItem, transfer } from './economy.ts';
 import type { RtEntity } from './world.ts';
 
 export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
+/** `barter`: give for want; `ask`: want only (a gift on accept). */
+export type OfferKind = 'barter' | 'ask';
 
 export interface Offer {
   id: string;
   from: string;
   to: string;
+  kind: OfferKind;
   give: Bag;
   want: Bag;
   status: OfferStatus;
@@ -35,6 +39,23 @@ export function offerError(c: Catalog, from: RtEntity, to: RtEntity | undefined,
   if (kinds.some((k) => !knownItem(c, k))) return 'unknown_item';
   if (Object.entries(give).some(([k, n]) => count(from, k) < n)) return 'nothing_to_give';
   if (pendingOfFrom >= limits.maxPending) return 'too_many_offers';
+  return undefined;
+}
+
+/** Why an ask cannot be made, or undefined. Pure. */
+export function askError(c: Catalog, from: RtEntity, to: RtEntity | undefined, want: Bag, limits: OfferLimits, pendingOfFrom: number): string | undefined {
+  if (!to || !to.alive || to.id === from.id || to.kind === 'player') return 'no_such_person';
+  if (!Object.keys(want).length) return 'empty_ask';
+  if (Object.keys(want).length > limits.maxKinds) return 'too_many_kinds';
+  if (Object.keys(want).some((k) => !knownItem(c, k))) return 'unknown_item';
+  if (pendingOfFrom >= limits.maxPending) return 'too_many_offers';
+  return undefined;
+}
+
+/** Gives what an ask wants from `giver` to `asker`, all or nothing. Returns an error code or undefined. */
+export function giveAsked(c: Catalog, want: Bag, giver: RtEntity, asker: RtEntity): string | undefined {
+  if (Object.entries(want).some(([k, n]) => count(giver, k) < n)) return 'nothing_to_give';
+  for (const [k, n] of Object.entries(want)) transfer(c, giver, asker, k, n);
   return undefined;
 }
 

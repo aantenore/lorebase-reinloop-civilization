@@ -23,6 +23,7 @@ import { type DecideHost, decisionTier, type Failure, faculties, limitsOf, model
 import { flatSteps, mockGroupPlan, mockSteps } from './mock.ts';
 import type { PlanStep } from './plan.ts';
 import { inboxBlock, look, memberLine, timeLine } from './prompt.ts';
+import { NestedUsage } from './observatory.ts';
 import { weightedWinner } from './society.ts';
 import { tally } from './vote.ts';
 import type { RtEntity } from './world.ts';
@@ -487,10 +488,19 @@ export class GroupManager {
     const trace: TraceEntry[] = [];
     const names = new Map<string, string>();
     const max = this.cfg.groups.traceMaxChars;
+    // Each member's model run is booked under its own model (the team run would book it all under the lead's).
+    const nested = new NestedUsage();
     const sink: Sink = {
       name: 'group-trace',
       onEvent: (ev: RunEvent) => {
         if (ev.type === 'run_start') names.set(ev.runId, (ev.data as { agent: string }).agent);
+        const booked = nested.onEvent(ev);
+        if (booked) {
+          const runName = names.get(ev.runId) ?? '';
+          const m = members.find((x) => x.id === runName.slice(0, Math.max(0, runName.lastIndexOf(SEP))));
+          if (m) this.host.ranModel({ id: `${g.id}/${m.id}`, name: `${g.name}/${m.name}`, model: m.model, tier: `group:${g.pattern}` }, booked);
+          else this.host.ranModel({ id: g.id, name: g.name, model: members[0]!.model, tier: `group:${g.pattern}` }, booked);
+        }
         if (ev.type !== 'run_end') return;
         const name = names.get(ev.runId) ?? '';
         const end = ev.data as { output?: string };
@@ -508,7 +518,7 @@ export class GroupManager {
     const task = this.situation(g, members, why, g.pattern === 'crowd');
     const res = await runner.run(task, { sinks: [sink], signal: AbortSignal.timeout(this.cfg.decisions.timeoutMs) });
     const lead = members[0]!;
-    this.host.ranModel({ id: g.id, name: g.name, model: lead.model, tier: `group:${g.pattern}` }, res);
+    this.host.ranModel({ id: g.id, name: g.name, model: lead.model, tier: `group:${g.pattern}` }, nested.remainder(res));
     // Per-member failures (budget stops included) as reported by the team patterns.
     const failures = (res.failures ?? []).map(failureText);
     if (res.status !== 'completed' && res.status !== 'stopped') {

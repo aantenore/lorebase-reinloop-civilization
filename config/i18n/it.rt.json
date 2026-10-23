@@ -62,7 +62,9 @@
     "offerForYou": "- {id}: {from} ti propone {give} in cambio di {want}",
     "offerByYou": "- {id}: hai proposto a {to} {give} in cambio di {want}",
     "hearsay": "CIÒ CHE SI DICE IN GIRO:\n{lines}",
-    "hearsayLine": "- {from} ha detto di {about}: «{text}»"
+    "hearsayLine": "- {from} ha detto di {about}: «{text}»",
+    "askForYou": "- {id}: {from} ti chiede {want}, senza offrire niente in cambio",
+    "askByYou": "- {id}: hai chiesto a {to} {want}"
   },
   "why": {
     "start": "ti guardi intorno per la prima volta",
@@ -78,7 +80,8 @@
     "groupChanged": "il tuo gruppo è cambiato",
     "conversation": "hai appena parlato con {name}",
     "offer": "{name} ti propone uno scambio",
-    "offerAnswered": "la tua proposta di scambio a {name} è stata {status}"
+    "offerAnswered": "la tua proposta di scambio a {name} è stata {status}",
+    "ask": "{name} ti chiede qualcosa"
   },
   "reason": {
     "unreachable": "non si può arrivare lì",
@@ -116,7 +119,11 @@
     "empty": "testo vuoto",
     "too_many": "hai già troppe proposte in attesa",
     "self": "non puoi giudicare te stesso",
-    "duplicate": "la stessa proposta aspetta già"
+    "duplicate": "la stessa proposta aspetta già",
+    "empty_ask": "una richiesta chiede almeno una cosa",
+    "no_such_law": "nel libro delle leggi non c'è una legge con quel codice",
+    "engine_law": "quella è una legge della natura: nessuno può violarla",
+    "duplicate_testimony": "hai già raccontato questo di quella persona"
   },
   "look": {
     "here": "Sei in ({x},{y}) su {biome}, altitudine {elev}: cibo {food}, legna {wood}{shelter}.",
@@ -180,7 +187,7 @@
     "offerTo": "nome della persona",
     "offerGive": "ciò che dai: codice della cosa -> quantità",
     "offerWant": "ciò che chiedi: codice della cosa -> quantità",
-    "answerOffer": "Rispondi a una proposta di scambio che ti è stata fatta: accettala (lo scambio avviene subito, se siete vicini e avete entrambi le cose) o rifiutala.",
+    "answerOffer": "Rispondi a una proposta di scambio o a una richiesta che ti è stata fatta: accettala (lo scambio o il dono avviene subito, se siete vicini e avete le cose) o rifiutala.",
     "offerId": "codice della proposta",
     "offerAccept": "true per accettare, false per rifiutare",
     "judge": "Esprimi il tuo giudizio su una persona: resta nella tua memoria, e chi ti sta vicino sente ciò che dici di lei.",
@@ -190,7 +197,13 @@
     "proposeLaw": "Proponi una legge nuova o il cambiamento di una legge del libro delle leggi. Entra in vigore solo se viene approvata.",
     "lawKey": "codice della legge (snake_case); se esiste già la proposta la cambia",
     "lawText": "il testo della legge, in italiano",
-    "lawValue": "valore numerico della legge, se ne ha uno"
+    "lawValue": "valore numerico della legge, se ne ha uno",
+    "ask": "Chiedi a una persona vicina una cosa senza offrire niente in cambio. La persona risponde quando ci pensa (rispondi_scambio): se accetta te la dà; altrimenti la richiesta scade.",
+    "askItem": "codice della cosa che chiedi",
+    "askAmount": "quantità",
+    "testify": "Racconta ciò che hai visto: se una persona ha rispettato o violato una legge della comunità (non una legge della natura). Chi ti sta vicino sente ciò che dici.",
+    "testifyLaw": "codice della legge",
+    "testifyKept": "true se l'ha rispettata, false se l'ha violata"
   },
   "act": {
     "planned": "piano fissato ({n} passi)",
@@ -227,7 +240,12 @@
     "judgeFailed": "giudizio non annotato: {reason}",
     "lawProposed": "legge proposta ({key}): ora aspetta l'approvazione",
     "lawFailed": "legge non proposta: {reason}",
-    "lawNotEsteemed": "la tua voce non ha ancora abbastanza peso per proporre una legge"
+    "lawNotEsteemed": "la tua voce non ha ancora abbastanza peso per proporre una legge",
+    "askMade": "richiesta {id} fatta a {name}: aspetta la sua risposta",
+    "askFailed": "richiesta non fatta: {reason}",
+    "askGiven": "hai dato a {name} ciò che chiedeva",
+    "testified": "ciò che hai visto di {name} è stato raccontato",
+    "testifyFailed": "racconto non fatto: {reason}"
   },
   "group": {
     "header": "SIETE IL GRUPPO {name} ({pattern}). Ora decidete insieme cosa farà ciascuno nei prossimi {horizon} minuti.",
@@ -291,7 +309,9 @@
     "aged": "{name} ora è {stage}",
     "lawProposed": "{name} propone una legge: «{text}»",
     "lawMerged": "La legge proposta da {name} entra nel libro delle leggi: {key}",
-    "lawRejected": "La legge proposta da {name} è respinta: {key}"
+    "lawRejected": "La legge proposta da {name} è respinta: {key}",
+    "lawBreach": "{name} ha violato la legge {law}: lo raccontano {witnesses}",
+    "budget": "Il tempo dei pensieri è finito: spesi {spent} $ su {max} $, ogni mente si ferma"
   },
   "memory": {
     "planned": "Ho deciso: {reason}",
@@ -313,7 +333,10 @@
     "offered": "Ho proposto a {name}: {give} in cambio di {want}",
     "traded": "Ho scambiato con {name}: ho dato {give} e ricevuto {get}",
     "judged": "Ho giudicato {name}: {reason}",
-    "offerClosed": "La mia proposta di scambio a {name} è stata {status}"
+    "offerClosed": "La mia proposta di scambio a {name} è stata {status}",
+    "asked": "Ho chiesto a {name}: {want}",
+    "testifiedKept": "Ho raccontato che {name} ha rispettato la legge {law}: {reason}",
+    "testifiedBroken": "Ho raccontato che {name} ha violato la legge {law}: {reason}"
   },
   "mock": {
     "reason": {
@@ -422,5 +445,6 @@
   "offerInbox": "Ti propongo uno scambio ({id}): ti do {give}, in cambio di {want}.",
   "society": {
     "familyName": "Casata di {name}"
-  }
+  },
+  "askInbox": "Ti chiedo ({id}): {want}. Non ho niente da darti in cambio."
 }

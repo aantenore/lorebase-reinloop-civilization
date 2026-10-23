@@ -180,6 +180,8 @@ export interface Family {
   /** Living members. */
   alive: number;
   esteem: number;
+  /** From the server's palette (config); clients fall back to their own when absent. */
+  color?: string;
 }
 
 /** How much `from` esteems `to` (-1..1). Only sent to authorized (god) clients. */
@@ -197,6 +199,8 @@ export interface Society {
 
 export type LawProposalStatus = 'open' | 'merged' | 'rejected';
 export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
+/** `barter`: give for want; `ask`: want only, nothing given (a gift when accepted). */
+export type OfferKind = 'barter' | 'ask';
 
 export interface EntityDelta {
   id: string;
@@ -407,6 +411,8 @@ export interface LawProposalMsg {
 export interface OfferMsg {
   type: 'offer';
   id: string;
+  /** Absent from older servers: barter. */
+  kind?: OfferKind;
   from: string;
   to: string;
   give: Record<string, number>;

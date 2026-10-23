@@ -20,7 +20,7 @@ export type Perception =
   | { kind: 'rules' }
   | { kind: 'groupChanged' }
   | { kind: 'groupFailed' }
-  | { kind: 'offer'; from: RtEntity }
+  | { kind: 'offer'; from: RtEntity; ask?: boolean }
   | { kind: 'offerAnswered'; with: RtEntity; status: string };
 
 /** Bounded concurrency for model calls. */

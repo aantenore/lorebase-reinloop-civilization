@@ -89,7 +89,7 @@ kinds:
         required: true
       event:
         description: What kind of event this is.
-        type: {enum: [birth, death, arrival, departure, group_formed, group_dissolved, laws_changed, discovery, family_founded, law_proposed]}
+        type: {enum: [birth, death, arrival, departure, group_formed, group_dissolved, laws_changed, discovery, family_founded, law_proposed, law_breach]}
         required: true
         indexed: true
       text:

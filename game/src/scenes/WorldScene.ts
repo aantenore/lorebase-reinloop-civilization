@@ -224,12 +224,12 @@ export class WorldScene extends Phaser.Scene {
     const a = this.anchorFor(o.from);
     const to = store.personName(o.to);
     if (o.status === 'pending') {
-      const text = `🤝 ${t('offer.bubble', { give: bagText(o.give), want: bagText(o.want) })}`;
+      const text = o.kind === 'ask' ? `🙏 ${t('offer.ask', { want: bagText(o.want) })}` : `🤝 ${t('offer.bubble', { give: bagText(o.give), want: bagText(o.want) })}`;
       this.labels.bubble(key, a, text, { kind: 'offer', to, ms: config.society.offerBubbleMs });
       return;
     }
     const ok = o.status === 'accepted';
-    this.labels.bubble(key, a, `🤝 ${t(`offer.${o.status}` as I18nKey)}`, { kind: ok ? 'offer-ok' : 'offer-no', to, ms: 2200 });
+    this.labels.bubble(key, a, `${o.kind === 'ask' ? '🙏' : '🤝'} ${t(`offer.${o.status}` as I18nKey)}`, { kind: ok ? 'offer-ok' : 'offer-no', to, ms: 2200 });
     const b = this.anchorFor(o.to);
     if (ok && b.pos()) {
       this.labels.traveler(a, b, this.bagNodes(o.give, ''), 1400);

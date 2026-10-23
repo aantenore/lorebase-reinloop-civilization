@@ -97,8 +97,18 @@ export interface SocietyConfig {
   hearsay: { perPerson: number; maxKept: number; lowBelow: number; highAbove: number; famousAbove: number };
   /** Laws proposed by agents: a branch + Proposal in Lorebase, never merged by the world. */
   lawProposals: { branchPrefix: string; textMaxChars: number; pollMs: number; maxOpen: number; defaultValue: number };
-  /** Family records (Kind) written in batches like the Chronicle. */
-  families: { kind: string; flushMs: number };
+  /** Family records (Kind) written in batches like the Chronicle; `colors` is the palette (by founding order). */
+  families: { kind: string; flushMs: number; colors: string[] };
+  /**
+   * Witnesses' accounts of social laws (laws that are not engine rules): one per witness, person and law
+   * within `windowMinutes` (game); a breach told by `chronicleMinWitnesses` witnesses enters the Chronicle.
+   */
+  testimony: { windowMinutes: number; chronicleMinWitnesses: number; maxKept: number; reasonMaxChars: number };
+  /**
+   * Opinions, esteem, fame and skills kept in mnemo across restarts, per world id (empty: `<domain>/<branch>`
+   * of Lorebase), flushed every `flushMs`.
+   */
+  persist: { enabled: boolean; world: string; flushMs: number };
 }
 
 export type ReplanTrigger = 'planExhausted' | 'stepFailed' | 'spokenTo' | 'critical' | 'nightfall' | 'dawn' | 'seasonChange' | 'rulesChanged' | 'offer' | 'offerAnswered';
@@ -162,6 +172,8 @@ export interface GameConfig {
   births: { maxAgentMinds: number; childTier: 'random-parent' | Tier; atCap: 'block' | 'crowd' };
   /** What a death frees: the private memory in mnemo (optionally leaving a one-line epitaph in the Chronicle). */
   death: { forgetMemories: boolean; epitaph: boolean };
+  /** Spending cap: when the model cost of this run reaches `maxUsd` (0: none) every mind is paused. */
+  budget: { maxUsd: number };
 }
 
 export function loadGameConfig(env: NodeJS.ProcessEnv = process.env): GameConfig {
@@ -177,6 +189,8 @@ export function loadGameConfig(env: NodeJS.ProcessEnv = process.env): GameConfig
   if (env.MNEMO_URL === '') cfg.memory.enabled = false;
   const scale = Number(env.GAME_TIME_SCALE);
   if (env.GAME_TIME_SCALE !== undefined && Number.isFinite(scale) && scale > 0) cfg.loop.timeScale = scale;
+  const maxUsd = Number(env.GAME_BUDGET_USD);
+  if (env.GAME_BUDGET_USD !== undefined && Number.isFinite(maxUsd) && maxUsd >= 0) cfg.budget.maxUsd = maxUsd;
   const flows = Number(env.GAME_FLOWS_MS);
   if (env.GAME_FLOWS_MS !== undefined && Number.isFinite(flows) && flows > 0) cfg.economy.flowsMs = flows;
   return cfg;
