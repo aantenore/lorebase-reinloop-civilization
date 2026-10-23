@@ -1,0 +1,157 @@
+import { roleLabel, t, type I18nKey } from '../i18n';
+import type { Group, PlanStep } from '../net/protocol';
+import { drawPortrait } from '../render/portrait';
+import { store, type EntityState, type Plan } from '../state/store';
+import { bus } from './bus';
+import { h, throttle, uiRoot } from './dom';
+import { icon } from './icons';
+import { panels } from './panels';
+
+export function tierBadge(tier: string): HTMLElement {
+  return h('span', { class: `tier tier-${tier}` }, t(`tier.${tier}` as I18nKey));
+}
+
+export function patternLabel(g: Group): string {
+  return t(`pattern.${g.pattern}` as I18nKey);
+}
+
+/** Ordered step list with done / active states; `who` adds the member name column (group plans). */
+export function stepList(steps: PlanStep[], current: number, withWho: boolean): HTMLElement {
+  const ol = h('ol', { class: 'steps' });
+  steps.forEach((s, i) => {
+    const who = withWho ? (s.args?.who as string | undefined) : undefined;
+    ol.append(
+      h(
+        'li',
+        { class: i < current ? 'done' : i === current ? 'active' : '' },
+        h('span', {}, s.label || s.action),
+        withWho ? h('span', { class: 'who' }, who ? store.name(who) : t('group.anyone')) : null,
+      ),
+    );
+  });
+  return ol;
+}
+
+export function progress(plan: Plan): HTMLElement {
+  const n = plan.steps.length;
+  const pct = n ? Math.min(100, (plan.current / n) * 100) : 0;
+  return h('div', {}, h('div', { class: 'progress' }, h('i', { style: `width:${pct}%` })), h('div', { class: 'note' }, t('insp.step', { i: Math.min(plan.current + 1, n), n })));
+}
+
+function bar(label: string, value: number, max: number, color: string): HTMLElement[] {
+  const pct = Math.max(0, Math.min(100, (value / Math.max(1, max)) * 100));
+  return [h('span', {}, label), h('div', { class: 'bar' }, h('i', { style: `width:${pct}%;background:${color}` })), h('span', { class: 'muted' }, `${Math.round(value)}/${max}`)];
+}
+
+/** Card for the selected inhabitant: vitals, group, live plan, thoughts and dialogue. */
+export function mountInspector(): void {
+  const body = h('div', { class: 'scroll' });
+  const el = h('div', { class: 'px panel inspector hidden' }, h('button', { class: 'btn x-btn', onclick: () => store.select(null) }, 'X'), body);
+  uiRoot().append(el);
+  panels.register({
+    id: 'inspector',
+    key: 'i',
+    defaultOpen: false,
+    el,
+    onOpen: () => (store.selectedId ? render() : panels.set('inspector', false, false)),
+  });
+  el.classList.add('hidden'); // follows the selection, never restored on its own
+  const portrait = h('canvas', { class: 'portrait', width: 56, height: 60 });
+  let portraitFor = '';
+  let scrollKey = '';
+
+  const render = () => {
+    const id = store.selectedId;
+    const e = id ? store.entities.get(id) : undefined;
+    if (!e) return;
+    if (portraitFor !== e.id) {
+      drawPortrait(portrait, e);
+      portraitFor = e.id;
+    }
+    const g = e.groupId ? store.groups.get(e.groupId) : undefined;
+    const plan = store.plans.get(e.id);
+    const groupPlan = g ? store.plans.get(g.id) : undefined;
+    const logs = store.logs.get(e.id) ?? [];
+    const thoughts = logs.filter((l) => l.kind === 'thought' && l.from === e.id).slice(-3).reverse();
+    const talk = logs.filter((l) => l.kind === 'speech').slice(-5).reverse();
+    const isYou = e.id === store.youId;
+
+    const prevScroll = body.scrollTop;
+    const parts: (Node | null)[] = [
+      h(
+        'div',
+        { class: 'card-head' },
+        portrait,
+        h(
+          'div',
+          {},
+          h('div', { class: 'name' }, isYou ? `${e.name} (${t('insp.you')})` : e.name),
+          h('div', { class: 'sub' }, tierBadge(e.tier), roleLabel(e.role), ' · ', t(`kind.${e.kind}` as I18nKey)),
+          h('div', { class: 'sub muted' }, `${t('insp.model')}: ${e.model || t('insp.none')}`),
+          h('div', { class: 'sub' }, e.alive ? t(`anim.${e.anim}` as I18nKey) : t('insp.dead'), ' ', e.thinking ? h('span', { class: 'thinking-tag' }, t('insp.thinking')) : null),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'bars' },
+        ...bar(t('hud.hp'), e.hp, e.maxHp, 'var(--red)'),
+        ...bar(t('hud.hunger'), e.hunger, 100, e.hunger > 70 ? 'var(--red)' : 'var(--bronze)'),
+      ),
+      h('div', { class: 'sub' }, `${t('insp.inventory')}: `, icon('berry'), ` ${e.inventory.food}  `, icon('wood'), ` ${e.inventory.wood}`),
+      g
+        ? h(
+            'div',
+            { class: 'group-row', onclick: () => (panels.set('groups', true), bus.emit('group', { id: g.id })) },
+            h('span', { class: 'swatch', style: `background:${g.color}` }),
+            h('span', {}, g.name),
+            h('span', { class: 'pattern' }, patternLabel(g)),
+            g.leader === e.id ? h('span', { class: 'muted' }, t('insp.leader')) : null,
+          )
+        : h('div', { class: 'sub muted' }, `${t('insp.group')}: ${t('insp.noGroup')}`),
+      planSection(e, plan, groupPlan),
+      thoughts.length ? h('div', { class: 'section-title' }, t('insp.thoughts')) : null,
+      ...thoughts.map((l) => h('div', { class: 'quote thought' }, l.text)),
+      talk.length ? h('div', { class: 'section-title' }, t('insp.dialogue')) : null,
+      ...talk.map((l) => h('div', { class: 'quote' }, h('b', {}, `${store.name(l.from)}${l.to !== 'all' ? ` → ${store.name(l.to)}` : ''}:`), ' ', l.text)),
+      store.youId && !isYou && e.kind !== 'player' && e.alive
+        ? h('button', { class: 'btn primary', onclick: () => bus.emit('dialog', { id: e.id }) }, t('insp.speak'))
+        : null,
+    ];
+    body.replaceChildren(...parts.filter((p): p is Node => !!p));
+    // keep the active step in view when the plan advances, otherwise preserve the user's scroll
+    body.scrollTop = prevScroll;
+    const key = `${e.id}:${plan?.createdAt}:${plan?.current}`;
+    const active = body.querySelector('.steps li.active') as HTMLElement | null;
+    if (key !== scrollKey && active) {
+      scrollKey = key;
+      const a = active.getBoundingClientRect();
+      const b = body.getBoundingClientRect();
+      if (a.bottom > b.bottom - 40 || a.top < b.top) body.scrollTop += a.top - b.top - b.height / 3;
+    }
+  };
+
+  const schedule = throttle(() => panels.isOpen('inspector') && render(), 300);
+  store.on('select', ({ id }) => {
+    panels.set('inspector', !!id, false);
+    if (id) render();
+  });
+  store.on('any', schedule);
+}
+
+function planSection(e: EntityState, plan: Plan | undefined, groupPlan: Plan | undefined): HTMLElement {
+  if (plan && plan.steps.length) {
+    return h(
+      'div',
+      {},
+      h('div', { class: 'section-title' }, t('insp.plan')),
+      progress(plan),
+      stepList(plan.steps, plan.current, false),
+      plan.reason ? h('div', { class: 'quote' }, h('b', {}, `${t('insp.reason')}:`), ' ', plan.reason) : null,
+    );
+  }
+  const mine = groupPlan?.steps.filter((s) => s.args?.who === e.id) ?? [];
+  if (groupPlan && mine.length) {
+    return h('div', {}, h('div', { class: 'section-title' }, t('insp.plan')), h('div', { class: 'note' }, t('insp.groupPlan')), stepList(mine, -1, false));
+  }
+  return h('div', { class: 'note' }, t('insp.noPlan'));
+}

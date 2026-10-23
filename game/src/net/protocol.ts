@@ -1,0 +1,219 @@
+/**
+ * Wire protocol between the world server and the game client.
+ * WebSocket at `/ws`, JSON text frames, every message has a `type` discriminator.
+ * This file has no runtime dependencies so the server can import or copy it as-is.
+ */
+
+export type Biome = 'grass' | 'forest' | 'water' | 'rock' | 'sand';
+export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
+export type Tier = 'opus' | 'sonnet' | 'haiku' | 'human';
+export type EntityKind = 'agent' | 'player' | 'crowd';
+export type Dir = 'n' | 'e' | 's' | 'w';
+export type Anim = 'idle' | 'walk' | 'work' | 'sleep' | 'eat';
+/**
+ * orchestrator: clan, a leader splits the plan · council: parallel proposals, an elder harmonizes ·
+ * router: guild, a dispatcher routes each situation to a specialist · chain: expedition, scout -> planner -> doer ·
+ * mentor: apprentice plans, mentor critiques and revises · assembly: everyone proposes, majority vote ·
+ * crowd: one mind drives many extras.
+ */
+export type GroupPattern = 'orchestrator' | 'council' | 'router' | 'chain' | 'mentor' | 'assembly' | 'crowd';
+
+export interface DecisionTraceEntry {
+  /** Entity id. */
+  member: string;
+  role: 'proposer' | 'critic' | 'router' | 'leader' | 'voter';
+  text: string;
+}
+
+export interface GroupDecision {
+  summary: string;
+  trace: DecisionTraceEntry[];
+}
+export type ShelterLevel = 0 | 1 | 2;
+
+export interface Inventory {
+  food: number;
+  wood: number;
+}
+
+export interface Tile {
+  x: number;
+  y: number;
+  biome: Biome;
+  /** Integer height step; 0 = water level. */
+  elev: number;
+  food: number;
+  wood: number;
+  shelter: ShelterLevel;
+}
+
+export interface MapData {
+  w: number;
+  h: number;
+  /** Row-major is not required: each tile carries its own x/y. */
+  tiles: Tile[];
+}
+
+export interface Entity {
+  id: string;
+  name: string;
+  role: string;
+  tier: Tier;
+  model: string;
+  kind: EntityKind;
+  groupId: string | null;
+  /** Float tile coordinates; integer values are tile CENTRES (tile (i,j) covers [i-0.5, i+0.5)). */
+  x: number;
+  y: number;
+  dir: Dir;
+  anim: Anim;
+  hp: number;
+  maxHp: number;
+  hunger: number;
+  inventory: Inventory;
+  /** Tiles per second. */
+  speed: number;
+  alive: boolean;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  pattern: GroupPattern;
+  members: string[];
+  leader: string | null;
+  /** CSS hex colour, e.g. "#e0a030". */
+  color: string;
+  /** How the group reached its latest joint plan. */
+  lastDecision?: GroupDecision;
+}
+
+export type RuleValue = number | string | boolean;
+
+export interface Rule {
+  key: string;
+  value: RuleValue;
+  text: string;
+  category: string;
+  unit: string;
+}
+
+export interface WorldTime {
+  day: number;
+  /** 0-1439 */
+  minute: number;
+  season: Season;
+}
+
+export interface LorebaseStatus {
+  connected: boolean;
+  branch: string;
+  revision: string;
+}
+
+export interface PlanStep {
+  action: string;
+  /** Free-form. For group plans `args.who` (entity id) names the member doing the step. */
+  args: Record<string, unknown>;
+  label: string;
+}
+
+export interface EntityDelta {
+  id: string;
+  x: number;
+  y: number;
+  dir: Dir;
+  anim: Anim;
+  hp: number;
+  hunger: number;
+  inventory?: Inventory;
+  alive: boolean;
+}
+
+export type WorldEventKind = 'birth' | 'death' | 'build' | 'season' | 'starvation' | 'cold' | 'rules' | 'group';
+
+export interface RuleChange {
+  key: string;
+  old: RuleValue;
+  new: RuleValue;
+  text: string;
+}
+
+// ---------------------------------------------------------------- server -> client
+
+export interface HelloMsg {
+  type: 'hello';
+  you: { entityId: string } | null;
+  map: MapData;
+  entities: Entity[];
+  groups: Group[];
+  rules: Rule[];
+  time: WorldTime;
+  roles: string[];
+  lorebase: LorebaseStatus;
+}
+export interface StateMsg { type: 'state'; t: number; entities: EntityDelta[] }
+export interface EntityAddedMsg { type: 'entity_added'; entity: Entity }
+export interface EntityRemovedMsg { type: 'entity_removed'; id: string; reason: string }
+export interface ThinkingMsg { type: 'thinking'; id: string; on: boolean }
+export interface PlanMsg {
+  type: 'plan';
+  /** Entity id or group id, depending on scope. */
+  id: string;
+  scope: 'entity' | 'group';
+  steps: PlanStep[];
+  current: number;
+  reason: string;
+  createdAt: number;
+}
+export interface PlanProgressMsg { type: 'plan_progress'; id: string; current: number }
+export interface SayMsg { type: 'say'; from: string; to: string | 'all'; text: string; kind: 'speech' | 'thought' }
+/** Streamed reply (to the player). The message with `done: true` closes the utterance; no extra `say` is needed. */
+export interface SayDeltaMsg { type: 'say_delta'; from: string; to: string; delta: string; done: boolean }
+export interface GroupMsg { type: 'group'; group: Group }
+export interface GroupRemovedMsg { type: 'group_removed'; id: string }
+export interface TileMsg { type: 'tile'; x: number; y: number; food: number; wood: number; shelter: ShelterLevel }
+export interface TimeMsg { type: 'time'; day: number; minute: number; season: Season }
+export interface WorldEventMsg { type: 'world_event'; kind: WorldEventKind; text: string; at?: { x: number; y: number } }
+export interface RulesChangedMsg { type: 'rules_changed'; revision: string; changes: RuleChange[] }
+export interface LorebaseMsg { type: 'lorebase'; connected: boolean; branch: string; revision: string }
+
+export type ServerMsg =
+  | HelloMsg
+  | StateMsg
+  | EntityAddedMsg
+  | EntityRemovedMsg
+  | ThinkingMsg
+  | PlanMsg
+  | PlanProgressMsg
+  | SayMsg
+  | SayDeltaMsg
+  | GroupMsg
+  | GroupRemovedMsg
+  | TileMsg
+  | TimeMsg
+  | WorldEventMsg
+  | RulesChangedMsg
+  | LorebaseMsg;
+
+// ---------------------------------------------------------------- client -> server
+
+export interface JoinMsg { type: 'join'; name: string; role: string }
+/** Held movement vector in TILE space (x/y grid axes), length <= 1. Sent only when it changes; {0,0} = stop. */
+export interface InputMsg { type: 'input'; dx: number; dy: number }
+export type ActAction = 'gather' | 'chop' | 'build' | 'eat' | 'give';
+/** args: `{x,y}` target tile for gather/chop/build; `{to, item:'food'|'wood', amount}` for give. */
+export interface ActMsg { type: 'act'; action: ActAction; args: Record<string, unknown> }
+export interface SpeakMsg { type: 'speak'; to: string; text: string }
+
+export type ClientMsg = JoinMsg | InputMsg | ActMsg | SpeakMsg;
+
+// ---------------------------------------------------------------- HTTP
+
+/** POST /api/rules. The client never applies the value locally; it waits for `rules_changed`. */
+export interface RuleEditRequest {
+  key: string;
+  value: RuleValue;
+  mode: 'direct' | 'proposal';
+  message: string;
+}
