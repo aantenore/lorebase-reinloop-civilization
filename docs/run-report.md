@@ -82,3 +82,70 @@ total went $0.11 past the cap. Nobody used `giudica`, `testimonia`, `proponi_leg
 
 Screenshots from this run: `docs/screenshots/` (game-world, society, economy, god-mode,
 consciousness; 800×500, the browser pane's size).
+
+## Run 2 (haiku, 3 days) — 2026-10-24
+
+Fresh world (`npm run world:reset`, empty mnemo), code at `d1162d8`. `SIM_MODEL_OVERRIDE=haiku` (every
+agent and every group role on haiku), default roster of 8 agents, no crowd extras (`GAME_CROWD=0`), seeded
+groups Consiglio degli Anziani (council: Ilse, Mara) and Assemblea dei Raccoglitori (assembly: Okon, Pell).
+Seed laws, unchanged. `GAME_TIME_SCALE=4`, `GAME_BUDGET_USD=2`. Stopped by hand after 13 real minutes at
+day 3, 10:25 (about 2.2 game days elapsed from 06:00 of day 1), on a time-box; the budget was never near.
+
+| Measure | Run 1 (mixed, 1x, 0.5 day) | Run 2 (haiku, 4x, 2.2 days) |
+|---|---|---|
+| Decisions (individual + group) | 166 + 106 | 302 + 37 |
+| Spoken replies | 170 | 89 |
+| Failures | 3 | 2 (1 decision over `maxTurns`, 1 decision timeout); 0 group failures |
+| Crafted items / discoveries | 8 / 0 | 0 / 0 |
+| Births / deaths | 3 / 0 | 0 / 2 (Okon, Pell: "freddo", the wild damage) |
+| Gifts / barters / asks | 44 / 0 / 1 | 21 / 0 / 0 (offers 0) |
+| Shelters built or extended | 11 | 23 |
+| Judgements / testimonies / insights / law proposals | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| Esteem spread | 0 (all 0.5) | 0 (all 0.5) |
+| Top 3 (fame) | Abe, Cira, Okon | Vera 22.6, Nia 12.0, Ilse 2.8 |
+| Bodies acting by reflex (plans) | n/a | 602 |
+| Cost | $3.11 (opus 1.49, sonnet 1.21, haiku 0.40) | **$0.53**, all haiku (individual 0.38, council 0.10, assembly 0.05) |
+| Cost per game day | about $6.2 | about $0.24 |
+
+Group decisions dropped from 106 per half day to 37 in 2.2 days (cooldown in game time, proposers on the
+cheap tier, no vote when only one valid proposal) and were 28% of the spend instead of 57%. Each group
+decision cost $0.002-0.007 (logged per decision). No group failed: no "no valid step" (the repair dropped
+two invalid `dai` steps from assembly proposals and kept the rest), no proposer writing that it lacks
+`commit_plan`.
+
+### Notable moments
+
+1. **The elder feeds first.** The council's plans settled on one rule of its own: «Prima si mangia,
+   ognuno su una casella di cibo diversa» — eat first, each on a different food tile so none is exhausted.
+2. **Checking the law instead of guessing.** The council consulted Lorebase before deciding: «Ho verificato
+   le regole: max_shelter_level è 2 e shelter_wood_cost è 6 per livello, quindi nessun livello…».
+3. **Carrying food to the elder.** Nia, an explorer, crossed the map back to the shelter: «Nia qui: ho
+   portato cibo a Ilse. Chi altro ha fame, si faccia avanti».
+4. **Holding wood for a common plan.** Vera: «Tengo le mie 2 legna da parte finché non mi dici dove
+   costruirlo, così non ne sprechiamo nemmeno una» — the builders then ran a second shelter site together.
+5. **The assembly that walked into the wild.** Okon and Pell kept choosing the richest grass at (19,1)-(21,2),
+   far north, and noticed «Di notte la salute è bassa per tutti» without tying it to the place. Both died of
+   the wild damage (`wild_distance` 9); the assembly dissolved.
+
+### Analysis: why the society features did or did not emerge
+
+- **Survival works, at 4x.** Bodies never wait for a mind: 602 reflex plans covered the gaps while minds
+  thought or groups waited. Nobody starved. The two deaths came from a law the agents did not understand.
+- **Esteem, testimonies, laws, insights: still zero.** The tools are listed (`giudica`, `testimonia`,
+  `proponi_legge`, `share_insight`) with neutral descriptions, but nothing in a haiku agent's perception
+  makes them relevant: no conflict, no theft, no broken promise is ever perceived as such. Hearsay and
+  esteem start flat, and a judgement has no visible consequence before it is made. The agents spend their
+  turns on what the perception is about: hunger, food tiles, wood, shelters.
+- **Barter did not happen** because everyone carries the same two goods (food, wood). Without crafts there
+  is nothing to trade; the one ask was a fibre request that nobody could serve. Crafting needs flint and
+  fibre, which are far from the centre, in the wild, where the assembly died: the economy and the wild
+  law pull in opposite directions and haiku plans do not weigh the risk.
+- **Perception gap.** An agent sees its health drop but not why (exposure in the wild, at night). Making
+  the cause perceivable (a factual line such as "fuori dal villaggio, all'aperto" in the self line) would
+  let the laws be learned from experience; adding hints would break the no-advice rule, so that is left
+  as a perception change for a later release.
+- **Haiku is enough for logistics.** Council and assembly plans were coherent, reused coordinates, shared
+  food and checked the laws. The social layer needs a reason in the perception, not a bigger model.
+
+Screenshots: `game-world.png` replaced with this run (day 3, a village of 8 shelters and the council's
+decision); the society, economy, consciousness and god-mode captures from run 1 still show more and are kept.
