@@ -54,12 +54,15 @@ export interface MemoryConfig {
   /** Keep reinloop run logs in mnemo (best effort). */
   runStore: boolean;
   runFlushMs: number;
+  /** Retries of a request that found nothing listening, with exponential backoff from retryBaseMs. */
+  retries: number;
+  retryBaseMs: number;
   ingest: Record<string, MemoryIngest>;
 }
 
 export interface ServicesConfig {
   herald: { autoStart: boolean; script: string; healthUrl: string; stopOnExit: boolean };
-  mnemo: { autoStart: boolean; entry: string; healthUrl: string; readyTimeoutMs: number };
+  mnemo: { autoStart: boolean; entry: string; healthUrl: string; readyTimeoutMs: number; pollMs: number };
 }
 
 export interface InsightConfig {

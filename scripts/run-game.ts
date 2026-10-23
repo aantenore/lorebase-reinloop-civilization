@@ -48,6 +48,14 @@ if (svc.mnemo.autoStart && cfg.memory.enabled && cfg.memory.url) {
     const child = spawn(process.execPath, [resolve(ROOT, svc.mnemo.entry)], { stdio: 'inherit', env: { ...process.env, ...(port ? { MNEMO_PORT: port } : {}) } });
     children.push(child);
     console.log(`[run] mnemo starting on ${cfg.memory.url} (the first start downloads the embedding model)`);
+    // The game talks to mnemo from its first second: wait until it answers (or give up and start anyway).
+    const deadline = Date.now() + svc.mnemo.readyTimeoutMs;
+    let ready = false;
+    while (!ready && Date.now() < deadline && child.exitCode === null) {
+      ready = await fetch(health, { headers: { 'X-Mnemo-Token': process.env.MNEMO_TOKEN! }, signal: AbortSignal.timeout(2000) }).then((r) => r.ok, () => false);
+      if (!ready) await new Promise((r) => setTimeout(r, svc.mnemo.pollMs));
+    }
+    if (!ready) console.warn(`[run] mnemo not ready after ${svc.mnemo.readyTimeoutMs} ms: starting the world without waiting`);
   }
 }
 

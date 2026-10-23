@@ -330,7 +330,9 @@
         "importance": 0.6,
         "emotion": 0
       }
-    }
+    },
+    "retries": 4,
+    "retryBaseMs": 500
   },
   "services": {
     "herald": {
@@ -343,7 +345,8 @@
       "autoStart": true,
       "entry": "services/mnemo/src/main.ts",
       "healthUrl": "http://127.0.0.1:4410/health",
-      "readyTimeoutMs": 300000
+      "readyTimeoutMs": 300000,
+      "pollMs": 500
     }
   },
   "observatory": {

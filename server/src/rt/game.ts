@@ -136,7 +136,7 @@ export class Game {
 
   private newGroups(): GroupManager {
     return new GroupManager(this.decideHost(), {
-      changed: (g) => this.broadcast({ type: 'group', group: this.groupDto(g) }),
+      changed: (g) => this.broadcastGroup(g),
       removed: (g) => {
         this.groupMinds.get(g.id)?.stop();
         this.groupMinds.delete(g.id);
@@ -205,7 +205,7 @@ export class Game {
       },
       consulted: (e, ev) => {
         this.recent(this.consults, e.id, { at: this.now(), tool: ev.tool, query: ev.query });
-        this.broadcast({ type: 'consult', agentId: e.id, tool: ev.tool, query: ev.query });
+        this.broadcastPrivileged({ type: 'consult', agentId: e.id, tool: ev.tool, query: ev.query });
       },
     };
   }
@@ -554,7 +554,7 @@ export class Game {
         this.setPlan(e, d.steps, d.reason, 'entity');
         this.live(e, 'planned', this.t('rt.memory.planned', { reason: d.reason }));
         if (d.reason) {
-          this.broadcast({ type: 'say', from: e.id, to: 'all', text: d.reason, kind: 'thought' });
+          this.broadcastPrivileged({ type: 'say', from: e.id, to: 'all', text: d.reason, kind: 'thought' });
           this.recent(this.thoughts, e.id, { at: this.now(), text: d.reason });
           this.mnemo.converse({ from: e.name, to: e.name, text: d.reason, kind: 'thought', at: this.now() });
         }
@@ -675,7 +675,7 @@ export class Game {
     g.memory.push(`[g${this.world.day} ${this.world.clockText()}] ${plan.summary}`);
     if (g.memory.length > this.game.decisions.memoryItems) g.memory.splice(0, g.memory.length - this.game.decisions.memoryItems);
     const now = Date.now();
-    this.broadcast({ type: 'group', group: this.groupDto(g) });
+    this.broadcastGroup(g);
     this.broadcast({ type: 'plan', id: g.id, scope: 'group', steps: plan.steps, current: 0, reason: plan.summary, createdAt: now });
     for (const id of g.members) {
       const m = this.world.entities.get(id);
@@ -730,7 +730,7 @@ export class Game {
 
   onOpen(conn: Conn): void {
     this.conns.set(conn.id, { conn, entityId: null, speech: [] });
-    conn.send(this.hello(null));
+    conn.send(this.hello(null, this.privileged(conn)));
   }
 
   onClose(conn: Conn): void {
@@ -780,7 +780,7 @@ export class Game {
 
   private join(pc: PlayerConn, msg: Record<string, unknown>): void {
     const p = this.game.player;
-    if (pc.entityId && this.world.entities.get(pc.entityId)?.alive) return void pc.conn.send(this.hello(pc.entityId));
+    if (pc.entityId && this.world.entities.get(pc.entityId)?.alive) return void pc.conn.send(this.hello(pc.entityId, this.privileged(pc.conn)));
     if (!pc.conn.authorized && !tokenMatches(typeof msg.token === 'string' ? msg.token : undefined, this.cfg.apiToken)) {
       pc.conn.send({ type: 'world_event', kind: 'group', text: 'unauthorized' });
       return void pc.conn.close(4401, 'unauthorized');
@@ -793,7 +793,7 @@ export class Game {
     const role = this.roles.some((r) => r.key === msg.role) ? String(msg.role) : (this.roles[0]?.key ?? 'gatherer');
     const e = this.world.spawn({ name, role, tier: 'human', model: 'human', kind: 'player' });
     pc.entityId = e.id;
-    pc.conn.send(this.hello(e.id));
+    pc.conn.send(this.hello(e.id, this.privileged(pc.conn)));
     this.broadcast({ type: 'entity_added', entity: this.entityDto(e) }, undefined, pc.conn.id);
     const text = this.t('rt.events.arrived', { name });
     this.event('birth', text, e);
@@ -883,22 +883,44 @@ export class Game {
     return { id: e.id, x: r2(e.x), y: r2(e.y), dir: e.dir, anim: e.anim, hp: r1(e.hp), hunger: r1(e.hunger), inventory: { ...e.inventory }, tools: e.tools.map((x) => ({ item: x.item, durability: r1(x.durability), max: x.max })), alive: e.alive } as unknown as Msg;
   }
 
-  groupDto(g: Group) {
-    return { id: g.id, name: g.name, pattern: g.pattern, members: [...g.members], leader: g.leader, color: g.color, ...(g.lastDecision ? { lastDecision: g.lastDecision } : {}) };
+  /** `full: false` hides how the group deliberated (the trace), keeping only what it decided. */
+  groupDto(g: Group, full = true) {
+    const last = g.lastDecision ? (full ? g.lastDecision : { summary: g.lastDecision.summary, trace: [] }) : undefined;
+    return { id: g.id, name: g.name, pattern: g.pattern, members: [...g.members], leader: g.leader, color: g.color, ...(last ? { lastDecision: last } : {}) };
+  }
+
+  /** Whether a connection may see god-mode content (always, when no token is configured). */
+  private privileged(conn: Conn): boolean {
+    return !this.cfg.apiToken || conn.authorized;
+  }
+
+  /** A group update: the deliberation trace only to privileged connections. */
+  private broadcastGroup(g: Group): void {
+    if (!this.cfg.apiToken) return this.broadcast({ type: 'group', group: this.groupDto(g) });
+    const full: Msg = { type: 'group', group: this.groupDto(g, true) };
+    const open: Msg = { type: 'group', group: this.groupDto(g, false) };
+    for (const pc of this.conns.values()) pc.conn.send(pc.conn.authorized ? full : open);
+    for (const fn of this.listeners) {
+      try {
+        fn(full);
+      } catch {
+        // a broken listener never stops the world
+      }
+    }
   }
 
   private lorebaseMsg(): Msg {
     return { type: 'lorebase', connected: this.watcher.connected, branch: this.cfg.lorebase.branch, revision: this.revision };
   }
 
-  hello(you: string | null): Msg {
+  hello(you: string | null, full = true): Msg {
     const w = this.world;
     return {
       type: 'hello',
       you: you ? { entityId: you } : null,
       map: { w: w.width, h: w.height, tiles: w.tiles.map((t) => ({ biome: t.biome, elev: t.elev, ...this.tileDto(t) })) },
       entities: [...w.entities.values()].map((e) => this.entityDto(e)),
-      groups: this.groups.list().map((g) => this.groupDto(g)),
+      groups: this.groups.list().map((g) => this.groupDto(g, full)),
       rules: this.laws.map((r) => ({ key: r.key, value: r.value, text: r.text, category: r.category, unit: r.unit })),
       time: this.timeDto(),
       roles: this.roles.map((r) => r.key),
@@ -1140,7 +1162,7 @@ export class Game {
     this.groups = this.newGroups();
     for (const pc of this.conns.values()) pc.entityId = null;
     this.populate();
-    for (const pc of this.conns.values()) pc.conn.send(this.hello(null));
+    for (const pc of this.conns.values()) pc.conn.send(this.hello(null, this.privileged(pc.conn)));
     this.start();
   }
 }

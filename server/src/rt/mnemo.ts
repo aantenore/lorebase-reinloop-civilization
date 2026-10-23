@@ -55,7 +55,20 @@ export class Mnemo {
     return this.cfg.enabled && !!this.cfg.url;
   }
 
+  /** One request; connection errors (mnemo still starting, restarting) are retried with backoff. */
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.once<T>(method, path, body);
+      } catch (err) {
+        const connection = err instanceof TypeError; // fetch failed: nothing listening yet
+        if (!connection || attempt >= this.cfg.retries) throw err;
+        await new Promise((r) => setTimeout(r, this.cfg.retryBaseMs * 2 ** attempt));
+      }
+    }
+  }
+
+  private async once<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.cfg.url.replace(/\/+$/, '')}${path}`, {
       method,
       headers: {
