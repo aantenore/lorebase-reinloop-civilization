@@ -119,6 +119,11 @@ async function main(): Promise<void> {
     if (method === 'GET' && parts[0] === 'agents' && parts[2] === 'memories' && parts.length === 3) {
       return send(res, 200, svc.list(parts[1]!, checkNs(ns)));
     }
+    if (method === 'DELETE' && parts[0] === 'agents' && parts.length === 2) {
+      const speaker = q.get('speaker') ?? undefined;
+      const runAgent = q.get('runAgent') ?? undefined;
+      return send(res, 200, store.forgetAgent(parts[1]!, { speaker, runAgent, vacuum: cfg.forget.vacuum }));
+    }
     if (method === 'POST' && url.pathname === '/compact') {
       const b = await readBody(req, maxBody);
       const agents = isObj(b) ? b.agents : undefined;

@@ -96,3 +96,22 @@ test('size cap removes lowest-fidelity memories', async () => {
   store.enforceCap(Date.now());
   assert.equal(store.count(), 0);
 });
+
+test('forgetAgent removes the memories, events, spoken lines and runs of one agent only', async () => {
+  const { svc, store } = setup();
+  await svc.add({ agent: 'mara', text: 'La legge del saluto è stata proclamata' });
+  await svc.add({ agent: 'ilse', text: 'Il fiume è in piena' });
+  store.appendConversations([
+    { from: 'Mara', to: 'Ilse', text: 'Salve', kind: 'speech', at: { day: 1, minute: 1 } },
+    { from: 'Ilse', to: 'Mara', text: 'Salve, sorella', kind: 'speech', at: { day: 1, minute: 2 } },
+  ], 1000, 100);
+  store.appendRunEvents([{ runId: 'r1', type: 'run_start', data: { agent: 'a2' } }, { runId: 'r2', type: 'run_start', data: { agent: 'a1' } }], 1000);
+  const out = store.forgetAgent('mara', { speaker: 'Mara', runAgent: 'a2', vacuum: true });
+  assert.deepEqual(out, { memories: 1, conversations: 1, runs: 1 });
+  assert.equal(svc.list('mara').length, 0);
+  assert.equal(svc.list('ilse').length, 1);
+  assert.deepEqual(await svc.recall({ agent: 'mara', query: 'legge saluto' }), []);
+  assert.ok(store.eventsSince(0, 100).every((e) => e.agent !== 'mara'));
+  assert.deepEqual(store.conversations({ limit: 10 }).map((c) => c.from), ['Ilse']);
+  assert.deepEqual(store.listRuns(), ['r2']);
+});

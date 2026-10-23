@@ -2,7 +2,8 @@
 // tools) or from the roster config; its pattern is chosen by its founder. Each pattern is a
 // reinloop multi-agent pattern producing ONE joint plan, split into each member's sub-plan:
 //   orchestrator  reinloop `orchestrator`: the leader delegates to members (as tools) and decides
-//   council       custom pattern over a `parallel` team: members propose, the elder harmonizes and judges
+//   council       custom patterns: members propose (a run cut short that said something still counts;
+//                 with no proposal the elder decides alone), the elder harmonizes and judges
 //                 (tolerant verdict: an unreadable judgement counts as approval)
 //   router        `router`: the leader picks the member best suited to decide
 //   chain         `chain`: scout -> planner -> doer
@@ -14,7 +15,7 @@ import { agent, definePattern, type EasyAgent, type MockTurn, type ModelRequest,
 import type { Translate } from '../i18n.ts';
 import type { GameConfig, GroupPattern } from './config.ts';
 import { AGENT_PATTERNS } from './config.ts';
-import { type DecideHost, decisionTier, faculties, limitsOf, modelRef, normalizeSteps, planSchema } from './decide.ts';
+import { type DecideHost, decisionTier, type Failure, faculties, limitsOf, modelRef, normalizeSteps, planSchema } from './decide.ts';
 import { flatSteps, mockGroupPlan, mockSteps } from './mock.ts';
 import type { PlanStep } from './plan.ts';
 import { inboxBlock, look, memberLine, timeLine } from './prompt.ts';
@@ -251,7 +252,9 @@ export class GroupManager {
       name,
       description: opts.description,
       model: modelRef(this.host, m.model, this.mockWithConsult(g, m, opts.json === true, opts.mock), this.cfg.mock.thinkDelayMs),
-      params: { maxTokens: opts.json ? counts.maxTokens : this.cfg.groups.proseMaxOutputTokens },
+      params: opts.json
+        ? { maxTokens: counts.maxTokens, extra: this.cfg.decisions.modelExtra.plan }
+        : { maxTokens: this.cfg.groups.proseMaxOutputTokens, extra: this.cfg.decisions.modelExtra.prose },
       instructions: [this.instructionsOf(m, g), opts.extra].filter(Boolean).join('\n'),
       tools,
       budget: { maxTurns: (opts.turns ?? this.cfg.groups.maxTurns) + tc.maxConsults + (opts.json ? 1 : 0) },
@@ -310,7 +313,7 @@ export class GroupManager {
         const judge = this.member(elder, g, 'critic', {
           mock: (_r, i) => ({ text: JSON.stringify(i === 0 && opts.maxRounds > 1 ? { pass: false, feedback: t('rt.mock.judgeFix') } : { pass: true, feedback: t('rt.mock.judgeOk') }) }),
         });
-        const proposals = team(`${g.id}-proposals`, 'parallel', { workers: proposers, aggregator: merge }, { template: tpl('aggregate') });
+        const proposals = team(`${g.id}-proposals`, this.proposalsPattern(tpl('aggregate')), { workers: proposers, aggregator: merge });
         return { runner: team(`${g.id}-council`, this.councilPattern(merge.name, opts.maxRounds), { generator: proposals, evaluator: judge }) };
       }
       case 'router': {
@@ -403,6 +406,31 @@ export class GroupManager {
     });
   }
 
+  /**
+   * Like reinloop's `parallel` with an aggregator, but tolerant: a proposer whose run was cut short
+   * (budget, empty answers) still contributes whatever it said, and with no proposal at all the
+   * aggregator (the elder) decides from the situation alone instead of failing the council.
+   */
+  private proposalsPattern(template: string) {
+    const fill = (vars: Record<string, string>) => template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => vars[k] ?? '');
+    return definePattern({
+      description: 'Members propose concurrently; the elder harmonizes whatever was proposed (or decides alone).',
+      roles: { workers: { description: 'Members proposing', many: true }, aggregator: { description: 'The elder harmonizing', kind: 'agent' } },
+      build: ({ workers, aggregator }) => async (input, ctx) => {
+        const results = await Promise.all((workers as EasyAgent[]).map((w) => ctx.call(w, input)));
+        const sections = results
+          .map((r, i) => ({ name: (workers as EasyAgent[])[i]!.name, out: r.output.trim() }))
+          .filter((x) => x.out)
+          .map((x) => `## ${x.name}\n${x.out}`)
+          .join('\n\n');
+        const merge = aggregator as EasyAgent;
+        const merged = await ctx.call(merge, sections ? fill({ task: ctx.task, results: sections }) : input);
+        if (merged.status === 'completed' || this.captured.has(merge.name)) return { output: merged.output, data: merged.data };
+        return { output: '', status: merged.status, reason: `${merge.name}: ${merged.status}${merged.reason ? ` (${merged.reason})` : ''}` };
+      },
+    });
+  }
+
   /** Custom reinloop pattern: everyone proposes a joint plan, everyone votes, majority wins. */
   private assemblyPattern(g: Group, members: RtEntity[]) {
     const t = this.t;
@@ -429,10 +457,10 @@ export class GroupManager {
     });
   }
 
-  /** Runs the group's pattern and returns the joint plan with the trace of how it was decided. */
-  async decide(g: Group, why: string): Promise<JointPlan | undefined> {
+  /** Runs the group's pattern and returns the joint plan with the trace of how it was decided (or why there is none). */
+  async decide(g: Group, why: string): Promise<JointPlan | Failure> {
     const members = this.livingMembers(g);
-    if (!members.length) return undefined;
+    if (!members.length) return { error: 'no living members' };
     const trace: TraceEntry[] = [];
     const names = new Map<string, string>();
     const failures: string[] = [];
@@ -444,8 +472,8 @@ export class GroupManager {
         if (ev.type !== 'run_end') return;
         const name = names.get(ev.runId) ?? '';
         const end = ev.data as { output?: string; status?: string; reason?: string };
-        // Keep why a member's run failed: the pattern itself only says "all workers failed".
-        if (end.status && end.status !== 'completed' && end.status !== 'stopped') failures.push(`${name || ev.runId}: ${end.status}${end.reason ? ` (${end.reason})` : ''}`);
+        // Keep why a member's run ended early (budget stops included): the pattern only says "all workers failed".
+        if (end.status && end.status !== 'completed') failures.push(`${name || ev.runId}: ${end.status}${end.reason ? ` (${end.reason})` : ''}`);
         const out = String(end.output ?? '');
         const cut = name.lastIndexOf(SEP);
         if (cut < 0 || !out.trim()) return;
@@ -463,12 +491,14 @@ export class GroupManager {
     const lead = members[0]!;
     this.host.ranModel({ id: g.id, name: g.name, model: lead.model, tier: `group:${g.pattern}` }, res);
     if (res.status !== 'completed' && res.status !== 'stopped') {
-      console.warn(`[group ${g.name}] ${g.pattern} ${res.status}: ${res.reason ?? ''}${failures.length ? ` <- ${failures.slice(0, 4).join('; ')}` : ''}`);
-      return undefined;
+      const own = failures.filter((f) => f.includes(SEP));
+      const shown = own.length ? own : failures;
+      return { error: `${g.pattern} ${res.status}: ${res.reason ?? ''}${shown.length ? ` <- ${shown.slice(0, 4).join('; ')}` : ''}` };
     }
+    if (failures.length) console.warn(`[group ${g.name}] ${g.pattern} decided despite: ${failures.slice(0, 4).join('; ')}`);
     const leadName = [...this.captured.keys()].find((k) => members.some((m) => k.startsWith(`${m.id}${SEP}`)));
     const json = parseJsonObject(res.output) ?? (leadName ? this.capturedPlan(leadName) : undefined) ?? (res.data && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : undefined);
-    if (!json) return undefined;
+    if (!json) return { error: `${g.pattern}: no joint plan in the output` };
     const c = this.counts(members);
     const byRef = (ref: unknown) => {
       const r = String(ref ?? '').trim().toLowerCase();
@@ -488,7 +518,7 @@ export class GroupManager {
       steps.push(step);
       perMember.set(who.id, n + 1);
     }
-    if (!steps.length) return undefined;
+    if (!steps.length) return { error: `${g.pattern}: the joint plan has no valid step` };
     const summary = String(json.summary ?? '').slice(0, this.cfg.decisions.textMaxChars) || steps[0]!.label;
     return { summary, steps, trace };
   }

@@ -40,6 +40,18 @@ export function changedBlock(t: Translate, changed: RuleChange[]): string {
   return t('rt.observation.changed', { changes: changed.map((c) => t('rt.observation.changeLine', { key: c.key, old: c.old ?? none, new: c.new ?? none })).join('\n') });
 }
 
+/** How a law change is proclaimed to every person: the full text of the law from Lorebase, and its value. */
+export function proclamation(t: Translate, c: RuleChange): string {
+  if (c.new === null) return t('rt.proclamation.removed', { text: c.text, key: c.key });
+  if (c.old === null) return t('rt.proclamation.new', { text: c.text, key: c.key, value: c.new });
+  return t('rt.proclamation.changed', { text: c.text, key: c.key, old: c.old, new: c.new });
+}
+
+/** Memories recalled from the private memory for the moment at hand; empty when none. */
+export function recalledBlock(t: Translate, lines: string[]): string {
+  return lines.length ? t('rt.observation.recalled', { memory: lines.map((m) => `- ${m}`).join('\n') }) : '';
+}
+
 export function timeLine(t: Translate, w: RtWorld): string {
   const season = w.season();
   const year = Math.max(1, Math.round(w.r('winter_every_ticks')));

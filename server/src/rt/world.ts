@@ -167,6 +167,8 @@ export class RtWorld {
   memoryItems: number;
   inboxItems: number;
   private rng: Rng;
+  /** Who the child of two parents is (tier, model, kind), or undefined when no birth may happen. Default: like a random parent. */
+  childOf?: (a: RtEntity, b: RtEntity, rnd: () => number) => { tier: EntityTier; model: string; kind: EntityKind } | undefined;
   private nextId = 1;
   private lastSeason: Season | undefined;
   private lastNight: boolean | undefined;
@@ -297,6 +299,12 @@ export class RtWorld {
     this.entities.set(id, e);
     this.namesUsed.add(spec.name);
     return e;
+  }
+
+  /** Puts a message in one person's inbox (kept to the last `inboxItems`). */
+  deliver(e: RtEntity, item: InboxItem): void {
+    e.inbox.push(item);
+    if (e.inbox.length > this.inboxItems) e.inbox.splice(0, e.inbox.length - this.inboxItems);
   }
 
   remember(e: RtEntity, text: string): void {
@@ -475,10 +483,7 @@ export class RtWorld {
     if (!all && (!target || !target.alive)) return { ok: false, reason: 'no_such_person' };
     if (target && !near.includes(target)) return { ok: false, reason: 'too_far' };
     const item: InboxItem = { from: e.id, fromName: e.name, to: target?.id ?? 'all', text, day: this.day, minute: this.minute };
-    for (const b of near) {
-      b.inbox.push(item);
-      if (b.inbox.length > this.inboxItems) b.inbox.splice(0, b.inbox.length - this.inboxItems);
-    }
+    for (const b of near) this.deliver(b, item);
     this.onEvent({ type: 'say', from: e.id, to: item.to, text, hearers: near.map((b) => b.id) });
     return { ok: true };
   }
@@ -692,13 +697,15 @@ export class RtWorld {
       const b = ready.find((p) => p.id !== a.id && !used.has(p.id) && tileOf(p).x === ta.x && tileOf(p).y === ta.y && a.inventory.food + p.inventory.food >= cost);
       if (!b) continue;
       if (this.living().length >= this.map.maxPopulation) return;
+      const parent = this.rng.next() < 0.5 ? a : b;
+      const spec = this.childOf ? this.childOf(a, b, () => this.rng.next()) : { tier: parent.tier, model: parent.model, kind: parent.kind };
+      if (!spec) continue;
       const fromA = Math.min(a.inventory.food, Math.max(cost / 2, cost - b.inventory.food));
       a.inventory.food = round2(a.inventory.food - fromA);
       b.inventory.food = round2(b.inventory.food - (cost - fromA));
       a.lastBirthTurn = b.lastBirthTurn = turn;
       used.add(a.id).add(b.id);
-      const parent = this.rng.next() < 0.5 ? a : b;
-      const child = this.spawn({ name: this.childName(), role: parent.role, tier: parent.tier, model: parent.model, kind: parent.kind }, ta);
+      const child = this.spawn({ name: this.childName(), role: parent.role, ...spec }, ta);
       child.lastBirthTurn = turn;
       this.onEvent({ type: 'birth', child, parents: [a.id, b.id] });
     }

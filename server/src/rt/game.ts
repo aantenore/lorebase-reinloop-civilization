@@ -23,7 +23,8 @@ import { type DecideHost, decide, reply, type ToolOutcome } from './decide.ts';
 import { type Group, GroupManager, type JointPlan } from './groups.ts';
 import { AgentMind, GroupMind, Limiter, type MindHost, type Perception } from './mind.ts';
 import { type Plan, type PlanStep, tileOf } from './plan.ts';
-import type { GroupView } from './prompt.ts';
+import { type GroupView, proclamation } from './prompt.ts';
+import { canAddAgentMind, childSpec } from './births.ts';
 import { missingRtRules, RT_RULE_KEYS, type Resource, type RtEntity, RtWorld, type WorldEvent } from './world.ts';
 
 type Msg = Record<string, unknown> & { type: string };
@@ -131,6 +132,10 @@ export class Game {
     w.timeScale = this.game.loop.timeScale;
     w.minExperimentItems = this.game.economy.minExperimentItems;
     w.onEvent = (ev) => this.onWorldEvent(ev);
+    w.childOf = (a, b, rnd) => {
+      const spec = childSpec(this.game, a, b, this.agentMinds(), rnd);
+      return spec && { ...spec, model: this.modelFor({ tier: spec.tier }) };
+    };
     return w;
   }
 
@@ -202,6 +207,11 @@ export class Game {
         const name = this.world.entities.get(memberId)?.name ?? memberId;
         this.broadcastPrivileged({ type: 'deliberation', groupId: g.id, pattern: g.pattern, member: memberId, role, text });
         this.mnemo.converse({ from: name, to: this.groups.groups.get(g.id)?.name ?? g.id, text, kind: 'deliberation', at: this.now(), groupId: g.id });
+      },
+      recall: async (e, query) => {
+        if (e.kind !== 'agent') return [];
+        const hits = await this.mnemo.recall(memoryKey(e.name), query);
+        return (hits ?? []).map((m) => this.t('rt.act.recallLine', { day: m.createdAt.day, text: m.text, vivid: this.t(m.fidelity >= 0.5 ? 'rt.act.vivid' : 'rt.act.faded') }).replace(/^- /, ''));
       },
       consulted: (e, ev) => {
         this.recent(this.consults, e.id, { at: this.now(), tool: ev.tool, query: ev.query });
@@ -302,6 +312,11 @@ export class Game {
     for (const e of this.world.living()) this.awaken(e);
   }
 
+  /** Living individual agents: each one is an LLM mind of its own. */
+  private agentMinds(): number {
+    return this.world.living().filter((e) => e.kind === 'agent').length;
+  }
+
   modelFor(entry: Pick<RosterEntry, 'tier' | 'model'>): string {
     return this.cfg.modelOverride ?? entry.model ?? this.cfg.models[entry.tier];
   }
@@ -359,7 +374,26 @@ export class Game {
       const text = this.t('rt.events.rules', { changes: list });
       this.event('rules', text);
       this.chron('laws_changed', text, []);
+      this.proclaim(changes);
       this.perceiveAll({ kind: 'rules' });
+    }
+  }
+
+  /**
+   * Every living person hears the new laws, with their full text from Lorebase: the proclamation
+   * reaches each one's inbox and stays in its private memory (where it fades like any memory).
+   */
+  private proclaim(changes: RuleChange[]): void {
+    const w = this.world;
+    const ingest = this.game.memory.ingest.law;
+    const from = this.t('rt.proclamation.herald');
+    for (const c of changes) {
+      const text = proclamation(this.t, c);
+      for (const e of w.living()) {
+        if (e.kind === 'player') continue;
+        w.deliver(e, { from: 'lorebase', fromName: from, to: e.id, text, day: w.day, minute: w.minute });
+        if (ingest && e.kind === 'agent') void this.mnemo.add(memoryKey(e.name), text, { ...ingest, at: { day: w.day, minute: w.minute }, source: 'law' });
+      }
     }
   }
 
@@ -468,15 +502,15 @@ export class Game {
       case 'death': {
         const e = w.entities.get(ev.id);
         if (!e) break;
-        this.sleep(e.id);
-        this.groups.leave(e);
         const text = t('rt.events.death', { name: e.name, cause: t(`rt.events.cause_${ev.cause}`) });
         this.event('death', text, e);
         this.chron('death', text, [e.name]);
+        void this.release(e);
         break;
       }
       case 'birth': {
         const [a, b] = ev.parents.map((id) => w.entities.get(id)?.name ?? id);
+        if (ev.child.kind === 'crowd') this.joinCrowd(ev.child);
         ev.child.personality = t('rt.events.childOf', { a: a!, b: b! });
         this.lawsSeen.set(ev.child.id, this.laws);
         const text = t('rt.events.birth', { name: ev.child.name, a: a!, b: b! });
@@ -548,8 +582,8 @@ export class Game {
       limiter: this.limiter,
       stats: this.stats,
       why: (p) => this.why(p),
-      decide: (e, why) => decide(host, e, why),
-      reply: (e, speaker, onDelta) => reply(host, e, speaker, onDelta),
+      decide: (e, why, stop) => decide(host, e, why, stop),
+      reply: (e, speaker, onDelta, stop) => reply(host, e, speaker, onDelta, stop),
       commitPlan: (e, d) => {
         this.setPlan(e, d.steps, d.reason, 'entity');
         this.live(e, 'planned', this.t('rt.memory.planned', { reason: d.reason }));
@@ -1138,7 +1172,9 @@ export class Game {
     const err = validateEntry(entry, this.roles.map((r) => r.key), this.cfg);
     if (err) return { error: err };
     if (this.world.nameTaken(entry.name)) return { error: `"${entry.name}" already lives here` };
-    if (this.world.living().filter((e) => e.kind === 'agent').length >= this.cfg.agents.maxRoster) return { error: `at most ${this.cfg.agents.maxRoster} people` };
+    const minds = this.agentMinds();
+    if (minds >= this.cfg.agents.maxRoster) return { error: `at most ${this.cfg.agents.maxRoster} people` };
+    if (!canAddAgentMind(this.game, minds)) return { error: `at most ${this.game.births.maxAgentMinds} agent minds` };
     const e = this.spawnAgent(cleanEntry(entry));
     this.broadcast({ type: 'entity_added', entity: this.entityDto(e) });
     const text = this.t('rt.events.arrived', { name: e.name });
@@ -1146,6 +1182,36 @@ export class Game {
     this.chron('arrival', text, [e.name]);
     this.awaken(e);
     return { agent: this.entityDto(e) };
+  }
+
+  /** A crowd newborn joins the crowd (founding it again if it dissolved), whose single mind decides for it. */
+  private joinCrowd(e: RtEntity): void {
+    const crowd = this.groups.list().find((g) => g.pattern === 'crowd');
+    if (crowd) this.groups.join(crowd, e);
+    else this.groups.create(this.game.crowd.groupName, 'crowd', [e], null);
+  }
+
+  /**
+   * A death frees what the person held: its in-flight model run is aborted and its mind stops,
+   * it leaves its group, the per-person caches go, and (config `death`) its private memory and
+   * the lines it spoke are deleted from mnemo, leaving at most a one-line epitaph in the Chronicle.
+   */
+  async release(e: RtEntity): Promise<void> {
+    this.sleep(e.id);
+    this.groups.leave(e);
+    this.lawsSeen.delete(e.id);
+    this.thoughts.delete(e.id);
+    this.consults.delete(e.id);
+    if (e.kind !== 'agent' || !this.game.death.forgetMemories) return;
+    const key = memoryKey(e.name);
+    if (this.game.death.epitaph) {
+      const mems = await this.mnemo.list(key).catch(() => []);
+      const best = [...mems].sort((a, b) => b.importance * b.fidelity - a.importance * a.fidelity)[0];
+      // Recorded as a death event: the Chronicle schema has no separate kind for it.
+      if (best) this.chron('death', this.t('rt.events.epitaph', { name: e.name, memory: best.text }), [e.name]);
+    }
+    const out = await this.mnemo.forget(key, { speaker: e.name, runAgent: e.id });
+    if (out) console.log(`[death ${e.name}] forgot ${out.memories} memories, ${out.conversations} lines, ${out.runs} runs`);
   }
 
   removeAgent(id: string): boolean {

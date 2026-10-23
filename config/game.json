@@ -108,14 +108,28 @@
       "offerAnswered": true
     },
     "startStaggerMs": 400,
-    "offersMax": 5
+    "offersMax": 5,
+    "modelExtra": {
+      "plan": {},
+      "reply": {
+        "output_config": {
+          "effort": "low"
+        }
+      },
+      "prose": {
+        "output_config": {
+          "effort": "low"
+        }
+      }
+    }
   },
   "conversation": {
-    "replyMaxOutputTokens": 300,
+    "replyMaxOutputTokens": 1000,
     "replyTimeoutMs": 30000,
     "agentReplyDepth": 1,
     "replanAfterReply": true,
-    "replyMaxTurns": 3
+    "replyMaxTurns": 4,
+    "replyMaxConsults": 1
   },
   "player": {
     "speechMinIntervalMs": 4000,
@@ -171,7 +185,7 @@
         "leader": null
       }
     ],
-    "proseMaxOutputTokens": 600,
+    "proseMaxOutputTokens": 1500,
     "maxTurns": 3
   },
   "crowd": {
@@ -329,6 +343,10 @@
       "remember": {
         "importance": 0.6,
         "emotion": 0
+      },
+      "law": {
+        "importance": 0.9,
+        "emotion": 0.2
       }
     },
     "retries": 4,
@@ -364,5 +382,14 @@
   },
   "god": {
     "recentMax": 20
+  },
+  "births": {
+    "maxAgentMinds": 15,
+    "childTier": "random-parent",
+    "atCap": "block"
+  },
+  "death": {
+    "forgetMemories": true,
+    "epitaph": true
   }
 }

@@ -139,7 +139,7 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Repro:** a `parallel` team whose workers all end with a non-completed status (budget, timeout, provider error).
 - **Expected:** the failed result carries the workers' reasons.
 - **Actual:** `reason: 'all workers failed'` only (`src/patterns.ts:105`); the cause is visible only in each worker's `run_end`.
-- **Workaround:** the group decision sink collects non-completed `run_end` reasons and logs them (`server/src/rt/groups.ts`).
+- **Workaround:** the group decision sink collects every non-completed `run_end` reason, budget stops included (`server/src/rt/groups.ts`); the council uses its own tolerant proposals pattern, where a worker stopped by its budget still contributes what it said and the elder decides alone when nobody proposed.
 
 ## 12. reinloop: `parseYaml` rejects multi-line flow mappings
 
@@ -154,3 +154,16 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Severity:** doc (same as 3)
 - **Repro:** a Kind attribute named `kind` → `schema.api_name_reserved`.
 - **Workaround:** the `Resource` Kind uses `category`.
+
+## 14. reinloop: thinking-only answers look like "empty responses"
+
+- **Severity:** bug
+- **Repro:** a Claude 5.5 model (thinking on by default) with a small `maxTokens` (e.g. 300): the
+  answer stops at `max_tokens` with only a `thinking` block.
+- **Expected:** a `max_tokens` stop is reported as such (or the run continues with a larger budget).
+- **Actual:** the Anthropic provider drops thinking blocks (`src/providers/anthropic.ts`, `toParts`),
+  so the message has no parts; the loop retries the identical request and fails with
+  `model returned 3 empty responses in a row` (`src/loop.ts`), each retry paying the full thinking budget.
+- **Workaround:** `decisions.modelExtra` sends `output_config.effort: "low"` for replies and group
+  prose (`thinking.type: "disabled"` is not accepted by every 5.5 model), with larger `maxTokens`;
+  a reply with no words leaves the person silent instead of counting as a failure.

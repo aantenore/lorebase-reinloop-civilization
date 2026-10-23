@@ -13,7 +13,7 @@ import { AGENT_PATTERNS, type GameConfig, type TierDecision } from './config.ts'
 import { flatSteps, mockSteps } from './mock.ts';
 import { MODEL_ACTIONS, normalizeStep, type PlanStep } from './plan.ts';
 import {
-  doingLine, type GroupView, groupLine, inboxBlock, look, memoryBlock, type PromptLimits, rtInstructions, rtObservation, selfLine, timeLine,
+  doingLine, type GroupView, groupLine, inboxBlock, look, memoryBlock, type PromptLimits, recalledBlock, rtInstructions, rtObservation, selfLine, timeLine,
 } from './prompt.ts';
 import type { ActResult, RtEntity, RtWorld } from './world.ts';
 
@@ -47,7 +47,16 @@ export interface DecideHost {
   ranModel(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number }): void;
   /** A person consulted Lorebase (shown to clients). */
   consulted(e: RtEntity, ev: ConsultEvent): void;
+  /** What the person's private memory brings back for `query` (formatted lines; empty when none or unavailable). */
+  recall(e: RtEntity, query: string): Promise<string[]>;
 }
+
+/** Why a decision produced nothing (logged and counted by the caller). */
+export interface Failure {
+  error: string;
+}
+
+export const isFailure = (v: unknown): v is Failure => !!v && typeof v === 'object' && typeof (v as Failure).error === 'string';
 
 /** Lorebase read tools (bounded per decision) and the private memory of one person. */
 export function faculties(host: DecideHost, e: RtEntity, maxConsults: number): Tool[] {
@@ -194,8 +203,8 @@ function mockPlanTurn(host: DecideHost, e: RtEntity, tc: TierDecision): MockTurn
   return { text: plan.reason, toolCalls: calls };
 }
 
-/** Asks one person what it will do next. Resolves undefined when no plan was committed. */
-export async function decide(host: DecideHost, e: RtEntity, why: string): Promise<Decision | undefined> {
+/** Asks one person what it will do next; a Failure says why no plan was committed. */
+export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: AbortSignal): Promise<Decision | Failure> {
   const t = host.t;
   const cfg = host.cfg;
   const w = host.world();
@@ -215,27 +224,37 @@ export async function decide(host: DecideHost, e: RtEntity, why: string): Promis
   const runner = agent({
     name: e.id,
     model: modelRef(host, e.model, (req) => mockDecision(host, e, tc, req), cfg.mock.thinkDelayMs),
-    params: { maxTokens: tc.maxOutputTokens },
+    params: { maxTokens: tc.maxOutputTokens, extra: cfg.decisions.modelExtra.plan },
     instructions: rtInstructions(t, e, host.roleOf(e.role), { horizon }),
     tools: [commit, ...socialTools(host, e), ...faculties(host, e, tc.maxConsults)],
     budget: { maxTurns: tc.maxTurns, maxToolCalls: tc.maxConsults + tc.maxTurns * 4 },
     toolSettings: { concurrency: 1 },
   });
   const prompt = rtObservation(t, w, e, why, host.groups(), host.roleTitle, limitsOf(cfg), host.changedLaws(e));
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.decisions.timeoutMs)]);
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.decisions.timeoutMs), ...(stop ? [stop] : [])]);
   const res = await runner.run(prompt, { signal });
   host.ranModel(e, res);
-  if (!committed && res.status !== 'completed') console.warn(`[decide ${e.name}] ${res.status}: ${res.reason ?? ''}`);
-  return committed;
+  if (committed) return committed;
+  return { error: res.status === 'completed' ? 'no plan committed' : `${res.status}${res.reason ? `: ${res.reason}` : ''}` };
 }
 
 export interface Reply {
   text: string;
   rethink: boolean;
+  /** Why nothing was said, when the model gave no answer (the person stays silent: not a failure). */
+  silent?: string;
 }
 
-/** Quick spoken reply, streamed through `onDelta`. */
-export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, onDelta: (delta: string) => void): Promise<Reply> {
+/** What the speaker last said to this person (to recall related memories). */
+export function lastHeard(e: Pick<RtEntity, 'inbox'>, speaker: Pick<RtEntity, 'id'>): string {
+  return [...e.inbox].reverse().find((m) => m.from === speaker.id)?.text ?? '';
+}
+
+/**
+ * Quick spoken reply, streamed through `onDelta`. The person may consult Lorebase (bounded by
+ * `conversation.replyMaxConsults`) before answering; memories related to what was said are recalled first.
+ */
+export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, onDelta: (delta: string) => void, stop?: AbortSignal): Promise<Reply> {
   const t = host.t;
   const cfg = host.cfg;
   const w = host.world();
@@ -252,37 +271,49 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
     const state = e.hunger >= w.r('critical_hunger') ? t('rt.mock.stateHungry') : e.groupId ? t('rt.mock.stateGroup', { group: host.groups().find((g) => g.id === e.groupId)?.name ?? '' }) : t('rt.mock.stateOk');
     return { text: t(`rt.mock.reply.${(n + w.minute) % 3}`, { name: speaker.name, me: e.name, role: host.roleTitle(e.role), state }) };
   };
+  const consults = Math.max(0, cfg.conversation.replyMaxConsults);
+  const lorebase = consults > 0 ? host.brain.lorebaseTools({ left: consults, onConsult: (ev) => host.consulted(e, ev) }) : [];
   const runner = agent({
     name: e.id,
     model: modelRef(host, e.model, mockReply, cfg.mock.replyDelayMs),
-    params: { maxTokens: cfg.conversation.replyMaxOutputTokens },
+    params: { maxTokens: cfg.conversation.replyMaxOutputTokens, extra: cfg.decisions.modelExtra.reply },
     instructions: `${rtInstructions(t, e, host.roleOf(e.role), { horizon: w.r('plan_horizon_minutes') * tc.horizonFactor })}\n${t('rt.replyInstructions')}`,
-    tools: [rethinkTool],
-    budget: { maxTurns: cfg.conversation.replyMaxTurns },
+    tools: [rethinkTool, ...lorebase],
+    // Consultations, plus rethink and one refused extra call, then the answer.
+    budget: { maxTurns: cfg.conversation.replyMaxTurns, maxToolCalls: consults + 2 },
+    toolSettings: { concurrency: 1 },
   });
+  const recalled = await host.recall(e, `${speaker.name}: ${lastHeard(e, speaker)}`).catch(() => []);
   const prompt = [
     timeLine(t, w),
     selfLine(t, w, e),
     groupLine(t, w, e, host.groups()),
     doingLine(t, e),
+    t('rt.observation.why', { why: t('rt.why.spokenTo', { name: speaker.name }) }),
     t('rt.observation.perceive', { look: look(t, w, e, host.groups(), host.roleTitle, limitsOf(cfg)) }),
     memoryBlock(t, e),
+    recalledBlock(t, recalled),
     inboxBlock(t, e),
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
   let text = '';
-  const handle = runner.stream(prompt, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.conversation.replyTimeoutMs)]) });
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.conversation.replyTimeoutMs), ...(stop ? [stop] : [])]);
+  const handle = runner.stream(prompt, { signal });
   for await (const ev of handle) {
+    // Speech before and after a consultation is one answer; nothing is said after rethink.
+    if (rethink) continue;
+    if (ev.type === 'turn_start' && text && !/\s$/.test(text)) {
+      text += ' ';
+      onDelta(' ');
+    }
     if (ev.type === 'text_delta') {
       const d = (ev.data as { text: string }).text;
-      // Only the first turn is speech; text after a tool call is not said aloud.
-      if (!rethink) {
-        text += d;
-        onDelta(d);
-      }
+      text += d;
+      onDelta(d);
     }
   }
   const res = await handle.result;
   host.ranModel(e, res);
-  if (!text && res.status !== 'completed' && !rethink) console.warn(`[reply ${e.name}] ${res.status}: ${res.reason ?? ''}`);
-  return { text: text.trim(), rethink };
+  const said = text.trim();
+  const silent = !said && !rethink ? (res.status === 'completed' ? 'no words' : `${res.status}${res.reason ? `: ${res.reason}` : ''}`) : undefined;
+  return { text: said, rethink, ...(silent ? { silent } : {}) };
 }

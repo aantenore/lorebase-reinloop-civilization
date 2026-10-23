@@ -95,5 +95,8 @@
   "conversations": {
     "maxKept": 20000,
     "maxLimit": 500
+  },
+  "forget": {
+    "vacuum": true
   }
 }

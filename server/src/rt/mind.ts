@@ -4,7 +4,7 @@
 // The only shared piece is a concurrency limit on model calls (a resource pool, not a planner).
 import type { Season } from '../world/types.ts';
 import type { GameConfig, ReplanTrigger } from './config.ts';
-import { type Decision, decisionTier, type Reply } from './decide.ts';
+import { type Decision, decisionTier, type Failure, isFailure, type Reply } from './decide.ts';
 import type { Group, JointPlan } from './groups.ts';
 import type { RtEntity, RtWorld } from './world.ts';
 
@@ -49,8 +49,8 @@ export interface MindHost {
   world(): RtWorld;
   limiter: Limiter;
   why(p: Perception): string;
-  decide(e: RtEntity, why: string): Promise<Decision | undefined>;
-  reply(e: RtEntity, speaker: RtEntity, onDelta: (d: string) => void): Promise<Reply>;
+  decide(e: RtEntity, why: string, stop: AbortSignal): Promise<Decision | Failure>;
+  reply(e: RtEntity, speaker: RtEntity, onDelta: (d: string) => void, stop: AbortSignal): Promise<Reply>;
   commitPlan(e: RtEntity, d: Decision): void;
   thinking(id: string, on: boolean): void;
   replyDelta(from: RtEntity, to: RtEntity, delta: string, done: boolean): void;
@@ -58,11 +58,17 @@ export interface MindHost {
   sayReply(from: RtEntity, to: RtEntity, text: string): void;
   /** The mind of this person's group, when the group decides jointly. */
   groupMind(e: RtEntity): GroupMind | undefined;
-  decideGroup(g: Group, why: string): Promise<JointPlan | undefined>;
+  decideGroup(g: Group, why: string): Promise<JointPlan | Failure>;
   commitJointPlan(g: Group, plan: JointPlan): void;
   /** The group could not decide: the member's own mind takes over. */
   groupFailed(member: RtEntity): void;
   stats: { decisions: number; groupDecisions: number; replies: number; failures: number };
+}
+
+/** Counts a failed decision and says briefly why. */
+export function failed(host: Pick<MindHost, 'stats'>, kind: string, who: string, reason: string): void {
+  host.stats.failures++;
+  console.warn(`[failure ${host.stats.failures}] ${kind} ${who}: ${reason.replace(/\s+/g, ' ').slice(0, 400)}`);
 }
 
 const TRIGGER: Record<Perception['kind'], ReplanTrigger | undefined> = {
@@ -124,6 +130,8 @@ export class AgentMind {
   private stopped = false;
   private lastThought = 0;
   private speaking = false;
+  /** Aborts the model run in flight when the mind stops (the person died or left). */
+  private readonly abort = new AbortController();
 
   constructor(e: RtEntity, host: MindHost) {
     this.e = e;
@@ -139,6 +147,7 @@ export class AgentMind {
 
   stop(): void {
     this.stopped = true;
+    this.abort.abort(new Error('mind stopped'));
     this.box.stopWaiting();
   }
 
@@ -175,14 +184,15 @@ export class AgentMind {
     this.lastThought = Date.now();
     this.host.thinking(this.e.id, true);
     try {
-      const d = await this.host.limiter.run(() => this.host.decide(this.e, why));
+      if (this.stopped) return;
+      const d = await this.host.limiter.run(() => this.host.decide(this.e, why, this.abort.signal));
+      if (this.stopped) return;
       this.host.stats.decisions++;
-      if (!d) this.host.stats.failures++;
+      if (isFailure(d)) failed(this.host, 'decide', this.e.name, d.error);
       // Joined a group while thinking: the group decides from now on.
       else if (this.e.alive && (solo || !this.host.groupMind(this.e))) this.host.commitPlan(this.e, d);
     } catch (err) {
-      this.host.stats.failures++;
-      console.warn(`[mind ${this.e.name}] ${err instanceof Error ? err.message : err}`);
+      if (!this.stopped) failed(this.host, 'decide', this.e.name, err instanceof Error ? err.message : String(err));
     } finally {
       this.host.thinking(this.e.id, false);
     }
@@ -200,15 +210,16 @@ export class AgentMind {
           this.host.thinking(this.e.id, false);
         }
         this.host.replyDelta(this.e, speaker, d, false);
-      }));
+      }, this.abort.signal));
       this.host.stats.replies++;
+      // No answer from the model: the person stays silent (not a failure).
+      if (out.silent && !this.stopped) console.warn(`[reply ${this.e.name}] silent: ${out.silent}`);
       this.host.replyDelta(this.e, speaker, '', true);
       if (out.text && this.e.alive) this.host.sayReply(this.e, speaker, out.text);
       if (out.rethink && this.host.cfg.conversation.replanAfterReply) this.box.push({ kind: 'conversation', with: speaker });
     } catch (err) {
-      this.host.stats.failures++;
       this.host.replyDelta(this.e, speaker, '', true);
-      console.warn(`[voice ${this.e.name}] ${err instanceof Error ? err.message : err}`);
+      if (!this.stopped) failed(this.host, 'reply', this.e.name, err instanceof Error ? err.message : String(err));
     } finally {
       if (first) this.host.thinking(this.e.id, false);
       this.speaking = false;
@@ -270,15 +281,15 @@ export class GroupMind {
     try {
       const plan = await this.host.limiter.run(() => this.host.decideGroup(this.g, why));
       this.host.stats.groupDecisions++;
-      if (plan && !this.stopped) this.host.commitJointPlan(this.g, plan);
+      if (this.stopped) return;
+      if (!isFailure(plan)) this.host.commitJointPlan(this.g, plan);
       else {
-        this.host.stats.failures++;
+        failed(this.host, 'group', this.g.name, plan.error);
         // No joint plan: each member's own mind takes over for now.
         for (const m of members) this.host.groupFailed(m);
       }
     } catch (err) {
-      this.host.stats.failures++;
-      console.warn(`[group ${this.g.name}] ${err instanceof Error ? err.message : err}`);
+      failed(this.host, 'group', this.g.name, err instanceof Error ? err.message : String(err));
     } finally {
       for (const m of members) this.host.thinking(m.id, false);
     }

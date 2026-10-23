@@ -55,7 +55,8 @@
     "nothingCarried": "nothing",
     "noTools": "none",
     "itemLine": "{amount} {name} ({code})",
-    "toolLine": "{name} ({code}) wear {durability}/{max}"
+    "toolLine": "{name} ({code}) wear {durability}/{max}",
+    "recalled": "COMES BACK TO YOUR MIND:\n{memory}"
   },
   "why": {
     "start": "you look around for the first time",
@@ -233,7 +234,8 @@
     "decay": "{name}: {amount} {item} {reason}",
     "spoiled": "spoiled",
     "broken": "broke",
-    "worn": "wore out"
+    "worn": "wore out",
+    "epitaph": "Epitaph of {name}: «{memory}»"
   },
   "memory": {
     "planned": "I decided: {reason}",
@@ -334,5 +336,11 @@
     "lorebase_changes": "The latest Lorebase revisions, newest first.",
     "lorebase_schema": "Which kinds of Records (Kind) exist in Lorebase and their attributes.",
     "lorebase_context": "An overview from Lorebase around some Records or a question."
+  },
+  "proclamation": {
+    "herald": "Herald",
+    "new": "A law has been proclaimed: «{text}» ({key} = {value})",
+    "changed": "A law has been amended: «{text}» ({key}: {old} → {new})",
+    "removed": "A law has been repealed: «{text}» ({key})"
   }
 }

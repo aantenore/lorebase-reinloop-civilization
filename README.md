@@ -8,20 +8,23 @@ branch → Proposal → merge, and the colony learns of it from Lorebase's chang
 
 ## Screenshots
 
-![Dashboard](docs/screenshots/dashboard.png)
-*Dashboard: leggi e stato del mondo / laws and world state.*
-
-![Game (mock)](docs/screenshots/game-mock.png)
-*Gioco in modalita' offline (mock) / game running offline (mock provider).*
-
-![Game (live)](docs/screenshots/game-live.png)
-*Gioco in tempo reale con agenti LLM / real-time game with LLM agents.*
+![Game world](docs/screenshots/game-world.png)
+*Il mondo in tempo reale / The real-time world*
 
 ![God mode](docs/screenshots/god-mode.png)
-*God mode: leggi, menti, conversazioni e osservatorio / laws, minds, conversations and observatory.*
+*Modalità Dio: leggi, menti, conversazioni / God mode: laws, minds, conversations*
 
 ![Consciousness](docs/screenshots/consciousness.png)
-*Vista della coscienza degli agenti / agent consciousness view.*
+*La coscienza dei ruoli, proposta e revisionata dai pari / Role consciousness, proposed and peer-reviewed*
+
+![Economy](docs/screenshots/economy.png)
+*Tecnologie, ricette e flussi tra ruoli / Technologies, recipes and flows between roles*
+
+![Agent memory](docs/screenshots/memory.png)
+*La memoria privata di un agente / An agent's private memory*
+
+![Dashboard](docs/screenshots/dashboard.png)
+*Dashboard v1: leggi e stato del mondo / v1 dashboard: laws and world state*
 
 ## Architecture
 

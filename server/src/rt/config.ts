@@ -97,8 +97,10 @@ export interface GameConfig {
     replanOn: Record<ReplanTrigger, boolean>;
     startStaggerMs: number;
     offersMax: number;
+    /** Provider-specific request fields per kind of call (e.g. thinking effort), so short answers are not eaten by thinking. */
+    modelExtra: { plan: Record<string, unknown>; reply: Record<string, unknown>; prose: Record<string, unknown> };
   };
-  conversation: { replyMaxOutputTokens: number; replyTimeoutMs: number; replyMaxTurns: number; agentReplyDepth: number; replanAfterReply: boolean };
+  conversation: { replyMaxOutputTokens: number; replyTimeoutMs: number; replyMaxTurns: number; replyMaxConsults: number; agentReplyDepth: number; replanAfterReply: boolean };
   player: { speechMinIntervalMs: number; speechPerMinute: number; speechMaxChars: number; nameMaxChars: number; maxPlayers: number; inputMax: number };
   groups: {
     minMembers: number;
@@ -122,6 +124,10 @@ export interface GameConfig {
   services: ServicesConfig;
   observatory: import('./observatory.ts').ObservatoryConfig;
   god: { recentMax: number };
+  /** Who a newborn is: `childTier` a tier name or 'random-parent'; at `maxAgentMinds` LLM minds a birth is blocked or becomes a crowd extra. */
+  births: { maxAgentMinds: number; childTier: 'random-parent' | Tier; atCap: 'block' | 'crowd' };
+  /** What a death frees: the private memory in mnemo (optionally leaving a one-line epitaph in the Chronicle). */
+  death: { forgetMemories: boolean; epitaph: boolean };
 }
 
 export function loadGameConfig(env: NodeJS.ProcessEnv = process.env): GameConfig {

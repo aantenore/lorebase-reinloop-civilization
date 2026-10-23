@@ -75,6 +75,8 @@ export interface MnemoConfig {
   reconsolidation: ReconsolidationConfig;
   runs: { maxRuns: number; maxAgeHours: number; pruneEveryInserts: number };
   conversations: { maxKept: number; maxLimit: number };
+  /** Forgetting a whole agent (it died): VACUUM afterwards to give the pages back. */
+  forget: { vacuum: boolean };
   events: { maxKept: number; trimEvery: number };
   namespaces: { fading: string[]; static: string[] };
 }

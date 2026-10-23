@@ -104,6 +104,19 @@ export class Mnemo {
     }
   }
 
+  /** Forgets a whole person (it died): its memories, the lines it spoke and its runs. */
+  async forget(agent: string, opts: { speaker?: string; runAgent?: string } = {}): Promise<{ memories: number; conversations: number; runs: number } | undefined> {
+    if (!this.enabled) return undefined;
+    await this.flushLines();
+    const q = new URLSearchParams(Object.entries(opts).filter(([, v]) => v) as Array<[string, string]>);
+    try {
+      return await this.req('DELETE', `/agents/${encodeURIComponent(agent)}${q.size ? `?${q}` : ''}`);
+    } catch (err) {
+      this.fail(err);
+      return undefined;
+    }
+  }
+
   async list(agent: string): Promise<Memory[]> {
     if (!this.enabled) return [];
     return this.req<Memory[]>('GET', `/agents/${encodeURIComponent(agent)}/memories?ns=mind`);

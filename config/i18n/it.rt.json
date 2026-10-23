@@ -55,7 +55,8 @@
     "nothingCarried": "niente",
     "noTools": "nessuno",
     "itemLine": "{amount} {name} ({code})",
-    "toolLine": "{name} ({code}) usura {durability}/{max}"
+    "toolLine": "{name} ({code}) usura {durability}/{max}",
+    "recalled": "TI TORNA IN MENTE:\n{memory}"
   },
   "why": {
     "start": "ti guardi intorno per la prima volta",
@@ -233,7 +234,8 @@
     "decay": "{name}: {amount} {item} {reason}",
     "spoiled": "si è guastato",
     "broken": "si è rotto",
-    "worn": "si è logorato"
+    "worn": "si è logorato",
+    "epitaph": "Epitaffio di {name}: «{memory}»"
   },
   "memory": {
     "planned": "Ho deciso: {reason}",
@@ -334,5 +336,11 @@
     "lorebase_changes": "Le ultime revisioni di Lorebase, dalla più recente.",
     "lorebase_schema": "Quali tipi di Record (Kind) esistono in Lorebase e con quali attributi.",
     "lorebase_context": "Un quadro d'insieme da Lorebase intorno a dei Record o a una domanda."
+  },
+  "proclamation": {
+    "herald": "Banditore",
+    "new": "È stata proclamata una legge: «{text}» ({key} = {value})",
+    "changed": "È stata modificata una legge: «{text}» ({key}: {old} → {new})",
+    "removed": "È stata abrogata la legge: «{text}» ({key})"
   }
 }

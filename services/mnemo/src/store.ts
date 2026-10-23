@@ -223,6 +223,39 @@ export class Store {
     });
   }
 
+  /**
+   * Forgets everything owned by one agent: its memories (rows, full-text index, embeddings), its
+   * memory events, the conversation lines it spoke (`speaker`) and the runs it ran (`runAgent`,
+   * the agent name in the run_start event). `vacuum` gives the freed pages back to the disk.
+   */
+  forgetAgent(agent: string, opts: { speaker?: string; runAgent?: string; vacuum?: boolean } = {}): { memories: number; conversations: number; runs: number } {
+    const out = this.tx(() => {
+      const rids = (this.db.prepare('SELECT rid FROM memories WHERE agent = ?').all(agent) as Array<{ rid: number }>).map((r) => r.rid);
+      const delFts = this.db.prepare('DELETE FROM memories_fts WHERE rowid = ?');
+      for (const rid of rids) delFts.run(rid);
+      this.db.prepare('DELETE FROM memories WHERE agent = ?').run(agent);
+      this.db.prepare('DELETE FROM events WHERE agent = ?').run(agent);
+      const conversations = opts.speaker ? Number(this.db.prepare('DELETE FROM conversations WHERE speaker = ?').run(opts.speaker).changes) : 0;
+      let runs = 0;
+      if (opts.runAgent) {
+        const starts = this.db.prepare("SELECT DISTINCT run_id, event FROM run_events WHERE event LIKE '%run_start%'").all() as Raw[];
+        const mine = starts.filter((r) => {
+          try {
+            const ev = JSON.parse(r.event as string) as { type?: string; data?: { agent?: string } };
+            return ev.type === 'run_start' && ev.data?.agent === opts.runAgent;
+          } catch {
+            return false;
+          }
+        }).map((r) => r.run_id as string);
+        this.deleteRuns([...new Set(mine)]);
+        runs = new Set(mine).size;
+      }
+      return { memories: rids.length, conversations, runs };
+    });
+    if (opts.vacuum) this.db.exec('VACUUM');
+    return out;
+  }
+
   /** Rows whose embedding was produced by another embedder. */
   stale(embedderName: string, limit: number): MemRow[] {
     return (this.db.prepare('SELECT * FROM memories WHERE embedder != ? LIMIT ?').all(embedderName, limit) as Raw[]).map(fromRaw);

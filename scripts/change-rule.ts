@@ -2,10 +2,11 @@
 // Lorebase change feed.
 //   node scripts/change-rule.ts <key> <value> [--mode direct|proposal] [-m "message"]
 //   node scripts/change-rule.ts --new <key> --text "..." --category society [--value 1] [--unit "..."] [--mode ...] [-m "..."]
+//   node scripts/change-rule.ts --repeal <key> [--mode ...] [-m "..."]
 import { loadConfig } from '../server/src/config.ts';
 import { LorebaseClient } from '../server/src/lorebase/client.ts';
 import { loadRules } from '../server/src/lorebase/rules.ts';
-import { createRule, writeRules, type WriteMode } from '../server/src/lorebase/writer.ts';
+import { createRule, repealRule, writeRules, type WriteMode } from '../server/src/lorebase/writer.ts';
 
 const args = process.argv.slice(2);
 const opt = (names: string[]) => {
@@ -18,6 +19,7 @@ const opt = (names: string[]) => {
 const mode = (opt(['--mode']) ?? 'proposal') as WriteMode;
 const message = opt(['-m', '--message']);
 const newKey = opt(['--new']);
+const repealKey = opt(['--repeal']);
 const cfg = loadConfig([]);
 const client = new LorebaseClient(cfg.lorebase.url, cfg.lorebase.domain);
 if (!['direct', 'proposal'].includes(mode)) {
@@ -40,6 +42,16 @@ if (newKey) {
     process.exit(1);
   }
   console.log(`${newKey}: new law (${mode}${out.proposalId ? `, proposal ${out.proposalId}` : ''}) @ ${out.revision?.slice(0, 12) ?? '?'}`);
+  process.exit(0);
+}
+
+if (repealKey) {
+  const out = await repealRule(client, cfg.lorebase, repealKey, mode, message ?? `Repeal ${repealKey}`);
+  if (!out.ok) {
+    console.error(`failed: ${out.error}`);
+    process.exit(1);
+  }
+  console.log(`${repealKey}: repealed (${mode}${out.proposalId ? `, proposal ${out.proposalId}` : ''}) @ ${out.revision?.slice(0, 12) ?? '?'}`);
   process.exit(0);
 }
 
