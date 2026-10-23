@@ -167,3 +167,26 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Workaround:** `decisions.modelExtra` sends `output_config.effort: "low"` for replies and group
   prose (`thinking.type: "disabled"` is not accepted by every 5.5 model), with larger `maxTokens`;
   a reply with no words leaves the person silent instead of counting as a failure.
+
+## 15. lorebase: no bulk delete, so a governed reset hits the write rate limit
+
+- **Severity:** dx
+- **Repro:** remove ~260 Records (Chronicle, Insight) from a branch through Operations: one `delete_{kind}`
+  call per Record, back to back.
+- **Expected:** a bulk counterpart of `import_records` for deletes (e.g. `delete_records {kind, keys}`), one
+  Revision per batch, as for imports.
+- **Actual:** after ~50 calls `429 rate-limited` (`class: writes`, `retry_after_s: 1`); each delete is its own
+  Revision on the branch.
+- **Where:** `packages/keeper/src/lorebase_keeper/services/operation_catalog.py` (built-ins: `create_`,
+  `update_`, `delete_`, `link_`, `unlink_`, `import_records`, `import_links`, `import_batch`; no bulk delete).
+- **Workaround:** `scripts/world-reset.ts` waits out each 429 (`retry_after_s`) and merges all deletes with one
+  Proposal; the seed run right after it pauses first.
+
+## 16. reinloop: `McpToolInfo` is not exported from the package entry
+
+- **Severity:** dx
+- **Repro:** `import { type McpToolInfo } from 'reinloop'` and type-check.
+- **Expected:** the return type of the public `McpClient.listTools()` is importable.
+- **Actual:** `TS2305: Module '"reinloop"' has no exported member 'McpToolInfo'` (it is declared in
+  `src/mcp/client.ts:178` but not re-exported by `src/index.ts`).
+- **Workaround:** none needed at runtime (type-only import, erased by Node's type stripping).

@@ -11,12 +11,22 @@ The prompt is minimal: no laws, no tasks, no goals, no strategy, no advice on wh
 |------|--------|
 | Instructions (system) | `config/i18n/<lang>.rt.json` → `instructions`: name, personality, role code and title (Lorebase `Role`), the faculties (a mind connected to Lorebase through the `lorebase_*` tools: laws, the role's shared consciousness, the chronicle; a private memory `remember`/`recall`) and the plan interface (`commit_plan`, step counts and horizon of the tier) |
 | Observation (user message, at each decision) | `rt.observation.*`, `rt.look.*`: time and season, the person's body, what it carries (item names and codes, tools with wear) and position, group, current step, why it is thinking again (a fact: plan finished, step failed, spoken to, ...), what it perceives within `vision_radius`, what was said to it, what it lived (last `memoryItems`), and which law keys changed since it last thought |
-| Tools | `commit_plan`, `say`, `form_group`, `join_group`, `leave_group`, `share_insight`, `review_insights`, `judge_insight` (`rt.tools.*`); Lorebase read tools from Herald (`lorebase_get`, `lorebase_query`, `lorebase_search`, `lorebase_history`, `lorebase_diff`, `lorebase_changes`, `lorebase_schema`, `lorebase_context`; descriptions `rt.mcp.*`); private memory `remember(text, importance?)`/`recall(query)` (mnemo: semantic recall, memories fade and blur; results say whether a memory is vivid or faded) |
+| Tools | `commit_plan`, `say`, `form_group`, `join_group`, `leave_group`, `scambia`, `rispondi_scambio`, `giudica`, `proponi_legge`, `share_insight`, `review_insights`, `judge_insight` (`rt.tools.*`); Lorebase read tools from Herald (`lorebase_get`, `lorebase_query`, `lorebase_search`, `lorebase_history`, `lorebase_diff`, `lorebase_changes`, `lorebase_schema`, `lorebase_context`; descriptions `rt.mcp.*`); private memory `remember(text, importance?)`/`recall(query)` (mnemo: semantic recall, memories fade and blur; results say whether a memory is vivid or faded) |
 | Spoken reply | same instructions + `rt.replyInstructions`; short observation without laws; optional `rethink` tool |
 | Group members | `rt.memberInstructions` + the group situation (`rt.group.*`: members, perception of the leader, what was said, group memory, the JSON shape of a joint plan); pattern texts `rt.group.tpl.*` replace reinloop's English harness templates |
 
+Society in the observation (`rt.observation.age|offers|hearsay`, `rt.look.repute*`), facts only and never a
+number of esteem or fame: the person's age and life stage; the exchange offers made to it and by it (codes
+to answer with `rispondi_scambio`); after each person in view, a band phrase ("gode di molta stima", "gode
+di poca stima", "tutti parlano di ciò che ha fatto") and what one heard of them ("di Bruno si dice: «…»");
+a block "CIÒ CHE SI DICE IN GIRO" with the judgements one overheard. Why it thinks again may also be "X ti
+propone uno scambio" or "la tua proposta di scambio a X è stata accettata". The tools say what they do
+(`giudica`: the judgement stays in one's memory and those nearby hear it; `proponi_legge`: it comes into
+force only if approved) and never when or why to use them. A refused `proponi_legge` says only "la tua voce
+non ha ancora abbastanza peso".
+
 The plan interface lists the economy actions (`crea(recipe)`, `sperimenta(items)`, `usa(item)`,
-`dai(to, item, amount)`, `gather(resource)` by item code) as a tool description only: which recipes
+`dai(to, item, amount)`, `scambia(to, give, want)`, `gather(resource)` by item code) as a tool description only: which recipes
 exist, who knows them and what they need is in Lorebase (`Recipe`, `Resource`, `Technology`), not in
 the prompt; undiscovered recipes are not readable at all. Perception adds the structures on tiles
 (hearth, storehouse) and whether the person stands in the wilds. The step count is a suggestion in

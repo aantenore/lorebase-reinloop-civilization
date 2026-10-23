@@ -1,5 +1,7 @@
 # Lorebase × reinloop: a tiny civilization
 
+[![CI](https://github.com/aantenore/lorebase-reinloop-civilization/actions/workflows/ci.yml/badge.svg)](https://github.com/aantenore/lorebase-reinloop-civilization/actions/workflows/ci.yml)
+
 A handful of LLM agents must survive on a grid world: hunger, winters, shelters, births and
 deaths. The **laws of the world** (every gameplay number and its wording) and the **social roles**
 live in [Lorebase](https://github.com/aantenore/lorebase), a versioned knowledge graph. The agents run on
@@ -24,6 +26,31 @@ branch → Proposal → merge, and the colony learns of it from Lorebase's chang
 *La memoria privata di un agente / An agent's private memory*
 
 ## Architecture
+
+```mermaid
+flowchart LR
+  subgraph agents["reinloop agent loops (one per person, one per group)"]
+    A1["mind: perceptions in, plans out"]
+  end
+  subgraph world["world server (server/src/rt, :4400)"]
+    W["physics + event bus 20 Hz<br/>barter, society, ages, skills"]
+    H["REST + WebSocket /ws + SSE"]
+  end
+  LB[("Lorebase Keeper<br/>laws, roles, economy,<br/>Chronicle, Insight, Family")]
+  HE["Herald (Lorebase MCP, read-only, pinned to main)"]
+  MN[("mnemo :4410<br/>private fading memory")]
+  C["clients: game/ (isometric), web/ (dashboard)"]
+  A1 -- "commit_plan, scambia, giudica, proponi_legge" --> W
+  W -- "perceptions (mailbox)" --> A1
+  A1 -- "lorebase_* tools" --> HE --> LB
+  W -- "change feed (SSE)" --> LB
+  W -- "Operations, Proposals (Chronicle, insights, discoveries, law proposals)" --> LB
+  A1 -- "remember / recall" --> MN
+  W -- "lived memories, conversations" --> MN
+  H <--> C
+```
+
+The diagram below is the v1 tick dashboard:
 
 ```
             Lorebase Keeper (Postgres)                 this project (Node; deps: reinloop, ws)        
@@ -64,8 +91,14 @@ deterministic heuristic instead of a model, so the demo runs offline; status rep
 
 ## Run
 
-Requirements: Node ≥ 22.18, Docker, the `lorebase` and `reinloop` checkouts next to this one
-(reinloop built once: `cd ../reinloop && npm install && npm run build`).
+Requirements: Node ≥ 22.18, Docker and the `lorebase` checkout next to this one (Keeper is built
+from it). reinloop is pinned: `vendor/reinloop-<sha>.tgz`, a packed build of one reinloop commit, is
+the dependency, so `npm ci` works anywhere (CI included).
+
+To move to a newer reinloop: `npm run reinloop:pin` (snapshot of `../reinloop` HEAD) or
+`npm run reinloop:pin -- <path-to-reinloop> <sha>`. The script packs the COMMITTED tree only
+(`git archive`, never uncommitted edits), builds it in a temp dir, writes `vendor/reinloop-<sha>.tgz`,
+points `package.json` at it and runs `npm install`; delete the old tgz and commit both.
 
 ```bash
 npm install
@@ -78,7 +111,8 @@ npm run game:server        # the game server alone (no Herald/mnemo management)
 npm run herald:up          # Herald alone, the Lorebase MCP server, on 127.0.0.1:8190/mcp
 npm run dev                # legacy tick dashboard (v1) on the same port
 npm run sim:mock           # legacy dashboard, offline mock agents
-npm test                   # unit tests (engine, plans, pathfinding, votes, request guards)
+npm test                   # unit tests (engine, plans, pathfinding, votes, barter, society, request guards)
+npm run world:reset -- --dry-run   # what a reset to the seed state would do (see "World reset")
 ```
 
 The first mnemo start downloads the embedding model `Xenova/multilingual-e5-small` (quantized,
@@ -141,11 +175,16 @@ but people can read it like every law, so it works as a social law they may foll
 - The colony is kept in memory; a server restart starts a new world (the roster is kept in `data/`).
 - Real-time world: the step count is a suggestion in the `commit_plan` schema; `maxSteps` per tier only
   caps what is kept. People do not collide. Pending insights are tracked in memory: after a restart
-  their `role/` branches and open Proposals stay in Lorebase unjudged (TODO: reconcile at startup).
-  Without Herald the agents run with no Lorebase tools (and so without knowing the laws).
+  at startup the open `role/` Proposals are reloaded into the review queue (older than
+  `insights.reconcile.maxAgeHours`, or with mode `close`, they are closed) and leaked `role/` and `law/`
+  branches are deleted. Without Herald the agents run with no Lorebase tools (and so without knowing the laws).
 - Economy: catalog edits made in Lorebase while the world runs are read at the next start only.
-  Discoveries persist in `main` across worlds. Barter with acceptance (`scambia`) and `chiedi` are not
-  built yet (gifts only). Births still count years in body turns (`turn_minutes`).
+  Discoveries persist in `main` across worlds (`npm run world:reset` hides them again). `chiedi` (asking
+  without offering) is not built. Births still count years in body turns (`turn_minutes`).
+- Society: fame counts gifts, supplies, accepted insights, discoveries and enacted laws; "obeying a law
+  under others' eyes" is not counted (engine laws are enforced physically, social laws are not
+  checkable). Opinions, esteem and families live in the server's memory (a restart starts a new
+  world); Family records and lineage (Chronicle births) are kept in Lorebase.
 - Herald pins agents to `main` (server-side argument override plus `LOREBASE_BRANCH` on Herald); a
   `lorebase_diff` between two revision ids of the hidden branch is not blocked, but those ids are
   never shown to agents.
@@ -168,6 +207,8 @@ See [docs/upstream-issues.md](docs/upstream-issues.md) for friction found in Lor
                  brain.ts  Lorebase MCP faculties (cached, pinned to main) + private memory (mnemo)
                  economy.ts / economy-book.ts  items, recipes, discovery, decay; catalog in Lorebase
                  insights.ts shared role consciousness (peer-reviewed Proposals)
+                 barter.ts offers with acceptance · society.ts esteem, fame, ranks, families
+                 law-proposals.ts laws proposed by agents (Proposals humans review)
                  game.ts   WebSocket protocol, REST host, Chronicle
 ```
 
@@ -235,6 +276,64 @@ Revision with its Links), written to the Chronicle (`discovery`) and shared as a
 discoverer's role. Nothing in prompts mentions the economy: people see what they carry and what is on
 the tiles, and consult Lorebase (`Recipe`, `Resource`, `Technology`) or experiment.
 
+### Barter with acceptance
+
+`scambia {to, give, want}` (plan step, or a tool during a decision; `give`/`want` map item code →
+amount, at most `economy.maxTradeKinds` kinds) creates an offer to a person within `speech_radius`.
+The target gets it in its inbox and as a perception (`decisions.replanOn.offer`), sees it under
+"PROPOSTE DI SCAMBIO" and answers in its own loop with `rispondi_scambio {offer, accept}` (even inside a
+group: the offer is answered by the person). On accept, both must still be within `speech_radius` and
+hold the items: the swap is atomic (`economy.barter`, catalog-checked) and emits `trade {kind:'barter'}`.
+Offers expire after the rule `offer_minutes` × (1 + `trade_trust_esteem` × (2·esteem − 1)) of the
+offerer (trusted people's offers last longer); the offerer perceives the answer (`offerAnswered`).
+At most `decisions.offersMax` pending offers per person.
+
+### Society: reputation, fame, ages, skills, families
+
+- **Opinions.** `giudica {chi, voto -1..1, motivo}` is optional: the judgement goes to the judge's private
+  memory (mnemo, it fades) and to the opinion table; people within `speech_radius` hear the reason
+  (hearsay), never the score. **Esteem** (0-1) = decayed weighted mean of the latest opinion of each judge
+  plus a prior (`esteem_prior`, worth `esteem_prior_weight` opinions); a judge weighs
+  `max(0, 1 + esteem_judge_weight·(2e−1))`, ×`elder_esteem_weight` for elders; opinions halve every
+  `opinion_half_life_days`. **Fame** = deeds (`fame_gift`, `fame_recipe_supply` for an item a recipe of the
+  receiver's other role consumes, `fame_insight_accepted`, `fame_discovery`, `fame_law_enacted`) halving
+  every `fame_half_life_days`. **Rank** 1 = highest esteem (fame breaks ties). All are Lorebase rules.
+- **Perception without numbers.** People in view carry phrases from i18n by band (`society.hearsay`:
+  "gode di molta stima", "tutti parlano di ciò che ha fatto") and what one heard ("di Bruno si dice: …");
+  the observation adds "CIÒ CHE SI DICE IN GIRO" and the person's age ("ETÀ: hai 18 giorni, sei adulto").
+- **Effects (rules).** Assembly votes and the choice of a new group leader weigh by esteem
+  (`esteem_vote_weight`). Insight approvals weigh `esteem × insight_review_esteem_factor` and an insight is
+  merged when they reach 1; a reviewer with esteem ≥ `insight_solo_approve_esteem` approves alone.
+  `proponi_legge {key?, text, category, value?}` is accepted from people with esteem ≥
+  `law_proposal_min_esteem`: it writes `create_rule`/`update_rule` on `law/agent-…` and opens a Proposal
+  that the world NEVER merges: a human approves it (god mode `POST /api/law-proposals/:id/approve|reject`,
+  or the Lorebase web app at `/<domain>/review/<proposal id>`, e.g. `/world/review/prp_…`; set
+  `VITE_LOREBASE_REVIEW_PATH` in `game/.env` accordingly). The world polls it (`society.lawProposals.pollMs`)
+  and the merged law reaches everyone through the change feed. Trade trust: see barter.
+- **Ages.** `child` until `age_child_days`, `elder` from `age_elder_days` (game days); founders arrive at
+  `founder_age_days` (the elder role already elder). Children work at `child_work_factor`, walk at
+  `child_move_factor` and cannot follow recipes with tools, a station or more than
+  `child_max_recipe_inputs` units of input; elders `elder_work_factor`/`elder_move_factor`, and their
+  judgement weighs more. **Skills**: each recipe followed is practice; its work time is divided by
+  `1 + skill_gain_per_practice × min(practice, skill_max_level)` (`skill` event when the level rises).
+- **Families (dynasties).** A newborn's esteem starts at `reputation_inheritance` × the parents' mean
+  esteem. It joins the family of the more esteemed parent that has one; when neither has one, that parent
+  founds a new family ("Casata di …") and both parents join. Lineage is kept the light way: a `Family`
+  Kind (code, name, founder, founded day, session; written in batches like the Chronicle) plus the
+  Chronicle's `birth` (child and parents as actors) and `family_founded` entries; a death keeps them
+  (only the private memory is freed).
+
+### World reset
+
+`npm run world:reset` returns Lorebase `main` to the seed state with the governed flow only (Operations on
+a `reset/<stamp>` branch, one Proposal, approved and merged): laws not in `lorebase/rules.seed.yaml` are
+repealed, seed laws and roles get their seed values back, discovered technologies and their recipes
+leave `main` (the seed then rebuilds `nature/hidden`), Chronicle, Insight and Family records are kept on
+`archive/<stamp>` and removed from `main`, and stale `role/`, `law/`, `tech/`, `seed/`, `reset/` branches
+and their open Proposals are closed. Then mnemo's database (`config/mnemo.json` `db.path`) is deleted
+(`data/models` is kept). `--dry-run` lists the actions; `--keep-memory` keeps mnemo; it refuses while
+mnemo answers (`--force` to override). Writes wait out the Keeper's rate limit (429).
+
 ### Private memory: mnemo (`services/mnemo`)
 
 A separate Node service (own `package.json`, port `config/mnemo.json`, started by `npm run game`).
@@ -258,6 +357,9 @@ entities only), `entity_added`, `entity_removed`, `thinking`, `plan` (entity or 
 steps carry `args.who`), `plan_progress`, `say` (speech or thought; a player's own speech is not
 echoed), `say_delta` (streamed reply, `done: true` closes it), `group`, `group_removed`, `tile`,
 `time`, `world_event`, `rules_changed`, `lorebase`, and:
+
+- `tiles {items: [{x, y, food, wood, shelter, structures?}]}`: changed tiles coalesced and flushed at most
+  every `net.tileFlushMs` (only tiles whose state changed since last sent); clients still accept `tile`.
 
 - `insight {insight: {code, role, text, confidence, author, reviewer?, day, evidence?, status}, action: 'proposed'|'accepted'|'rejected'|'retired', reviewer?}`
 - `consult {agentId, tool, query}`: an agent consulted Lorebase (e.g. `lorebase_search`, "leggi inverno").
@@ -285,6 +387,22 @@ Economy and memory (phase 2):
   and revision; mnemo totals and per-agent count/avg fidelity/gists; reinloop runs, decisions, failures, tokens `{input, output}` and
   `costUsd {total, byModel, byTier}`; per-agent usage is in `/api/agents/:id/mind`), `/log?limit=` (main's revisions), `/proposals?status=`,
   `/records/:kind?limit=` (Kinds in `observatory.kinds`), `/memories?offset=&limit=` (all agents, paged).
+
+Barter and society (phase 3):
+
+- `Entity` gains `age: {stage: 'child'|'adult'|'elder', days}`, `esteem` (0-1), `fame`, `rank` (1 = top), `family`
+  (id or null), `parents` ([id, id] or null). `hello.society` = `Society`.
+- `offer {id, from, to, give, want, status: 'pending'|'accepted'|'rejected'|'expired'}`; an accepted offer is
+  followed by `trade {kind: 'barter', give, get}`.
+- `reputation {people: [{id, esteem, fame, rank}]}` every `society.broadcastMs`; `opinion {from, to, score, reason}`
+  (privileged, like `memory`); `aged {id, stage}`; `skill {id, recipe, level}`;
+  `family {family: {id, name, founder, members, alive, esteem}}`;
+  `law_proposal {id, by, text, key, category, value, branch, status: 'open'|'merged'|'rejected'}` (`id` is the
+  Lorebase Proposal id).
+- REST: `GET /api/society` → `{people: [{id, name, role, tier, age, esteem, fame, rank, family, parents, alive}],
+  families, opinions?: [{from, to, score}]}` (opinions only with the token, or when none is set);
+  `GET /api/law-proposals`; `POST /api/law-proposals/:id/approve|reject` `{message?}` (a mutation: token
+  and JSON content type as usual).
 
 The typed client copy is `game/src/net/protocol.ts`. REST (both modes): `GET /api/status`,
 `GET|POST /api/rules`, `GET /api/scenarios`, `POST /api/scenarios/:name/apply`, `GET|PUT /api/roster`,
