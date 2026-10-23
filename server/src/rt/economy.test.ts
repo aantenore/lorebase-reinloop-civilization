@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  addItems, applyCraft, barter, canCraft, type Catalog, experiment, Flows, gatherTool, type Holder, matchDiscovery, recipeFrom, resourceFrom,
+  addItems, applyCraft, barter, canCraft, type Catalog, count, experiment, knownItem, newInventory, Flows, gatherTool, type Holder, matchDiscovery, recipeFrom, resourceFrom,
   spoil, stationsOf, techFrom, transfer, wearStructures,
 } from './economy.ts';
 
@@ -103,4 +103,31 @@ test('tools boost gathering; barter is all or nothing; flows aggregate', () => {
   f.add('crafter', 'builder', 'axe', 1);
   assert.deepEqual(f.take(), [{ fromRole: 'gatherer', toRole: 'crafter', item: 'flint', amount: 3 }, { fromRole: 'crafter', toRole: 'builder', item: 'axe', amount: 1 }]);
   assert.deepEqual(f.take(), []);
+});
+
+test('hostile item codes and amounts never reach object internals or fail open', () => {
+  const c = catalog();
+  const h: Holder = { role: 'crafter', inventory: newInventory(), tools: [] };
+  assert.equal(Object.getPrototypeOf(h.inventory), null);
+  for (const bad of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+    assert.equal(count(h, bad), 0);
+    assert.equal(knownItem(c, bad), false);
+    addItems(h, bad, 5);
+  }
+  assert.deepEqual(Object.keys(h.inventory).sort(), ['food', 'wood']);
+  assert.equal(({} as Record<string, unknown>).polluted, undefined);
+  addItems(h, 'flint', Number.NaN);
+  addItems(h, 'flint', Number.POSITIVE_INFINITY);
+  assert.equal(count(h, 'flint'), 0);
+  h.inventory.flint = Number.NaN;
+  assert.equal(count(h, 'flint'), 0);
+  h.inventory.flint = 3;
+  const b: Holder = { role: 'builder', inventory: newInventory(), tools: [] };
+  assert.equal(transfer(c, h, b, 'flint', Number.NaN), 0);
+  assert.equal(transfer(c, h, b, 'flint', -2), 0);
+  assert.equal(transfer(c, h, b, 'flint', Number.POSITIVE_INFINITY), 0);
+  assert.equal(transfer(c, h, b, 'flint', 3), 3);
+  assert.equal(transfer(c, h, b, 'constructor', 1), 0);
+  assert.deepEqual(experiment(c, b, ['__proto__', 'flint'], none, 2), { ok: false, error: 'missing_inputs' });
+  assert.equal(count(b, 'flint'), 3, 'nothing consumed by a rejected experiment');
 });

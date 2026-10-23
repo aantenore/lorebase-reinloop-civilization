@@ -42,6 +42,22 @@ export const config = {
     /** Opacity of the silhouette drawn over occluders for hidden inhabitants. */
     silhouetteAlpha: 0.55,
   },
+  /** Lorebase web UI (link target from god mode). */
+  lorebaseUi: {
+    base: String(env.VITE_LOREBASE_UI_URL || 'http://localhost:5180').replace(/\/$/, ''),
+    explorerPath: '/world/explorer',
+  },
+  god: {
+    /** How long a law edit waits for `rules_changed` before it is reported as failed (ms). */
+    pendingTimeoutMs: 20000,
+    /** Conversation lines fetched per query and kept on screen. */
+    conversationLimit: 200,
+    /** Observatory auto-refresh while visible (ms). */
+    observatoryRefreshMs: 10000,
+    observatoryLogLimit: 15,
+    /** Thoughts and consults kept in the mind view. */
+    mindItemsKept: 20,
+  },
   minds: {
     /** Lorebase consult bubble lifetime (ms) and how many consults the inspector keeps per agent. */
     consultBubbleMs: 4200,

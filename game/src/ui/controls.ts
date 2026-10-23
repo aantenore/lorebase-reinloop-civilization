@@ -18,7 +18,11 @@ const MOVE_KEYS: Record<string, [number, number]> = {
   KeyD: [1, 0],
   ArrowRight: [1, 0],
 };
-const ACT_KEYS: Record<string, ActAction> = { KeyC: 'chop', KeyG: 'gather', KeyB: 'build', KeyQ: 'eat' };
+// G is reserved for god mode; gathering stays on E/Space (context action)
+const ACT_KEYS: Record<string, ActAction> = { KeyC: 'chop', KeyB: 'build', KeyQ: 'eat' };
+/** Panel id of the god-mode overlay: while open the player body does not move or act. */
+const GOD_PANEL = 'god';
+const godOn = () => panels.isOpen(GOD_PANEL);
 
 let dialogOpen = false;
 const held = new Set<string>();
@@ -27,7 +31,7 @@ let lastSent = { dx: 0, dy: 0 };
 function sendInput(): void {
   let sx = 0;
   let sy = 0;
-  if (!dialogOpen) for (const k of held) {
+  if (!dialogOpen && !godOn()) for (const k of held) {
     const v = MOVE_KEYS[k];
     if (v) {
       sx += v[0];
@@ -87,6 +91,12 @@ function contextAct(forced?: ActAction): void {
 }
 
 export function installControls(): void {
+  panels.onChange((id, open) => {
+    if (id !== GOD_PANEL) return;
+    held.clear();
+    sendInput();
+    if (open) bus.emit('follow', { on: false });
+  });
   bus.on('dialog', ({ id }) => {
     dialogOpen = !!id;
     if (dialogOpen) {
@@ -98,19 +108,20 @@ export function installControls(): void {
     if (isTyping(ev) || ev.metaKey || ev.ctrlKey || ev.altKey) return;
     if (MOVE_KEYS[ev.code]) {
       ev.preventDefault();
+      if (godOn()) return;
       held.add(ev.code);
       sendInput();
       return;
     }
     if (ev.repeat) return;
     // C and E are actions while playing: panels then answer to Shift+C / Shift+E
-    if ((ev.shiftKey || !store.youId) && (ev.code === 'KeyC' || ev.code === 'KeyE')) {
+    if ((ev.shiftKey || !store.youId || godOn()) && (ev.code === 'KeyC' || ev.code === 'KeyE')) {
       const p = panels.byKey(ev.code === 'KeyC' ? 'c' : 'e');
       if (p) return panels.toggle(p.id);
     }
     if (ev.code === 'KeyE' || ev.code === 'Space') {
       ev.preventDefault();
-      if (!store.youId) return;
+      if (!store.youId || godOn()) return;
       const target = nearestAgent();
       if (target) {
         store.select(target);
@@ -118,7 +129,7 @@ export function installControls(): void {
       } else contextAct();
       return;
     }
-    if (ACT_KEYS[ev.code]) return contextAct(ACT_KEYS[ev.code]);
+    if (ACT_KEYS[ev.code] && !godOn()) return contextAct(ACT_KEYS[ev.code]);
     if (ev.code === 'KeyF') return bus.emit('follow', {});
     if (ev.code === 'Escape') {
       if (dialogOpen) return bus.emit('dialog', { id: null });

@@ -1,6 +1,6 @@
 import { config } from '../config';
 import type { ClientMsg, RuleEditRequest, ServerMsg } from './protocol';
-import { authHeaders, getJson, withToken } from './http';
+import { authHeaders, getJson, requestJson, withToken } from './http';
 import type { ConnStatus, Transport } from './transport';
 
 /** Reconnecting WebSocket transport. Re-sends the last `join` after a reconnect. */
@@ -86,6 +86,10 @@ export class WsTransport implements Transport {
 
   getJson<T = unknown>(path: string): Promise<T> {
     return getJson<T>(path);
+  }
+
+  request<T = unknown>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+    return requestJson<T>(method, path, body);
   }
 
   close(): void {

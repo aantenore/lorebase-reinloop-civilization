@@ -1,6 +1,7 @@
 // mnemo HTTP entry point: JSON-only API over node:http, bound to the configured host (loopback by
 // default). Wires config, store, embedder (with automatic fallback) and rewriter, starts the
 // compaction timer and closes the database on SIGINT/SIGTERM.
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { loadConfig, loadEnvFile } from './config.ts';
 import { createEmbedder } from './embed.ts';
@@ -162,7 +163,22 @@ async function main(): Promise<void> {
     throw new HttpError(404, 'not found');
   }
 
+  // Only the game server may talk to mnemo: loopback Host names (no DNS rebinding) and a shared secret.
+  const allowedHosts = new Set([`127.0.0.1:${cfg.http.port}`, `localhost:${cfg.http.port}`, `[::1]:${cfg.http.port}`]);
+  let secret = process.env.MNEMO_TOKEN ?? '';
+  if (!secret) {
+    secret = randomBytes(24).toString('hex');
+    console.warn('mnemo: MNEMO_TOKEN not set: generated a private one, so no client can call this instance (start it with npm run game, or set MNEMO_TOKEN)');
+  }
+  const secretBuf = Buffer.from(secret);
+  const authorized = (req: IncomingMessage) => {
+    const given = Buffer.from(String(req.headers['x-mnemo-token'] ?? ''));
+    return given.length === secretBuf.length && timingSafeEqual(given, secretBuf);
+  };
+
   const server = createServer((req, res) => {
+    if (!allowedHosts.has(String(req.headers.host ?? '').toLowerCase())) return send(res, 403, { error: 'host not allowed' });
+    if (!authorized(req)) return send(res, 401, { error: 'missing or invalid X-Mnemo-Token' });
     route(req, res).catch((err) => {
       if (err instanceof HttpError) return send(res, err.status, { error: err.message });
       console.error('mnemo: request failed:', err);

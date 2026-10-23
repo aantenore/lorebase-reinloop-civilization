@@ -4,7 +4,7 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
-import { type GuardConfig, originAllowed, tokenMatches } from './security.ts';
+import { type GuardConfig, hostAllowed, originAllowed, tokenMatches } from './security.ts';
 
 export interface Conn {
   id: number;
@@ -31,7 +31,7 @@ export function attachWebSocket(server: Server, opts: WsOptions, handlers: WsHan
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname !== opts.path) return void socket.destroy();
-    if (!originAllowed(req.headers.origin, opts)) {
+    if (!originAllowed(req.headers.origin, opts) || !hostAllowed(req.headers.host, opts)) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return void socket.destroy();
     }

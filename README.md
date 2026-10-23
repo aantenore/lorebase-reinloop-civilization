@@ -17,6 +17,12 @@ branch → Proposal → merge, and the colony learns of it from Lorebase's chang
 ![Game (live)](docs/screenshots/game-live.png)
 *Gioco in tempo reale con agenti LLM / real-time game with LLM agents.*
 
+![God mode](docs/screenshots/god-mode.png)
+*God mode: leggi, menti, conversazioni e osservatorio / laws, minds, conversations and observatory.*
+
+![Consciousness](docs/screenshots/consciousness.png)
+*Vista della coscienza degli agenti / agent consciousness view.*
+
 ## Architecture
 
 ```
@@ -276,8 +282,8 @@ Economy and memory (phase 2):
 - `act` (players) also accepts `gather {item?}`, `craft {recipe}`, `experiment {items}`, `use {item}`, `give {to, item, amount}`.
 - REST: `GET /api/economy` (economy + last `flows`), `GET /api/agents/:id/memories` (bare `Memory[]`).
 - Observatory (read-only proxies, cached `observatory.cacheMs`): `GET /api/observatory/summary` (Lorebase counts per Kind
-  and revision; mnemo totals and per-agent count/avg fidelity/gists; reinloop runs, decisions, failures, tokens and cost by
-  model and tier, per agent from each run's end), `/log?limit=` (main's revisions), `/proposals?status=`,
+  and revision; mnemo totals and per-agent count/avg fidelity/gists; reinloop runs, decisions, failures, tokens `{input, output}` and
+  `costUsd {total, byModel, byTier}`; per-agent usage is in `/api/agents/:id/mind`), `/log?limit=` (main's revisions), `/proposals?status=`,
   `/records/:kind?limit=` (Kinds in `observatory.kinds`), `/memories?offset=&limit=` (all agents, paged).
 
 The typed client copy is `game/src/net/protocol.ts`. REST (both modes): `GET /api/status`,
@@ -310,6 +316,12 @@ The server spends paid model credits, so even locally:
   when an `Origin` header is present, an origin from `http.corsOrigins` or the server's own (403):
   this blocks cross-site form and `text/plain` requests. Bodies over `http.maxBodyBytes` get 413.
 - The WebSocket upgrade applies the same Origin check.
+- Every HTTP request and WebSocket upgrade must carry a `Host` of the server's own loopback names on its port, of a
+  `http.corsOrigins` origin, or of `http.allowedHosts` (403 otherwise: blocks DNS rebinding).
+- With `SIM_API_TOKEN` set, `/api/stream` and the god-mode reads need the token, and `memory`/`deliberation` events go
+  only to WebSocket connections that presented it (`?token=` or `join.token`).
+- mnemo accepts only `Host` 127.0.0.1/localhost on its port and a shared `X-Mnemo-Token` header; `npm run game`
+  generates the secret at boot (`MNEMO_TOKEN` to set it) and passes it to both processes.
 - Optional shared token: with `SIM_API_TOKEN` set, mutating routes need `Authorization: Bearer <token>`
   and a WebSocket `join` needs `?token=<token>` on the `/ws` URL or `token` in the `join` message.
   Clients would read it from their env (e.g. `VITE_API_TOKEN`) and send it; without the token

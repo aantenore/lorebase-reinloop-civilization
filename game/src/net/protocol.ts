@@ -237,6 +237,11 @@ export interface RuleChange {
   old: RuleValue;
   new: RuleValue;
   text: string;
+  /** Present when the law was retired/deleted. */
+  removed?: boolean;
+  /** Present when the law was created or re-categorized. */
+  category?: string;
+  unit?: string;
 }
 
 // ---------------------------------------------------------------- server -> client
@@ -305,6 +310,17 @@ export interface MemoryMsg {
   mergedFrom?: string[];
 }
 
+/** One voice inside a group deliberation (the pattern's internal discussion). */
+export interface DeliberationMsg {
+  type: 'deliberation';
+  groupId: string;
+  pattern: GroupPattern;
+  /** Entity id. */
+  member: string;
+  role: DecisionTraceEntry['role'];
+  text: string;
+}
+
 export type ServerMsg =
   | HelloMsg
   | StateMsg
@@ -329,7 +345,8 @@ export type ServerMsg =
   | DiscoveryMsg
   | DecayMsg
   | FlowsMsg
-  | MemoryMsg;
+  | MemoryMsg
+  | DeliberationMsg;
 
 // ---------------------------------------------------------------- client -> server
 
@@ -366,3 +383,92 @@ export interface MemoryList {
 }
 /** GET /api/economy */
 export type EconomyResponse = Economy & { flows?: FlowEdge[] };
+
+// ---------------------------------------------------------------- HTTP (god mode)
+
+export type RuleMode = 'direct' | 'proposal';
+
+/** POST /api/rules: create a law (or edit an existing key). */
+export interface RuleCreateRequest {
+  key: string;
+  value?: RuleValue;
+  text?: string;
+  category?: string;
+  unit?: string;
+  mode: RuleMode;
+  message: string;
+}
+
+/** PATCH /api/rules/:key */
+export interface RulePatchRequest {
+  value?: RuleValue;
+  text?: string;
+  category?: string;
+  mode: RuleMode;
+  message: string;
+}
+
+/** Response of a rule mutation (every field optional: the client waits for `rules_changed`). */
+export interface RuleMutationResult {
+  revision?: string;
+  branch?: string;
+  proposal?: { id: string; branch?: string; title?: string };
+}
+
+export type ConversationKind = 'speech' | 'thought' | 'deliberation';
+
+/** GET /api/conversations?agent=&with=&group=&since=&limit= */
+export interface ConversationLine {
+  id: string;
+  at: GameTime;
+  from: string;
+  to: string;
+  text: string;
+  kind: ConversationKind;
+  groupId?: string;
+}
+
+/** GET /api/agents/:id/mind */
+export interface AgentMind {
+  agentId: string;
+  plan?: { steps: PlanStep[]; current: number; reason: string } | null;
+  thoughts?: { at: GameTime; text: string }[];
+  consults?: { at: GameTime; tool: string; query: string }[];
+  groupId?: string | null;
+}
+
+/** GET /api/observatory/summary. Nested values may vary by server version: render generically. */
+export interface ObservatorySummary {
+  lorebase?: { url?: string; domain?: string; branch?: string; revision?: string; counts?: Record<string, number> };
+  mnemo?: {
+    memories?: number;
+    perAgent?: { agentId: string; name: string; count: number; avgFidelity: number; gists: number }[];
+    dbBytes?: number;
+    lastCompaction?: string | null;
+  };
+  reinloop?: {
+    runs?: number;
+    decisions?: number;
+    groupDecisions?: number;
+    failures?: number;
+    tokens?: number | Record<string, unknown>;
+    costUsd?: number | Record<string, unknown>;
+  };
+}
+
+/** GET /api/observatory/log?limit= */
+export interface LorebaseLogEntry {
+  revision: string;
+  message: string;
+  time: string;
+  kinds: string[];
+}
+
+/** GET /api/observatory/proposals?status= */
+export interface ProposalInfo {
+  id: string;
+  title: string;
+  branch: string;
+  status: string;
+  author?: string;
+}

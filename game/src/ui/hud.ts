@@ -8,6 +8,7 @@ import { panels } from './panels';
 
 /** Toolbar entries: panel id, label key, shortcut. */
 const TOOLBAR: { id: string; label: I18nKey; key: string }[] = [
+  { id: 'god', label: 'god.button', key: 'g' },
   { id: 'laws', label: 'laws.title', key: 'l' },
   { id: 'consciousness', label: 'hud.consciousness', key: 'c' },
   { id: 'economy', label: 'hud.economy', key: 'e' },

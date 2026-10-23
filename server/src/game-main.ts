@@ -17,7 +17,7 @@ const seconds = Number(flag('--seconds') ?? 0);
 
 const game = new Game(cfg, gameCfg);
 const server = createHttpServer(game);
-const wss = attachWebSocket(server, { path: gameCfg.ws.path, maxPayloadBytes: gameCfg.ws.maxPayloadBytes, port: cfg.http.port, corsOrigins: cfg.http.corsOrigins, apiToken: cfg.apiToken }, {
+const wss = attachWebSocket(server, { path: gameCfg.ws.path, maxPayloadBytes: gameCfg.ws.maxPayloadBytes, port: cfg.http.port, corsOrigins: cfg.http.corsOrigins, apiToken: cfg.apiToken, allowedHosts: cfg.http.allowedHosts }, {
   open: (c) => game.onOpen(c),
   message: (c, m) => game.onMessage(c, m),
   close: (c) => game.onClose(c),

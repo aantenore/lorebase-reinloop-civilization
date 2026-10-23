@@ -7,6 +7,22 @@ export interface GuardConfig {
   port: number;
   corsOrigins: string[];
   apiToken?: string;
+  /** Extra Host header values accepted besides localhost/127.0.0.1 on `port` and the CORS origins' hosts. */
+  allowedHosts?: string[];
+}
+
+/** Host header allowlist (blocks DNS rebinding): the server's own loopback names and the configured origins. */
+export function hostAllowed(host: string | undefined, cfg: GuardConfig): boolean {
+  if (!host) return false;
+  const ok = new Set([`localhost:${cfg.port}`, `127.0.0.1:${cfg.port}`, `[::1]:${cfg.port}`, ...(cfg.allowedHosts ?? [])]);
+  for (const o of cfg.corsOrigins) {
+    try {
+      ok.add(new URL(o).host);
+    } catch {
+      // not a URL: ignore
+    }
+  }
+  return ok.has(host.toLowerCase());
 }
 
 export interface RequestLike {

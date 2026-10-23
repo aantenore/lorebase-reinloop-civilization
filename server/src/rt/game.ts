@@ -200,7 +200,7 @@ export class Game {
       ranModel: (who, res) => this.usage.track(who, res),
       deliberated: (g, memberId, role, text) => {
         const name = this.world.entities.get(memberId)?.name ?? memberId;
-        this.broadcast({ type: 'deliberation', groupId: g.id, pattern: g.pattern, member: memberId, role, text });
+        this.broadcastPrivileged({ type: 'deliberation', groupId: g.id, pattern: g.pattern, member: memberId, role, text });
         this.mnemo.converse({ from: name, to: this.groups.groups.get(g.id)?.name ?? g.id, text, kind: 'deliberation', at: this.now(), groupId: g.id });
       },
       consulted: (e, ev) => {
@@ -271,7 +271,7 @@ export class Game {
 
   private onMemory(ev: MemoryEvent): void {
     const e = this.world.living().find((x) => x.kind === 'agent' && memoryKey(x.name) === ev.agentId);
-    this.broadcast({ type: 'memory', agentId: e?.id ?? ev.agentId, action: ev.action, memory: memoryDto(ev.memory), ...(ev.mergedFrom ? { mergedFrom: ev.mergedFrom } : {}) });
+    this.broadcastPrivileged({ type: 'memory', agentId: e?.id ?? ev.agentId, action: ev.action, memory: memoryDto(ev.memory), ...(ev.mergedFrom ? { mergedFrom: ev.mergedFrom } : {}) });
   }
 
   private itemName(code: string): string {
@@ -337,6 +337,7 @@ export class Game {
   // ---- rules ------------------------------------------------------------------
 
   private applyRules(rules: Rule[], roles: Role[], revision: string, changes: RuleChange[], roleChanges: RoleChange[], message?: string, initial = false): void {
+    const before = new Map(this.laws.map((r) => [r.key, r]));
     const values = ruleValues(rules);
     this.values = { ...this.values, ...values };
     this.world.rules = this.values;
@@ -346,7 +347,12 @@ export class Game {
     if (initial) return;
     this.brain.invalidate();
     console.log(`[lorebase] rules_changed @ ${revision.slice(0, 12)}${message ? ` "${message}"` : ''}: ${changes.map((c) => `${c.key} ${c.old} -> ${c.new}`).join(', ') || 'no rule value change'}${roleChanges.length ? `; roles: ${roleChanges.map((r) => r.key).join(', ')}` : ''}`);
-    this.broadcast({ type: 'rules_changed', revision, changes: changes.map((c) => ({ key: c.key, old: c.old, new: c.new, text: c.text })) });
+    this.broadcast({
+      type: 'rules_changed', revision, changes: changes.map((c) => {
+        const r = rules.find((x) => x.key === c.key) ?? before.get(c.key);
+        return { key: c.key, old: c.old, new: c.new, text: c.text, ...(c.new === null ? { removed: true } : {}), ...(r ? { category: r.category, unit: r.unit } : {}) };
+      }),
+    });
     this.broadcast(this.lorebaseMsg());
     if (changes.length) {
       const list = changes.map((c) => `${c.key} ${c.old ?? '-'} → ${c.new ?? '-'}`).join(', ');
@@ -779,6 +785,7 @@ export class Game {
       pc.conn.send({ type: 'world_event', kind: 'group', text: 'unauthorized' });
       return void pc.conn.close(4401, 'unauthorized');
     }
+    pc.conn.authorized = true;
     const players = [...this.conns.values()].filter((c) => c.entityId).length;
     if (players >= p.maxPlayers) return void pc.conn.send({ type: 'world_event', kind: 'group', text: 'world full' });
     let name = String(msg.name ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, p.nameMaxChars) || 'Viandante';
@@ -993,6 +1000,22 @@ export class Game {
 
   private broadcastEntity(e: RtEntity): void {
     this.broadcast({ type: 'entity_added', entity: this.entityDto(e) });
+  }
+
+  /**
+   * God-mode content (memories, deliberations): with SIM_API_TOKEN set only connections that
+   * presented the token get it (SSE listeners already passed the token check); otherwise everyone.
+   */
+  private broadcastPrivileged(msg: Msg): void {
+    if (!this.cfg.apiToken) return this.broadcast(msg);
+    for (const pc of this.conns.values()) if (pc.conn.authorized) pc.conn.send(msg);
+    for (const fn of this.listeners) {
+      try {
+        fn(msg);
+      } catch {
+        // a broken listener never stops the world
+      }
+    }
   }
 
   /** Sends to every client (except `excludeEntity`'s connection / `excludeConn`) and to SSE listeners. */

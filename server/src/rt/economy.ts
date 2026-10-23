@@ -177,17 +177,41 @@ export function matchDiscovery(c: Catalog, discovered: ReadonlySet<string>, item
 
 // ---- holdings ------------------------------------------------------------------------------
 
+/** Tile stocks every world has, even with an empty catalog. */
+export const BASE_ITEMS = new Set(['food', 'wood']);
+
+/** A finite, non-negative amount (NaN, Infinity and negatives count as 0: never fail open). */
+export const amountOf = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+/** A syntactically safe item code that cannot collide with object internals. */
+export function isItemCode(item: unknown): item is string {
+  return typeof item === 'string' && /^[a-z][a-z0-9_]{0,40}$/.test(item) && !(item in Object.prototype);
+}
+
+/** An item the world knows: in the catalog, or a base tile stock. */
+export function knownItem(c: Catalog, item: unknown): item is string {
+  return isItemCode(item) && (c.resources.has(item) || BASE_ITEMS.has(item));
+}
+
+/** An empty inventory without prototype (codes can never reach Object.prototype). */
+export function newInventory(): Bag {
+  const inv = Object.create(null) as Bag;
+  for (const k of BASE_ITEMS) inv[k] = 0;
+  return inv;
+}
+
 export function count(h: Pick<Holder, 'inventory'>, item: string): number {
-  return h.inventory[item] ?? 0;
+  return isItemCode(item) && Object.hasOwn(h.inventory, item) ? amountOf(h.inventory[item]) : 0;
 }
 
 export function hasAll(h: Pick<Holder, 'inventory'>, need: Bag): boolean {
-  return Object.entries(need).every(([k, n]) => count(h, k) >= n);
+  return Object.entries(need).every(([k, n]) => count(h, k) >= amountOf(n));
 }
 
 /** Adds (or with a negative amount removes) items; tools get or lose instances to match. */
 export function addItems(h: Holder, item: string, n: number, def?: ResourceDef): void {
-  const next = Math.round(((h.inventory[item] ?? 0) + n) * 100) / 100;
+  if (!isItemCode(item) || !Number.isFinite(n) || n === 0) return;
+  const next = Math.round((count(h, item) + n) * 100) / 100;
   h.inventory[item] = Math.max(0, next);
   if (def?.category !== 'tool') return;
   const want = Math.max(0, Math.floor(h.inventory[item] ?? 0));
@@ -291,7 +315,8 @@ export type ExperimentResult =
 
 /** Combines one unit of each item: may discover a technology. Items are consumed either way. */
 export function experiment(c: Catalog, h: Holder, items: string[], discovered: ReadonlySet<string>, minItems: number): ExperimentResult {
-  const set = [...new Set(items.map((i) => i.trim()).filter(Boolean))];
+  const set = [...new Set(items.map((i) => String(i).trim()).filter(Boolean))];
+  if (set.some((i) => !knownItem(c, i))) return { ok: false, error: 'missing_inputs' };
   if (set.length < minItems) return { ok: false, error: 'too_few_items' };
   if (set.some((i) => count(h, i) < 1)) return { ok: false, error: 'missing_inputs' };
   const consumed: Bag = {};
@@ -325,7 +350,8 @@ export function defaultFood(c: Catalog, h: Holder): string | undefined {
 
 /** Moves `n` units (tools keep their wear). Returns the amount moved. */
 export function transfer(c: Catalog, from: Holder, to: Holder, item: string, n: number): number {
-  const moved = Math.floor(Math.min(n, count(from, item)));
+  if (!knownItem(c, item)) return 0;
+  const moved = Math.floor(Math.min(amountOf(n), count(from, item)));
   if (moved < 1) return 0;
   const def = c.resources.get(item);
   if (def?.category === 'tool') {
@@ -346,7 +372,7 @@ export function cleanBag(raw: unknown, c: Catalog, maxKinds: number): Bag {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     const n = Math.floor(num(v));
-    if (n >= 1 && c.resources.has(k) && Object.keys(out).length < maxKinds) out[k] = n;
+    if (n >= 1 && knownItem(c, k) && Object.keys(out).length < maxKinds) out[k] = n;
   }
   return out;
 }
@@ -354,6 +380,7 @@ export function cleanBag(raw: unknown, c: Catalog, maxKinds: number): Bag {
 /** A barter between two holders, both sides checked first. Returns false (nothing moved) if either side lacks items. */
 export function barter(c: Catalog, a: Holder, b: Holder, give: Bag, want: Bag): boolean {
   if (!Object.keys(give).length && !Object.keys(want).length) return false;
+  if (![...Object.keys(give), ...Object.keys(want)].every((k) => knownItem(c, k))) return false;
   if (!hasAll(a, give) || !hasAll(b, want)) return false;
   for (const [k, n] of Object.entries(give)) transfer(c, a, b, k, n);
   for (const [k, n] of Object.entries(want)) transfer(c, b, a, k, n);

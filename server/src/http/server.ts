@@ -7,7 +7,7 @@ import type { LorebaseClient } from '../lorebase/client.ts';
 import type { Rule } from '../lorebase/rules.ts';
 import { loadScenarios } from '../lorebase/scenarios.ts';
 import { amendRule, createRule, repealRule, writeRules } from '../lorebase/writer.ts';
-import { allowedOrigins, bearer, checkMutation, isMutation, tokenMatches } from './security.ts';
+import { allowedOrigins, bearer, checkMutation, hostAllowed, isMutation, tokenMatches } from './security.ts';
 
 /** What the HTTP API needs from a world: the tick simulation (v1) or the real-time game (v2). */
 export interface HttpHost {
@@ -60,7 +60,7 @@ export function createHttpServer(sim: HttpHost): Server {
   const cfg = sim.cfg;
   const staticRoot = resolve(ROOT, cfg.http.staticDir);
   const writerCfg = cfg.lorebase;
-  const guard = { port: cfg.http.port, corsOrigins: cfg.http.corsOrigins, apiToken: cfg.apiToken };
+  const guard = { port: cfg.http.port, corsOrigins: cfg.http.corsOrigins, apiToken: cfg.apiToken, allowedHosts: cfg.http.allowedHosts };
   const origins = allowedOrigins(guard);
   const readBody = (req: IncomingMessage) => readJson(req, cfg.http.maxBodyBytes);
 
@@ -107,13 +107,14 @@ export function createHttpServer(sim: HttpHost): Server {
     const path = url.pathname;
     const method = req.method ?? 'GET';
     try {
+      if (!hostAllowed(req.headers.host, guard)) return send(res, 403, { ok: false, error: 'host not allowed' });
       if (method === 'OPTIONS') return void res.writeHead(204).end();
       if (path.startsWith('/api/') && isMutation(method)) {
         const refused = checkMutation(req, guard);
         if (refused) return send(res, refused.status, { ok: false, error: refused.error });
       }
       // God mode reads (minds, memories, conversations, observatory) need the token too when one is set.
-      if (method === 'GET' && guard.apiToken && /^\/api\/(conversations|observatory\/|agents\/[^/]+\/(mind|memories))/.test(path) && !tokenMatches(bearer(req), guard.apiToken)) {
+      if (method === 'GET' && guard.apiToken && /^\/api\/(stream$|conversations|observatory\/|agents\/[^/]+\/(mind|memories))/.test(path) && !tokenMatches(bearer(req), guard.apiToken)) {
         return send(res, 401, { ok: false, error: 'missing or invalid token' });
       }
       if (method === 'GET' && path === '/api/conversations') return sim.conversations ? send(res, 200, await sim.conversations(url.searchParams)) : unsupported();

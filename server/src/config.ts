@@ -22,7 +22,7 @@ export interface SimConfig {
   tickMs: number;
   autoStart: boolean;
   /** `host` is the bind address (default 127.0.0.1); `maxBodyBytes` caps JSON request bodies. */
-  http: { host: string; port: number; corsOrigins: string[]; staticDir: string; maxBodyBytes: number };
+  http: { host: string; port: number; corsOrigins: string[]; staticDir: string; maxBodyBytes: number; allowedHosts?: string[] };
   lorebase: {
     url: string;
     domain: string;

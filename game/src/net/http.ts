@@ -17,3 +17,19 @@ export async function getJson<T>(path: string): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return (await res.json()) as T;
 }
+
+/** JSON request with a body under the API base. Rejects with `status message` on HTTP errors. */
+export async function requestJson<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${config.apiBase}${path}`, {
+    method,
+    headers: { accept: 'application/json', ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...authHeaders() },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text().catch(() => '');
+  if (!res.ok) throw new Error(`${res.status} ${text.slice(0, 200) || res.statusText}`);
+  try {
+    return (text ? JSON.parse(text) : {}) as T;
+  } catch {
+    return {} as T;
+  }
+}

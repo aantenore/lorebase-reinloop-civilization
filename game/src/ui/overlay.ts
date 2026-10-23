@@ -4,6 +4,7 @@ import { mountDiscoveryBanner } from './discovery';
 import { mountEconomy } from './economy';
 import { installControls } from './controls';
 import { mountDialog } from './dialog';
+import { mountGodMode } from './god/godMode';
 import { mountGroupPanel } from './groupPanel';
 import { mountHud } from './hud';
 import { mountInspector } from './inspector';
@@ -23,6 +24,7 @@ export function mountOverlay(): void {
   mountEconomy();
   mountDiscoveryBanner();
   mountDialog();
+  mountGodMode();
   const join = mountJoin();
   mountHud(() => join.show());
   installControls();

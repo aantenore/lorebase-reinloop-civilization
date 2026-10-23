@@ -42,3 +42,15 @@ test('insight peer check: same role, not the author', () => {
   assert.equal(peerCheck(insight, { name: 'Mara', role: 'healer' }), 'own');
   assert.equal(peerCheck(insight, { name: 'Tomas', role: 'builder' }), 'not_peer');
 });
+
+test('hostAllowed: loopback names on the port and CORS hosts only (no DNS rebinding)', async () => {
+  const { hostAllowed } = await import('./security.ts');
+  const cfg = { port: 4400, corsOrigins: ['http://localhost:5174'] };
+  assert.equal(hostAllowed('127.0.0.1:4400', cfg), true);
+  assert.equal(hostAllowed('localhost:4400', cfg), true);
+  assert.equal(hostAllowed('localhost:5174', cfg), true);
+  assert.equal(hostAllowed('evil.example:4400', cfg), false);
+  assert.equal(hostAllowed('127.0.0.1:4401', cfg), false);
+  assert.equal(hostAllowed(undefined, cfg), false);
+  assert.equal(hostAllowed('attacker.test', { ...cfg, allowedHosts: ['attacker.test'] }), true);
+});

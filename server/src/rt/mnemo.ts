@@ -58,7 +58,11 @@ export class Mnemo {
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.cfg.url.replace(/\/+$/, '')}${path}`, {
       method,
-      headers: body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'X-Mnemo-Token': process.env.MNEMO_TOKEN ?? '',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(this.cfg.timeoutMs),
     });

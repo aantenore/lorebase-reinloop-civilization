@@ -59,6 +59,8 @@ export interface ObservatoryHost {
   usage: UsageLedger;
 }
 
+const usd = (m: Record<string, { costUsd: number }>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.costUsd]));
+
 export class Observatory {
   private readonly host: ObservatoryHost;
   private readonly cfg: ObservatoryConfig;
@@ -148,8 +150,7 @@ export class Observatory {
         ...this.host.stats(),
         runs: rows.reduce((s, r) => s + r.runs, 0),
         tokens: { input: rows.reduce((s, r) => s + r.inputTokens, 0), output: rows.reduce((s, r) => s + r.outputTokens, 0) },
-        costUsd: { total: Math.round(rows.reduce((s, r) => s + r.costUsd, 0) * 1e6) / 1e6, byModel: u.by('model'), byTier: u.by('tier') },
-        perAgent: rows,
+        costUsd: { total: Math.round(rows.reduce((s, r) => s + r.costUsd, 0) * 1e6) / 1e6, byModel: usd(u.by('model')), byTier: usd(u.by('tier')) },
       },
     };
   }

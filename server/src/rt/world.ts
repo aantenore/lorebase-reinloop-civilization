@@ -7,7 +7,7 @@ import { createRng, type Rng, valueNoise } from '../world/rng.ts';
 import type { Rules, Season } from '../world/types.ts';
 import { findPath, nearestWalkable, type Point } from './path.ts';
 import {
-  addItems, applyCraft, canCraft, type Catalog, count, defaultFood, type Discovery, experiment, gatherableAt, gatherTool, protectionOf,
+  addItems, applyCraft, knownItem, newInventory, canCraft, type Catalog, count, defaultFood, type Discovery, experiment, gatherableAt, gatherTool, protectionOf,
   type RecipeDef, spoil, stationsOf, type TechDef, type ToolInstance, transfer, useEffect, wearStructures, wearTool,
 } from './economy.ts';
 import { type Activity, advance, type Anim, type Dir, type ExecContext, type Plan, prepareStep, tileOf } from './plan.ts';
@@ -291,7 +291,7 @@ export class RtWorld {
     const maxHp = this.r('max_hp');
     const e: RtEntity = {
       id, name: spec.name, role: spec.role, tier: spec.tier, model: spec.model, kind: spec.kind, personality: spec.personality ?? '',
-      groupId: null, x: at.x, y: at.y, dir: 's', anim: 'idle', hp: maxHp, maxHp, hunger: 0, inventory: { food: 0, wood: 0 },
+      groupId: null, x: at.x, y: at.y, dir: 's', anim: 'idle', hp: maxHp, maxHp, hunger: 0, inventory: newInventory(),
       tools: [], spoilAcc: {}, alive: true, input: { dx: 0, dy: 0 }, memory: [], inbox: [], lastBirthTurn: this.turn,
     };
     this.entities.set(id, e);
@@ -370,6 +370,7 @@ export class RtWorld {
   gather(e: RtEntity, resource: Resource, at: Point = tileOf(e)): ActResult {
     const t = this.tile(at.x, at.y);
     if (!t) return { ok: false, reason: 'outside' };
+    if (!knownItem(this.catalog, resource)) return { ok: false, reason: 'unknown_item' };
     const tool = gatherTool(this.catalog, e, resource);
     const boost = tool?.boost ?? 1;
     let amount: number;
@@ -396,6 +397,7 @@ export class RtWorld {
   }
 
   craft(e: RtEntity, recipe: string): ActResult {
+    if (typeof recipe !== 'string' || !this.catalog.recipes.has(recipe)) return { ok: false, reason: 'unknown_recipe' };
     const here = tileOf(e);
     const t = this.tile(here.x, here.y);
     if (!t) return { ok: false, reason: 'outside' };
@@ -453,6 +455,7 @@ export class RtWorld {
   }
 
   give(e: RtEntity, to: string, resource: Resource, amount: number): ActResult {
+    if (!knownItem(this.catalog, resource)) return { ok: false, reason: 'unknown_item' };
     if (this.r('sharing_allowed') < 1) return { ok: false, reason: 'giving_forbidden' };
     const b = this.find(to);
     if (!b || !b.alive || b.id === e.id) return { ok: false, reason: 'no_such_person' };

@@ -3,6 +3,7 @@ import type {
   ConsultMsg,
   CraftMsg,
   DecayMsg,
+  DeliberationMsg,
   DiscoveryMsg,
   Economy,
   Entity,
@@ -112,6 +113,7 @@ export interface StoreEvents {
   flows: FlowsMsg;
   memory: MemoryMsg;
   memories: { agentId: string };
+  deliberation: DeliberationMsg;
   any: void;
 }
 
@@ -400,8 +402,9 @@ export class Store {
       case 'rules_changed':
         for (const c of msg.changes) {
           const r = this.rules.get(c.key);
-          if (r) r.value = c.new;
-          else this.rules.set(c.key, { key: c.key, value: c.new, text: c.text, category: 'other', unit: '' });
+          if (c.removed) this.rules.delete(c.key);
+          else if (r) Object.assign(r, { value: c.new, text: c.text ?? r.text, category: c.category ?? r.category, unit: c.unit ?? r.unit });
+          else this.rules.set(c.key, { key: c.key, value: c.new, text: c.text, category: c.category ?? 'other', unit: c.unit ?? '' });
         }
         this.lorebase = { ...this.lorebase, revision: msg.revision };
         this.emit('rules_changed', { revision: msg.revision, changes: msg.changes });
@@ -459,6 +462,9 @@ export class Store {
         this.emit('memory', msg);
         break;
       }
+      case 'deliberation':
+        this.emit('deliberation', msg);
+        break;
       case 'lorebase': {
         const changed = msg.revision !== this.lorebase.revision || msg.branch !== this.lorebase.branch;
         this.lorebase = { connected: msg.connected, branch: msg.branch, revision: msg.revision };

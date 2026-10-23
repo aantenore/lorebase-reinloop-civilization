@@ -12,5 +12,7 @@ export interface Transport {
   postRule(req: RuleEditRequest): Promise<string | null>;
   /** GET a REST resource under the API base (`/economy`, `/agents/:id/memories`...). Rejects on HTTP errors. */
   getJson<T = unknown>(path: string): Promise<T>;
+  /** JSON request (POST/PATCH/DELETE) under the API base. Rejects with the server message on errors. */
+  request<T = unknown>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T>;
   close(): void;
 }

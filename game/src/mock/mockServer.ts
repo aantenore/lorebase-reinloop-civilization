@@ -6,7 +6,13 @@ import type {
   ItemBag,
   MapData,
   PlanStep,
+  Rule,
+  RuleChange,
+  RuleCreateRequest,
   RuleEditRequest,
+  RuleMode,
+  RuleMutationResult,
+  RuleValue,
   ServerMsg,
   Season,
   Tile,
@@ -27,6 +33,7 @@ import {
   RULES,
   THOUGHTS,
 } from './mockData';
+import { GodLedger } from './mockGod';
 import { consultFor, Minds } from './mockMinds';
 import { CRAFTS, EconomyState, fmtBag, FIRE, FLOW_WINDOW, PERISHABLE, PRODUCE, RES_NAME, ROUTES, START_INVENTORY, START_TOOLS, TECHS, TOOL_ITEMS } from './mockEconomy';
 import type { TechDef } from './mockEconomy';
@@ -46,6 +53,15 @@ const WINTER_AT = 110;
 const FLOWS_EVERY = 10;
 const SPOIL_EVERY: [number, number] = [20, 30];
 const BAG_CAP = 8;
+/** Real seconds before a proposal is merged, and the minimum gap between two deliberations of a group. */
+const PROPOSAL_MERGE_SEC = 4;
+const DELIBERATION_GAP_SEC = 20;
+const RULE_KEY_RE = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/;
+
+type RuleOp =
+  | { kind: 'create'; value: RuleValue; text?: string; category?: string; unit?: string }
+  | { kind: 'patch'; value?: RuleValue; text?: string; category?: string; unit?: string }
+  | { kind: 'remove' };
 
 interface Actor extends Entity {
   steps: PlanStep[];
@@ -78,7 +94,7 @@ export class MockServer implements Transport {
   private tiles: Tile[];
   private actors = new Map<string, Actor>();
   private groups = new Map<string, Group>();
-  private rules = RULES.map((r) => ({ ...r }));
+  private rules: Rule[] = RULES.map((r) => ({ ...r }));
   private time: WorldTime = { day: 1, minute: 7 * 60, season: START_SEASON };
   private lorebase = { connected: true, branch: 'main', revision: 'a3f9c1e' };
   private youId: string | null = null;
@@ -94,6 +110,7 @@ export class MockServer implements Transport {
   private minds: Minds;
   private flowsAt = FLOWS_EVERY;
   private spoilAt = SPOIL_EVERY[0];
+  private god: GodLedger;
 
   constructor() {
     this.map = generateMap();
@@ -117,6 +134,19 @@ export class MockServer implements Transport {
       ['gatherer', 'woodcutter', 'builder', 'healer', 'scout', 'wanderer', 'chief', 'elder', 'hunter'],
     );
     for (const a of this.actors.values()) if (a.kind === 'agent') this.minds.seedAgent(a.id, a.role);
+    this.god = new GodLedger({
+      r: () => this.r(),
+      now: () => ({ day: this.time.day, minute: Math.floor(this.time.minute) }),
+      agent: (id) => this.actors.get(id),
+      agentIds: () => [...this.actors.values()].filter((a) => a.kind === 'agent').map((a) => a.id),
+      memories: (id) => this.minds.memories(id),
+      revision: () => ({ branch: this.lorebase.branch, revision: this.lorebase.revision }),
+      counts: () => {
+        const ins = this.minds.insightList();
+        const eco = this.econ.economy();
+        return { rules: this.rules.length, insights: ins.stored.length + ins.pending.length, techs: eco.techs.length, recipes: eco.recipes.length };
+      },
+    });
     // stagger first plans so the opening already looks busy
     let k = 0;
     for (const a of this.actors.values()) {
@@ -164,15 +194,31 @@ export class MockServer implements Transport {
   }
 
   async postRule(req: RuleEditRequest): Promise<string | null> {
-    const rule = this.rules.find((r) => r.key === req.key);
-    if (!rule) return `legge sconosciuta: ${req.key}`;
-    if (req.mode === 'proposal') {
-      this.emit({ type: 'world_event', kind: 'rules', text: `Proposta aperta: ${rule.text} → ${req.value}. ${req.message || ''}`.trim() });
-      setTimeout(() => this.changeRule(req.key, req.value, 'Proposta approvata dal consiglio'), 4000 / SPEED);
-    } else {
-      setTimeout(() => this.changeRule(req.key, req.value, req.message || 'Modifica diretta'), 600);
-    }
+    if (!this.rules.some((r) => r.key === req.key)) return `legge sconosciuta: ${req.key}`;
+    this.submitRule(req.key, { kind: 'patch', value: req.value }, req.mode, req.message);
     return null;
+  }
+
+  /** POST /rules, PATCH /rules/:key, DELETE /rules/:key?mode= */
+  async request<T = unknown>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+    const [route, query = ''] = path.split('?');
+    const q = new URLSearchParams(query);
+    const m = /^\/rules(?:\/([^/]+))?$/.exec(route.replace(/^\/api(?=\/)/, ''));
+    if (!m || (method === 'POST') === !!m[1]) throw new Error('404 not found');
+    const b = (body ?? {}) as Partial<RuleCreateRequest>;
+    const key = m[1] ? decodeURIComponent(m[1]) : String(b.key ?? '');
+    const mode: RuleMode = (method === 'DELETE' ? q.get('mode') : b.mode) === 'proposal' ? 'proposal' : 'direct';
+    const message = (method === 'DELETE' ? q.get('message') : b.message) || '';
+    const exists = this.rules.some((r) => r.key === key);
+    if (!RULE_KEY_RE.test(key)) throw new Error(`400 chiave non valida: ${key}`);
+    if (method !== 'POST' && !exists) throw new Error(`404 legge sconosciuta: ${key}`);
+    const op: RuleOp =
+      method === 'DELETE'
+        ? { kind: 'remove' }
+        : exists
+          ? { kind: 'patch', value: b.value, text: b.text, category: b.category, unit: b.unit }
+          : { kind: 'create', value: b.value ?? '', text: b.text, category: b.category, unit: b.unit };
+    return this.submitRule(key, op, mode, message) as T;
   }
 
   async getJson<T = unknown>(path: string): Promise<T> {
@@ -181,18 +227,27 @@ export class MockServer implements Transport {
     const q = new URLSearchParams(query);
     let out: unknown;
     const mem = /^\/agents\/([^/]+)\/memories$/.exec(clean);
+    const mind = /^\/agents\/([^/]+)\/mind$/.exec(clean);
     if (clean === '/economy') out = { ...this.econ.economy(), flows: this.econ.flows(this.elapsed) };
     else if (mem) {
       const memories = this.minds.memories(decodeURIComponent(mem[1]));
       if (!memories) return Promise.reject(new Error('404'));
       out = { memories };
-    } else if (clean === '/insights') out = this.minds.insightList(q.get('role') || undefined);
+    } else if (mind) {
+      out = this.god.mind(decodeURIComponent(mind[1]));
+      if (!out) return Promise.reject(new Error('404'));
+    } else if (clean === '/conversations') out = this.god.conversations(q, this.groups);
+    else if (clean === '/observatory/summary') out = this.god.summary();
+    else if (clean === '/observatory/log') out = this.god.lorebaseLog(Number(q.get('limit') || 20));
+    else if (clean === '/observatory/proposals') out = this.god.proposalList(q.get('status'));
+    else if (clean === '/insights') out = this.minds.insightList(q.get('role') || undefined);
     else if (clean === '/consciousness') out = this.minds.consciousness();
     else return Promise.reject(new Error('404'));
     return structuredClone(out) as T;
   }
 
   private emit(msg: ServerMsg) {
+    this.god?.observe(msg);
     for (const cb of this.msgCbs) cb(msg);
   }
 
@@ -471,6 +526,9 @@ export class MockServer implements Transport {
       this.groupProgress.set(g.id, tracked);
       tracked.current = this.groupCurrent(tracked.refs);
       this.emit({ type: 'plan', id: g.id, scope: 'group', steps, current: tracked.current, reason: g.lastDecision?.summary ?? '', createdAt: Date.now() });
+      this.god.deliberation(g, this.elapsed, DELIBERATION_GAP_SEC).forEach((d, i) =>
+        setTimeout(() => this.emit({ type: 'deliberation', groupId: g.id, pattern: g.pattern, ...d }), (i * 1200) / SPEED),
+      );
     }
   }
 
@@ -582,22 +640,60 @@ export class MockServer implements Transport {
     setTimeout(() => this.groupPlans(), 5000 / SPEED);
   }
 
-  private changeRule(key: string, value: RuleEditRequest['value'], why: string) {
-    const rule = this.rules.find((r) => r.key === key);
-    if (!rule) return;
-    const old = rule.value;
-    rule.value = value;
+  private changeRule(key: string, value: RuleValue, why: string) {
+    this.applyRule(key, { kind: 'patch', value }, why);
+  }
+
+  /** Accept a law mutation: applied shortly (direct) or after a proposal branch is reviewed and merged. */
+  private submitRule(key: string, op: RuleOp, mode: RuleMode, message: string): RuleMutationResult {
+    if (mode === 'direct') {
+      setTimeout(() => this.applyRule(key, op, message || 'Modifica diretta'), 600);
+      return { branch: this.lorebase.branch };
+    }
+    const verb = op.kind === 'create' ? 'Nuova legge' : op.kind === 'remove' ? 'Ritiro legge' : 'Modifica legge';
+    const branch = `proposal/${key.replace(/[._]/g, '-')}-${Math.floor(this.r() * 1e4)}`;
+    const p = this.god.openProposal(`${verb}: ${key}${message ? ` (${message})` : ''}`, branch, this.youId ? (this.actors.get(this.youId)?.name ?? 'Dio') : 'Dio');
+    this.emit({ type: 'world_event', kind: 'rules', text: `Proposta aperta su ⎇ ${branch}: ${verb.toLowerCase()} ${key}.` });
+    setTimeout(() => {
+      this.god.closeProposal(p.id, 'merged');
+      this.applyRule(key, op, `merge di ${p.id}${message ? `: ${message}` : ''}`);
+    }, (PROPOSAL_MERGE_SEC * 1000) / SPEED);
+    return { branch, proposal: { id: p.id, branch, title: p.title } };
+  }
+
+  private applyRule(key: string, op: RuleOp, why: string) {
+    const idx = this.rules.findIndex((r) => r.key === key);
+    const rule = this.rules[idx];
+    let change: RuleChange;
+    if (op.kind === 'create' && !rule) {
+      const r: Rule = { key, value: op.value, text: op.text || key, category: op.category || 'altro', unit: op.unit || '' };
+      this.rules.push(r);
+      change = { key, old: '', new: r.value, text: r.text, category: r.category, unit: r.unit };
+    } else if (!rule) return;
+    else if (op.kind === 'remove') {
+      this.rules.splice(idx, 1);
+      change = { key, old: rule.value, new: rule.value, text: rule.text, removed: true };
+    } else {
+      const old = rule.value;
+      if (op.value !== undefined) rule.value = op.value;
+      if (op.text) rule.text = op.text;
+      if (op.category) rule.category = op.category;
+      if (op.unit) rule.unit = op.unit;
+      change = { key, old, new: rule.value, text: rule.text, category: rule.category, unit: rule.unit };
+    }
     const rev = Math.floor(this.r() * 0xfffffff).toString(16).padStart(7, '0');
     this.lorebase.revision = rev;
-    this.emit({ type: 'rules_changed', revision: rev, changes: [{ key, old, new: value, text: rule.text }] });
-    this.minds.rememberAll(`La legge è cambiata: ${rule.text}.`, 'law', 0.6, 'preoccupazione');
-    this.emit({ type: 'world_event', kind: 'rules', text: `Legge cambiata: ${rule.text} ${old} → ${value}. ${why}` });
+    this.emit({ type: 'rules_changed', revision: rev, changes: [change] });
+    const what = change.removed ? `Legge ritirata: ${change.text}` : op.kind === 'create' ? `Nuova legge: ${change.text} = ${change.new}` : `Legge cambiata: ${change.text} ${change.old} → ${change.new}`;
+    this.god.commit(rev, `${what} (${why})`, ['rule']);
+    this.minds.rememberAll(`${what}.`, 'law', 0.6, 'preoccupazione');
+    this.emit({ type: 'world_event', kind: 'rules', text: `${what}. ${why}` });
     // a couple of agents react
     const reactors = [...this.actors.values()].filter((a) => a.kind === 'agent').slice(0, 3);
     reactors.forEach((a, i) =>
       setTimeout(() => this.emit({ type: 'say', from: a.id, to: 'all', text: i === 0 ? 'Le leggi sono cambiate. Dobbiamo rifare i conti.' : 'Allora cambio piano.', kind: 'speech' }), 800 + i * 1500),
     );
-    if (reactors[1]) this.think(reactors[1], `Nuova legge: ${rule.text} = ${value}`, 1.5);
+    if (reactors[1]) this.think(reactors[1], `${what}`, 1.5);
   }
 
   private faceTo(a: Actor, dx: number, dy: number) {
