@@ -24,6 +24,7 @@ import { type Group, GroupManager, type JointPlan } from './groups.ts';
 import { AgentMind, GroupMind, Limiter, type MindHost, type Perception } from './mind.ts';
 import { type Plan, type PlanStep, tileOf } from './plan.ts';
 import { type GroupView, proclamation } from './prompt.ts';
+import { reflexEat, reflexSteps } from './reflex.ts';
 import { canAddAgentMind, childSpec } from './births.ts';
 import { missingRtRules, RT_RULE_KEYS, type Resource, type RtEntity, type RtTile, RtWorld, type WorldEvent } from './world.ts';
 import { askError, giveAsked, offerError, OfferBook, offerMinutes, type Offer, swap } from './barter.ts';
@@ -101,6 +102,9 @@ export class Game {
   private lastOfferCheckMs = 0;
   private lastLawPollMs = 0;
   private lastPersistMs = 0;
+  private lastReflexMs = 0;
+  /** Plans a reflex interrupted, by person id (resumed when the reflex ends, dropped by a new plan). */
+  private readonly suspended = new Map<string, Plan>();
   private persistBusy = false;
   /** Opinions formed since the society was last saved to mnemo. */
   private unsavedOpinions: Opinion[] = [];
@@ -589,8 +593,8 @@ export class Game {
   }
 
   /** Saves people's standing and skills and the opinions formed since the last save (mnemo). */
-  private async saveSociety(): Promise<void> {
-    if (this.persistBusy || !this.game.society.enabled) return;
+  private async saveSociety(): Promise<{ people: number; opinions: number } | undefined> {
+    if (this.persistBusy || !this.game.society.enabled) return undefined;
     this.persistBusy = true;
     const w = this.world;
     const snap = this.society.snapshot(w.clock, (id) => w.entities.get(id)?.skills ?? {});
@@ -598,7 +602,9 @@ export class Game {
     const name = (id: string) => this.society.people.get(id)?.name;
     const opinions = pending.flatMap((o) => (name(o.from) && name(o.to) ? [{ from: name(o.from)!, to: name(o.to)!, score: o.score, reason: o.reason, at: o.at }] : []));
     try {
-      if (!(await this.mnemo.saveSociety(this.societyWorld, { clock: snap.clock, people: snap.people, opinions }, this.game.society.maxOpinions))) this.unsavedOpinions.unshift(...pending);
+      if (await this.mnemo.saveSociety(this.societyWorld, { clock: snap.clock, people: snap.people, opinions }, this.game.society.maxOpinions)) return { people: snap.people.length, opinions: opinions.length };
+      this.unsavedOpinions.unshift(...pending);
+      return undefined;
     } finally {
       this.persistBusy = false;
     }
@@ -789,7 +795,13 @@ export class Game {
 
   async shutdown(): Promise<void> {
     this.stopLoop();
-    if (this.game.society.persist.enabled) await this.saveSociety().catch(() => undefined);
+    if (this.game.society.persist.enabled) {
+      // A periodic save may be in flight: let it finish, then save the final state.
+      for (let i = 0; this.persistBusy && i < 50; i++) await new Promise((r) => setTimeout(r, 100));
+      const saved = await this.saveSociety().catch(() => undefined);
+      if (saved) console.log(`[society] saved ${saved.people} people and ${saved.opinions} new opinions of ${this.societyWorld} on shutdown`);
+      else console.warn(`[society] could not save the society of ${this.societyWorld} on shutdown (mnemo unavailable?)`);
+    }
     this.watcher.stop();
     await this.brain.close();
     this.mnemo.stop();
@@ -864,6 +876,7 @@ export class Game {
       }
     }
     this.flushTiles(now);
+    this.reflexes(now);
     this.tickSociety(now);
     this.checkBudget();
     if (now - this.lastStateMs >= 1000 / this.game.loop.stateHz) {
@@ -893,6 +906,36 @@ export class Game {
     }
   }
 
+  /**
+   * Bodies act by reflex (reflex.ts): without a plan when hungry; with one only at critical hunger
+   * (eat what they carry, or suspend the plan to fetch food and resume it afterwards).
+   */
+  private reflexes(now: number): void {
+    const cfg = this.game.reflex;
+    if (!cfg.enabled || now - this.lastReflexMs < cfg.checkMs) return;
+    this.lastReflexMs = now;
+    for (const e of this.world.living()) {
+      if (e.kind === 'player') continue;
+      const busy = !!e.plan && e.plan.current < e.plan.steps.length;
+      if (busy && (e.plan!.scope === 'reflex' || reflexEat(this.world, e, cfg) || e.hunger < this.world.r('critical_hunger'))) continue;
+      const steps = reflexSteps(this.t, this.world, e, cfg);
+      if (!steps) continue;
+      if (busy) this.suspended.set(e.id, e.plan!);
+      this.setPlan(e, steps, this.t('rt.reflex.reason'), 'reflex');
+    }
+  }
+
+  /** A reflex plan ended: the plan it interrupted (if any) goes on from the step it was at. */
+  private resume(e: RtEntity): boolean {
+    const plan = this.suspended.get(e.id);
+    this.suspended.delete(e.id);
+    if (!plan) return false;
+    e.plan = plan;
+    e.activity = undefined;
+    this.broadcastPlan({ type: 'plan', id: e.id, scope: plan.scope === 'group' ? 'group' : 'entity', steps: plan.steps, current: plan.current, reason: plan.reason, createdAt: plan.createdAt });
+    return true;
+  }
+
   private sendState(): void {
     const changed: Msg[] = [];
     for (const e of this.world.entities.values()) {
@@ -915,13 +958,16 @@ export class Game {
         this.broadcast({ type: 'plan_progress', id: ev.id, current: ev.current });
         break;
       case 'plan_done': {
-        this.perceive(w.entities.get(ev.id), { kind: 'planDone' });
+        const e = w.entities.get(ev.id);
+        if (e?.plan?.scope !== 'reflex') this.perceive(e, { kind: 'planDone' });
+        else this.resume(e);
         break;
       }
       case 'step_failed': {
         const e = w.entities.get(ev.id);
         const step = e?.plan?.steps[ev.step];
         if (!e || !step) break;
+        if (e.plan?.scope === 'reflex') break;
         const reason = t(`rt.reason.${ev.reason}`);
         this.live(e, 'stepFailed', t('rt.memory.failed', { label: step.label, reason }));
         this.perceive(e, { kind: 'stepFailed', label: step.label, reason });
@@ -1196,11 +1242,13 @@ export class Game {
     if (g.pattern !== 'crowd') this.event('group', this.t('rt.events.decided', { name: g.name, summary: plan.summary }));
   }
 
-  private setPlan(e: RtEntity, steps: PlanStep[], reason: string, scope: 'entity' | 'group'): void {
+  private setPlan(e: RtEntity, steps: PlanStep[], reason: string, scope: Plan['scope']): void {
     const plan: Plan = { id: e.id, scope, steps, current: 0, reason, createdAt: Date.now() };
+    if (scope !== 'reflex') this.suspended.delete(e.id);
     e.plan = plan;
     e.activity = undefined;
-    this.broadcastPlan({ type: 'plan', id: e.id, scope, steps, current: 0, reason, createdAt: plan.createdAt });
+    // Clients know person plans and group plans; a reflex is a person's plan.
+    this.broadcastPlan({ type: 'plan', id: e.id, scope: scope === 'group' ? 'group' : 'entity', steps, current: 0, reason, createdAt: plan.createdAt });
   }
 
   // ---- groups (agent tools) ------------------------------------------------------
@@ -1676,6 +1724,7 @@ export class Game {
    */
   async release(e: RtEntity): Promise<void> {
     this.sleep(e.id);
+    this.suspended.delete(e.id);
     this.groups.leave(e);
     this.lawsSeen.delete(e.id);
     this.thoughts.delete(e.id);

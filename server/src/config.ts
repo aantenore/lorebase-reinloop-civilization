@@ -22,7 +22,11 @@ export interface SimConfig {
   tickMs: number;
   autoStart: boolean;
   /** `host` is the bind address (default 127.0.0.1); `maxBodyBytes` caps JSON request bodies. */
-  http: { host: string; port: number; corsOrigins: string[]; staticDir: string; maxBodyBytes: number; allowedHosts?: string[] };
+  /**
+   * `corsOrigins` also gets `http://localhost:<p>` and `http://127.0.0.1:<p>` for every port in `devOriginPorts`
+   * ([from, to], inclusive: dev servers that moved to the next free port); SIM_DEV_ORIGIN_PORTS="from-to" (or one port) overrides it.
+   */
+  http: { host: string; port: number; corsOrigins: string[]; devOriginPorts?: [number, number]; staticDir: string; maxBodyBytes: number; allowedHosts?: string[] };
   lorebase: {
     url: string;
     domain: string;
@@ -91,6 +95,16 @@ export function loadEnvFile(): void {
   if (existsSync(file)) process.loadEnvFile(file);
 }
 
+/** Loopback origins for a range of dev server ports (both loopback names). */
+export function devOrigins(range: [number, number] | undefined): string[] {
+  if (!range) return [];
+  const [from, to] = range;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to > 65535 || to < from) return [];
+  const out: string[] = [];
+  for (let p = from; p <= to; p++) out.push(`http://localhost:${p}`, `http://127.0.0.1:${p}`);
+  return out;
+}
+
 export function loadConfig(argv: string[] = process.argv.slice(2), env: NodeJS.ProcessEnv = process.env): SimConfig {
   loadEnvFile();
   const path = resolve(ROOT, env.SIM_CONFIG ?? 'config/sim.json');
@@ -102,6 +116,10 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env: NodeJS.P
   cfg.http.port = num(env.PORT ?? env.SIM_PORT) ?? cfg.http.port;
   cfg.http.host = env.SIM_HOST ?? cfg.http.host ?? '127.0.0.1';
   cfg.http.maxBodyBytes ??= 64 * 1024;
+  const devRange = /^(\d+)(?:-(\d+))?$/.exec(env.SIM_DEV_ORIGIN_PORTS ?? '');
+  if (devRange) cfg.http.devOriginPorts = [Number(devRange[1]), Number(devRange[2] ?? devRange[1])];
+  else if (env.SIM_DEV_ORIGIN_PORTS) console.warn(`SIM_DEV_ORIGIN_PORTS: expected a port or a range "from-to", got "${env.SIM_DEV_ORIGIN_PORTS}"`);
+  cfg.http.corsOrigins = [...new Set([...(cfg.http.corsOrigins ?? []), ...devOrigins(cfg.http.devOriginPorts)])];
   cfg.apiToken = env.SIM_API_TOKEN || undefined;
   cfg.lorebase.url = env.LOREBASE_URL ?? cfg.lorebase.url;
   cfg.lorebase.domain = env.LOREBASE_DOMAIN ?? cfg.lorebase.domain;

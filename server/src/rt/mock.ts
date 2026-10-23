@@ -89,7 +89,9 @@ export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentCha
   const wanted = new Set<string>(e.role === 'explorer' ? [...c.resources.values()].filter((r) => r.minDistance > 0).map((r) => r.code) : []);
   for (const k of mine) wanted.add(k);
   if (e.role === 'gatherer' || e.role === 'elder') for (const b of near) for (const k of needsOf(w, b.role)) wanted.add(k);
-  const raw = [...wanted].map((k) => c.resources.get(k)).filter((r) => r && r.source === 'biome' && (e.inventory[r.code] ?? 0) < 4);
+  // The wild (rule wild_distance) hurts the unsheltered: only the healthy go there.
+  const fit = e.hp >= e.maxHp * 0.8;
+  const raw = [...wanted].map((k) => c.resources.get(k)).filter((r) => r && r.source === 'biome' && (e.inventory[r.code] ?? 0) < 4 && (fit || r.minDistance <= w.r('wild_distance')));
   const pick = raw.length ? raw[Math.floor(rng.next() * raw.length)]! : undefined;
   if (pick) {
     const tile = w.tiles
@@ -121,8 +123,10 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
   const gatherWood = Math.max(1, Math.floor(w.r('gather_wood_yield')));
   const hungerPerStep = w.r('food_per_tick') / Math.max(1, w.r('turn_minutes')) * w.r('gather_minutes');
   const dist = (a: Point) => Math.max(Math.abs(a.x - pos.x), Math.abs(a.y - pos.y));
+  // Everyday errands stay out of the wild (rule wild_distance), where the unsheltered get hurt.
+  const safe = (p: Point) => w.distanceFromCenter(p) <= w.r('wild_distance');
   const nearest = (pred: (x: { food: number; wood: number; shelter: number }) => boolean) =>
-    w.tiles.filter((x) => pred(x) && w.walkable(x.x, x.y) && dist(x) <= radius).sort((a, b) => dist(a) - dist(b) + (rng.next() - 0.5))[0];
+    w.tiles.filter((x) => pred(x) && w.walkable(x.x, x.y) && dist(x) <= radius && safe(x)).sort((a, b) => dist(a) - dist(b) + (rng.next() - 0.5))[0];
   const push = (s: PlanStep) => {
     if (steps.length < count.max) steps.push(s);
   };
@@ -141,6 +145,11 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
     hunger = 0;
   };
   if (hunger >= eatAt && food >= 1) eat();
+  // Out in the wild: head back first.
+  if (!safe(pos)) {
+    const back = w.tiles.filter((x) => w.walkable(x.x, x.y) && safe(x)).sort((a, b) => dist(a) - dist(b))[0];
+    if (back) go(back);
+  }
 
   const eco = e.hunger < w.r('critical_hunger') - 1 ? mockEconomy(t, w, e, experimentChance) : [];
   for (const s of eco) push(s);
@@ -210,7 +219,7 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
     if (e.role === 'explorer' || rng.next() < 0.25) {
       const tx = pos.x + Math.round((rng.next() * 2 - 1) * wanderRadius);
       const ty = pos.y + Math.round((rng.next() * 2 - 1) * wanderRadius);
-      if (w.walkable(tx, ty)) {
+      if (w.walkable(tx, ty) && (safe({ x: tx, y: ty }) || e.role === 'explorer')) {
         why('explore');
         go({ x: tx, y: ty });
         push({ action: 'wait', args: { minutes: 2 }, label: L('wait') });

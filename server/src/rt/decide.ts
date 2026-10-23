@@ -105,6 +105,21 @@ export function tierConfig(e: RtEntity, cfg: GameConfig): TierDecision {
   return cfg.decisions.tiers[decisionTier(e, cfg)];
 }
 
+/** Real milliseconds per game minute at the current time scale (rule game_minutes_per_real_second). */
+export function realMsPerGameMinute(w: Pick<RtWorld, 'r' | 'timeScale'>): number {
+  return 1000 / Math.max(1e-6, w.r('game_minutes_per_real_second') * w.timeScale);
+}
+
+/**
+ * How long a decision may take: `decisions.timeoutGameMinutes` of game time, in real time between
+ * `timeoutMinMs` (a model call needs that long whatever the time scale) and `timeoutMs`.
+ */
+export function decisionTimeoutMs(cfg: GameConfig, w: Pick<RtWorld, 'r' | 'timeScale'>): number {
+  const d = cfg.decisions;
+  const game = d.timeoutGameMinutes * realMsPerGameMinute(w);
+  return Math.round(Math.min(d.timeoutMs, Math.max(d.timeoutMinMs, game)));
+}
+
 export function limitsOf(cfg: GameConfig): PromptLimits {
   return { lookMaxTiles: cfg.decisions.lookMaxTiles, lookMaxPeople: cfg.decisions.lookMaxPeople, nearbyGroupsMax: cfg.decisions.nearbyGroupsMax };
 }
@@ -325,7 +340,7 @@ export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: 
     toolSettings: { concurrency: 1 },
   });
   const prompt = rtObservation(t, w, e, why, host.groups(), host.roleTitle, limitsOf(cfg), host.changedLaws(e), host.perceived);
-  const signal = AbortSignal.any([AbortSignal.timeout(cfg.decisions.timeoutMs), ...(stop ? [stop] : [])]);
+  const signal = AbortSignal.any([AbortSignal.timeout(decisionTimeoutMs(cfg, w)), ...(stop ? [stop] : [])]);
   const handle = runner.stream(prompt, { signal });
   let thought = '';
   for await (const ev of handle) if (ev.type === 'thinking_delta') thought += (ev.data as { text: string }).text;

@@ -222,8 +222,25 @@ See [docs/upstream-issues.md](docs/upstream-issues.md) for friction found in Lor
   delivers perceptions (plan finished, step failed, spoken to, critical hunger or health, nightfall,
   season, new laws, group changes) to each agent's own mailbox. Each agent's mind decides by itself
   whether to think again (config `decisions.replanOn`, a cooldown from the rule `replan_cooldown_minutes`
-  times the tier factor); while it thinks it keeps executing its old plan. A shared limiter caps
+  times the tier factor); while it thinks it keeps executing its old plan. Cooldowns, horizons and the
+  decision timeout (`decisions.timeoutGameMinutes`, at least `timeoutMinMs` and at most `timeoutMs` real ms)
+  are in game time, so a faster world (`GAME_TIME_SCALE`) replans as often per game day, not more. Only
+  the first decision, a critical body and a failed group decision skip the cooldown. A shared limiter caps
   concurrent model calls (`decisions.maxConcurrent`).
+- **Reflex.** A body with no plan (its mind has not decided yet, is thinking, or is paused by the
+  budget) acts by reflex (`server/src/rt/reflex.ts`, config `reflex`): from hunger `eatAtHunger` it
+  eats what it carries, else walks to the nearest food within `searchRadius` and gathers it. A busy
+  body reacts only at critical hunger (rule `critical_hunger`): it eats what it carries without leaving
+  its plan, or suspends the plan to fetch food and then resumes it.
+  Nothing else: physics, not strategy; a reflex never wakes the mind and a committed plan replaces it.
+- **Groups and cost.** In a group decision only the deciding role (elder, leader, router, mentor, chain
+  doer) runs on its member's own model; proposers, workers and voters run on `groups.memberTier`, at
+  most `groups.maxProposers` of them (most esteemed first). A group decides at most once per
+  `groups.minGameMinutesBetweenDecisions` game minutes; each decision logs its estimated cost. Only
+  plan writers hold `commit_plan` and read its format; judges, voters and routers answer with
+  structured output and no tools. Joint plans are checked against the plan schema: a step without a
+  valid `who` goes to its writer, near-miss action names are mapped (`plan.ts` `ACTION_NEAR_MISSES`),
+  steps that still fail are dropped and logged.
 - **Plans, not per-second calls.** One call returns a plan of steps (`move_to`, `approach`, `gather`,
   `eat`, `build`, `give`, `say`, `rest`, `sleep`, `wait`) through the `commit_plan` tool; the run ends
   as soon as a plan is committed. Step counts and horizon per tier are in `config/game.json`
@@ -458,7 +475,8 @@ The server spends paid model credits, so even locally:
 
 - It binds to `127.0.0.1` (`http.host`, `SIM_HOST`).
 - Every `POST`/`PUT`/`DELETE` under `/api` needs `Content-Type: application/json` (415 otherwise) and,
-  when an `Origin` header is present, an origin from `http.corsOrigins` or the server's own (403):
+  when an `Origin` header is present, an origin from `http.corsOrigins` (plus `localhost`/`127.0.0.1` on every port
+  of `http.devOriginPorts`, default 5173-5179, `SIM_DEV_ORIGIN_PORTS=from-to`) or the server's own (403):
   this blocks cross-site form and `text/plain` requests. Bodies over `http.maxBodyBytes` get 413.
 - The WebSocket upgrade applies the same Origin check.
 - Every HTTP request and WebSocket upgrade must carry a `Host` of the server's own loopback names on its port, of a

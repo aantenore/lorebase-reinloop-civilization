@@ -4,7 +4,7 @@
 // The only shared piece is a concurrency limit on model calls (a resource pool, not a planner).
 import type { Season } from '../world/types.ts';
 import type { GameConfig, ReplanTrigger } from './config.ts';
-import { type Decision, decisionTier, type Failure, isFailure, type Reply } from './decide.ts';
+import { type Decision, decisionTier, type Failure, isFailure, realMsPerGameMinute, type Reply } from './decide.ts';
 import type { Group, JointPlan } from './groups.ts';
 import type { RtEntity, RtWorld } from './world.ts';
 
@@ -119,14 +119,30 @@ class Mailbox<T> {
 
 const IDLE_WAIT_MS = 60_000;
 
+/**
+ * Game time between two decisions of a person (rule replan_cooldown_minutes x tier factor), in real ms at
+ * the current time scale: a sped-up world replans as often in game time, not more often.
+ */
 function cooldownMs(host: MindHost, e: RtEntity): number {
-  const w = host.world();
   const tc = host.cfg.decisions.tiers[decisionTier(e, host.cfg)];
-  // Game minutes per real second include the time scale, so a sped-up world replans as often in game time.
-  return (w.r('replan_cooldown_minutes') * tc.cooldownFactor / Math.max(1e-6, w.r('game_minutes_per_real_second') * w.timeScale)) * 1000;
+  return host.world().r('replan_cooldown_minutes') * tc.cooldownFactor * realMsPerGameMinute(host.world());
+}
+
+/** A group's cooldown: its lead's, and at least `groups.minGameMinutesBetweenDecisions` of game time. */
+function groupCooldownMs(host: MindHost, lead: RtEntity): number {
+  return Math.max(cooldownMs(host, lead), host.cfg.groups.minGameMinutesBetweenDecisions * realMsPerGameMinute(host.world()));
 }
 
 const idle = (e: RtEntity) => !e.plan || e.plan.current >= e.plan.steps.length;
+
+/** What a person's mind does not wait the cooldown for (an idle body does not wait either). */
+const URGENT: ReadonlySet<Perception['kind']> = new Set(['start', 'critical', 'planDone', 'groupFailed']);
+/**
+ * What a group does not wait its cooldown for: its first decision and a member in a critical state
+ * (nor do all members idle). Anything else waits: meanwhile each body keeps executing its plan and,
+ * with none, acts by reflex (reflex.ts).
+ */
+const GROUP_URGENT: ReadonlySet<Perception['kind']> = new Set(['start', 'critical']);
 
 export class AgentMind {
   readonly e: RtEntity;
@@ -166,12 +182,12 @@ export class AgentMind {
         return !trig || this.host.cfg.decisions.replanOn[trig];
       });
       if (!wanted.length) continue;
-      const urgent = wanted.some((p) => p.kind === 'start' || p.kind === 'critical' || p.kind === 'planDone' || p.kind === 'groupFailed');
+      const urgent = wanted.some((p) => URGENT.has(p.kind));
       const wait = this.lastThought + cooldownMs(this.host, this.e) - Date.now();
       if (!urgent && !idle(this.e) && wait > 0) {
         // Not worth rethinking yet: keep the perceptions and look again when the cooldown ends.
         this.box.items.unshift(...wanted);
-        await new Promise((r) => setTimeout(r, wait));
+        await new Promise((r) => setTimeout(r, Math.min(wait, IDLE_WAIT_MS)));
         continue;
       }
       const why = wanted.map((p) => this.host.why(p)).filter(Boolean).join('; ');
@@ -179,7 +195,7 @@ export class AgentMind {
       // An offer is answered by the person itself (its own tool), even inside a group.
       const solo = wanted.some((p) => p.kind === 'groupFailed' || p.kind === 'offer');
       if (group && !solo) {
-        group.perceive(why, urgent);
+        group.perceive(why, wanted.some((p) => GROUP_URGENT.has(p.kind)));
         continue;
       }
       await this.think(why, solo);
@@ -271,10 +287,10 @@ export class GroupMind {
       const members = this.members();
       if (!members.length) continue;
       const lead = members.find((m) => m.id === this.g.leader) ?? members[0]!;
-      const wait = this.lastThought + cooldownMs(this.host, lead) - Date.now();
+      const wait = this.lastThought + groupCooldownMs(this.host, lead) - Date.now();
       if (!urgent && !members.every(idle) && wait > 0) {
         this.box.items.unshift(...batch);
-        await new Promise((r) => setTimeout(r, wait));
+        await new Promise((r) => setTimeout(r, Math.min(wait, IDLE_WAIT_MS)));
         continue;
       }
       await this.think([...new Set(batch.map((b) => b.why))].join('; '), members);

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { checkModel } from '../config.ts';
 import { peerCheck } from '../rt/insights.ts';
 import { checkMutation, originAllowed, tokenMatches } from './security.ts';
+import { devOrigins } from '../config.ts';
 
 const guard = { port: 4400, corsOrigins: ['http://localhost:5174'] };
 const json = { 'content-type': 'application/json; charset=utf-8' };
@@ -53,4 +54,13 @@ test('hostAllowed: loopback names on the port and CORS hosts only (no DNS rebind
   assert.equal(hostAllowed('127.0.0.1:4401', cfg), false);
   assert.equal(hostAllowed(undefined, cfg), false);
   assert.equal(hostAllowed('attacker.test', { ...cfg, allowedHosts: ['attacker.test'] }), true);
+});
+
+test('dev origin ports expand to both loopback names; a bad range adds nothing', () => {
+  const o = devOrigins([5174, 5179]);
+  assert.equal(o.length, 12);
+  assert.ok(o.includes('http://localhost:5177') && o.includes('http://127.0.0.1:5179'));
+  assert.deepEqual(devOrigins([5179, 5174]), []);
+  assert.deepEqual(devOrigins(undefined), []);
+  assert.equal(originAllowed('http://localhost:5178', { port: 4400, corsOrigins: o }), true);
 });

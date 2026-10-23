@@ -125,6 +125,9 @@ export interface GameConfig {
   movement: MovementConfig;
   decisions: {
     tiers: Record<Tier, TierDecision>;
+    /** A decision may take this much game time, but never less than `timeoutMinMs` nor more than `timeoutMs` real ms. */
+    timeoutGameMinutes: number;
+    timeoutMinMs: number;
     timeoutMs: number;
     maxConcurrent: number;
     memoryItems: number;
@@ -153,6 +156,12 @@ export interface GameConfig {
     maxRounds: number;
     proseMaxOutputTokens: number;
     maxTurns: number;
+    /** Tier of the members who only propose, work or vote (the deciding role keeps its own); empty: their own. */
+    memberTier?: Tier;
+    /** Members consulted per decision besides the one deciding (0: all). */
+    maxProposers: number;
+    /** A group decides at most once per this many game minutes (its first decision excepted). */
+    minGameMinutesBetweenDecisions: number;
     colors: string[];
     seeded: Array<{ name: string; pattern: GroupPattern; members: string[]; leader: string | null }>;
   };
@@ -172,6 +181,8 @@ export interface GameConfig {
   births: { maxAgentMinds: number; childTier: 'random-parent' | Tier; atCap: 'block' | 'crowd' };
   /** What a death frees: the private memory in mnemo (optionally leaving a one-line epitaph in the Chronicle). */
   death: { forgetMemories: boolean; epitaph: boolean };
+  /** The body's reflex while it has no plan (reflex.ts). */
+  reflex: import('./reflex.ts').ReflexConfig;
   /** Spending cap: when the model cost of this run reaches `maxUsd` (0: none) every mind is paused. */
   budget: { maxUsd: number };
 }

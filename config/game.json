@@ -54,6 +54,11 @@
       1
     ],
     "spawnRadius": 3,
+    "spawnFood": {
+      "radius": 6,
+      "fill": 1,
+      "minFood": 3
+    },
     "maxPopulation": 40
   },
   "movement": {
@@ -89,6 +94,8 @@
         "maxConsults": 4
       }
     },
+    "timeoutGameMinutes": 90,
+    "timeoutMinMs": 45000,
     "timeoutMs": 90000,
     "maxConcurrent": 4,
     "memoryItems": 12,
@@ -182,7 +189,10 @@
       }
     ],
     "proseMaxOutputTokens": 1500,
-    "maxTurns": 3
+    "maxTurns": 3,
+    "memberTier": "haiku",
+    "maxProposers": 3,
+    "minGameMinutesBetweenDecisions": 60
   },
   "crowd": {
     "count": 4,
@@ -453,6 +463,12 @@
       "world": "",
       "flushMs": 10000
     }
+  },
+  "reflex": {
+    "enabled": true,
+    "eatAtHunger": 2,
+    "searchRadius": 8,
+    "checkMs": 500
   },
   "budget": {
     "maxUsd": 0

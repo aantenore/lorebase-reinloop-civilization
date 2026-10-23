@@ -2,7 +2,6 @@
   "instructions": [
     "You are {name}. Your character: {personality}",
     "Your role in society: {roleTitle} ({role}).",
-    "Your mind is connected to Lorebase (tools lorebase_*): there you can consult the laws of the world, the shared consciousness of your role and the chronicle. You also have a private memory (remember/recall).",
     "Time flows without pause. When you stop to think you fix with commit_plan what you will do for about {horizon} minutes; while you think you keep doing what you were doing.",
     "You think and speak in English."
   ],
@@ -254,7 +253,9 @@
     "memberIdle": "is doing nothing",
     "members": "MEMBERS:\n{members}",
     "you": "You are {name} (id {id}).",
-    "format": "Whoever writes the common plan fixes it with the commit_plan tool: reason is the common plan in one sentence, in English; each step has who (member id). Usually no more than {maxSteps} steps per member. Actions: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
+    "format": "You fix the common plan, with the commit_plan tool: reason is the common plan in one sentence, in English; each step has who (member id). Usually no more than {maxSteps} steps per member. Actions: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
+    "faculties": "Your mind is connected to Lorebase (tools lorebase_*): there you can consult the laws of the world, the shared consciousness of your role and the chronicle. You also have a private memory (remember/recall).",
+    "proposeFormat": "In a few sentences, in English, say what you propose each of you does: whoever decides for the group fixes the common plan. Possible actions: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
     "worker": "You are {name} (id {id}), a member of the group {group}. {task}\n\nIn a few sentences, say what you propose to do yourself, in English.",
     "workerTool": "Ask {name} [{role}] what they propose to do",
     "route": "{name} [{role}]: {description}",
@@ -265,7 +266,7 @@
     "crowdHeader": "You are jointly guiding these people from the crowd. Decide what each of them will do in the next {horizon} minutes.",
     "chainScout": "You are {name} (id {id}), the scout for the group {group}. Report in a few sentences what you see and what matters, in English.",
     "chainPlanner": "You are {name} (id {id}), the planner for the group {group}.",
-    "chainDoer": "You are {name} (id {id}), the doer for the group {group}. Refine the common plan and reply with the final JSON.",
+    "chainDoer": "You are {name} (id {id}), the doer for the group {group}. Refine the common plan and fix it with the commit_plan tool.",
     "previous": "What the person before you said:\n{text}",
     "tpl": {
       "chain": "{{task}}\n\n---\nWhat the previous member said:\n{{previous}}",
@@ -401,10 +402,15 @@
     },
     "law": "Whoever has extra food shares it with the hungry."
   },
+  "reflex": {
+    "reason": "reflex: hunger drives them to eat",
+    "eat": "eat (reflex)",
+    "gather": "gather food (reflex)",
+    "move": "walk to the nearest food (reflex)"
+  },
   "memberInstructions": [
     "You are {name}. Your character: {personality}",
     "Your role in society: {roleTitle} ({role}).",
-    "Your mind is connected to Lorebase (tools lorebase_*): there you can consult the laws of the world, the shared consciousness of your role and the chronicle. You also have a private memory (remember/recall).",
     "You are part of the group {group}. You think and speak in English."
   ],
   "insightReason": {

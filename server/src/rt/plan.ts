@@ -8,6 +8,13 @@ export type StepAction = (typeof STEP_ACTIONS)[number];
 
 /** Names agents write for some actions (the people of the world speak Italian); normalized to STEP_ACTIONS. */
 export const ACTION_ALIASES: Record<string, StepAction> = { crea: 'craft', sperimenta: 'experiment', usa: 'use', dai: 'give', scambia: 'offer' };
+/** Near misses models write for the same actions (Italian verbs, English synonyms): mapped, not dropped. */
+export const ACTION_NEAR_MISSES: Record<string, StepAction> = {
+  move: 'move_to', go: 'move_to', walk: 'move_to', goto: 'move_to', go_to: 'move_to', vai: 'move_to', cammina: 'move_to', muoviti: 'move_to',
+  avvicinati: 'approach', raggiungi: 'approach', collect: 'gather', harvest: 'gather', raccogli: 'gather', mangia: 'eat',
+  construct: 'build', costruisci: 'build', amplia: 'build', talk: 'say', speak: 'say', parla: 'say', di: 'say', dici: 'say',
+  riposa: 'rest', dormi: 'sleep', aspetta: 'wait', attendi: 'wait', idle: 'wait', fabbrica: 'craft', combina: 'experiment', trade: 'offer',
+};
 /** Actions offered to models in the commit_plan schema. */
 export const MODEL_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'dai', 'scambia', 'say', 'rest', 'sleep', 'wait', 'crea', 'sperimenta', 'usa'] as const;
 export type Dir = 'n' | 'e' | 's' | 'w';
@@ -25,7 +32,8 @@ export interface PlanStep {
 
 export interface Plan {
   id: string;
-  scope: 'entity' | 'group';
+  /** `reflex`: the body's own plan while the mind has none (see reflex.ts); it never wakes the mind. */
+  scope: 'entity' | 'group' | 'reflex';
   steps: PlanStep[];
   current: number;
   reason: string;
@@ -95,7 +103,7 @@ export function normalizeStep(raw: unknown, textMax: number): PlanStep | undefin
   const r = raw as Record<string, unknown>;
   const a = { ...(r.args && typeof r.args === 'object' ? (r.args as Record<string, unknown>) : {}), ...r };
   const named = str(a.action, 32).toLowerCase();
-  const action = (ACTION_ALIASES[named] ?? named) as StepAction;
+  const action = (ACTION_ALIASES[named] ?? ACTION_NEAR_MISSES[named] ?? named) as StepAction;
   if (!STEP_ACTIONS.includes(action)) return undefined;
   const label = str(a.label, textMax);
   const args: Record<string, unknown> = {};

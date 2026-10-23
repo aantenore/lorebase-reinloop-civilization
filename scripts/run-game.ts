@@ -45,7 +45,9 @@ if (svc.mnemo.autoStart && cfg.memory.enabled && cfg.memory.url) {
   if (up) console.log(`[run] mnemo already up at ${cfg.memory.url}`);
   else {
     const port = new URL(cfg.memory.url).port;
-    const child = spawn(process.execPath, [resolve(ROOT, svc.mnemo.entry)], { stdio: 'inherit', env: { ...process.env, ...(port ? { MNEMO_PORT: port } : {}) } });
+    // Its own process group: a Ctrl-C in the terminal reaches the game (which saves the society to mnemo
+    // on its way out) but not mnemo, which is stopped below once the game has exited.
+    const child = spawn(process.execPath, [resolve(ROOT, svc.mnemo.entry)], { stdio: 'inherit', detached: true, env: { ...process.env, ...(port ? { MNEMO_PORT: port } : {}) } });
     children.push(child);
     console.log(`[run] mnemo starting on ${cfg.memory.url} (the first start downloads the embedding model)`);
     // The game talks to mnemo from its first second: wait until it answers (or give up and start anyway).
@@ -83,3 +85,8 @@ function stop(code: number): void {
 game.on('exit', (code) => stop(code ?? 0));
 process.on('SIGINT', () => stop(0));
 process.on('SIGTERM', () => stop(0));
+process.on('SIGHUP', () => stop(0));
+// mnemo runs in its own process group: never leave it behind, however this process ends.
+process.on('exit', () => {
+  for (const c of children) if (c.exitCode === null) c.kill('SIGTERM');
+});

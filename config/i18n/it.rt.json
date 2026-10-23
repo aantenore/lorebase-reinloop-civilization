@@ -2,7 +2,6 @@
   "instructions": [
     "Sei {name}. Il tuo carattere: {personality}",
     "Il tuo ruolo nella società: {roleTitle} ({role}).",
-    "La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).",
     "Il tempo scorre senza pause. Quando ti fermi a pensare fissi con commit_plan ciò che farai per circa {horizon} minuti; mentre pensi continui a fare ciò che stavi facendo.",
     "Pensi e parli in italiano."
   ],
@@ -254,7 +253,9 @@
     "memberIdle": "non sta facendo niente",
     "members": "MEMBRI:\n{members}",
     "you": "Tu sei {name} (id {id}).",
-    "format": "Chi scrive il piano comune lo fissa con lo strumento commit_plan: reason è il piano comune in una frase, in italiano; ogni passo ha who (id del membro). Di solito non più di {maxSteps} passi per membro. Azioni: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
+    "format": "Sei tu a fissare il piano comune, con lo strumento commit_plan: reason è il piano comune in una frase, in italiano; ogni passo ha who (id del membro). Di solito non più di {maxSteps} passi per membro. Azioni: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
+    "faculties": "La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).",
+    "proposeFormat": "Di' in poche frasi, in italiano, cosa proponi che faccia ciascuno: il piano comune lo fissa chi decide per il gruppo. Azioni possibili: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
     "worker": "Sei {name} (id {id}), membro del gruppo {group}. {task}\n\nDi' in poche frasi cosa proponi di fare tu, in italiano.",
     "workerTool": "Chiedi a {name} [{role}] cosa propone di fare",
     "route": "{name} [{role}]: {description}",
@@ -265,7 +266,7 @@
     "crowdHeader": "Guidi insieme queste persone della folla. Decidi cosa farà ciascuna nei prossimi {horizon} minuti.",
     "chainScout": "Sei {name} (id {id}), chi esplora per il gruppo {group}. Riferisci in poche frasi ciò che vedi e ciò che conta, in italiano.",
     "chainPlanner": "Sei {name} (id {id}), chi pianifica per il gruppo {group}.",
-    "chainDoer": "Sei {name} (id {id}), chi esegue per il gruppo {group}. Rifinisci il piano comune e rispondi con il JSON definitivo.",
+    "chainDoer": "Sei {name} (id {id}), chi esegue per il gruppo {group}. Rifinisci il piano comune e fissalo con lo strumento commit_plan.",
     "previous": "Ciò che ha detto chi ti precede:\n{text}",
     "tpl": {
       "chain": "{{task}}\n\n---\nCiò che ha detto chi ti precede:\n{{previous}}",
@@ -401,10 +402,15 @@
     },
     "law": "Chi ha cibo in più lo divida con chi ha fame."
   },
+  "reflex": {
+    "reason": "riflesso: la fame spinge a mangiare",
+    "eat": "mangia (riflesso)",
+    "gather": "raccogli cibo (riflesso)",
+    "move": "va verso il cibo più vicino (riflesso)"
+  },
   "memberInstructions": [
     "Sei {name}. Il tuo carattere: {personality}",
     "Il tuo ruolo nella società: {roleTitle} ({role}).",
-    "La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).",
     "Fai parte del gruppo {group}. Pensi e parli in italiano."
   ],
   "insightReason": {

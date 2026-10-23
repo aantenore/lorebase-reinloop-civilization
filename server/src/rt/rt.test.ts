@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { findPath, nearestWalkable } from './path.ts';
 import { advance, type ExecContext, type Mover, normalizeStep, prepareStep } from './plan.ts';
 import { tally } from './vote.ts';
+import { memberRef, repairSteps } from './groups.ts';
 
 // 5x5 grid with a wall at x=2 except y=4.
 const blocked = new Set(['2,0', '2,1', '2,2', '2,3']);
@@ -84,4 +85,21 @@ test('tally: plurality, majority flag, tie-break, invalid votes', () => {
   assert.equal(tie.majority, false);
   assert.equal(tally([], 3).winner, 0);
   assert.equal(tally([0], 0).winner, -1);
+});
+
+test('joint plan repair: who by id, name or in text; missing who goes to the author; unknown actions mapped or dropped', () => {
+  const members = [{ id: 'a5', name: 'Okon' }, { id: 'a6', name: 'Pell' }];
+  assert.equal(memberRef('Okon (a5)', members)?.id, 'a5');
+  assert.equal(memberRef('pell', members)?.id, 'a6');
+  assert.equal(memberRef('Nia', members), undefined);
+  const raw = [
+    { who: 'a5', action: 'raccogli', resource: 'food', label: 'g' },
+    { action: 'mangia', label: 'e' },
+    { who: 'Pell', action: 'fly', label: 'x' },
+    { who: 'Nia', action: 'wait', minutes: 5, label: 'w' },
+  ];
+  const fixed = repairSteps(raw, members, 'a6', 100, 10);
+  assert.deepEqual(fixed.steps.map((s) => [s.args.who, s.action]), [['a5', 'gather'], ['a6', 'eat'], ['a6', 'wait']]);
+  assert.equal(fixed.dropped.length, 1);
+  assert.equal(repairSteps(raw.slice(3), members, undefined, 100, 10).steps.length, 0);
 });

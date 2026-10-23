@@ -69,6 +69,11 @@ export interface MapConfig {
   blocked: Biome[];
   initialFill: [number, number];
   spawnRadius: number;
+  /**
+   * Food near the spawn at world creation, so the first day is survivable: walkable tiles within `radius`
+   * (Chebyshev, from the map centre) start filled to `fill` of their food capacity and with at least `minFood`.
+   */
+  spawnFood?: { radius: number; fill: number; minFood: number };
   maxPopulation: number;
 }
 
@@ -267,6 +272,14 @@ export class RtWorld {
         const cap = m.capacity[biome];
         this.tiles.push({ x, y, biome, elev, food: round2(cap.food * fill), wood: round2(cap.wood * fill), shelter: 0, structures: {}, shelterWear: 0 });
       }
+    }
+    const sf = m.spawnFood;
+    if (!sf || sf.radius < 0) return;
+    const cx = Math.floor(this.width / 2);
+    const cy = Math.floor(this.height / 2);
+    for (const t of this.tiles) {
+      if (Math.max(Math.abs(t.x - cx), Math.abs(t.y - cy)) > sf.radius || m.blocked.includes(t.biome)) continue;
+      t.food = round2(Math.max(t.food, m.capacity[t.biome].food * sf.fill, sf.minFood));
     }
   }
 
