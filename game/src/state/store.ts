@@ -1,10 +1,25 @@
 import { config } from '../config';
 import type {
+  ConsultMsg,
+  CraftMsg,
+  DecayMsg,
+  DiscoveryMsg,
+  Economy,
   Entity,
   EntityDelta,
+  FlowsMsg,
+  GameTime,
   Group,
   HelloMsg,
+  Insight,
+  InsightMsg,
   Inventory,
+  Memory,
+  MemoryMsg,
+  Recipe,
+  Resource,
+  Tech,
+  TradeMsg,
   LorebaseStatus,
   PlanMsg,
   Rule,
@@ -50,6 +65,23 @@ export interface Chronicle extends Omit<WorldEventMsg, 'type'> {
   minute: number;
 }
 
+export interface ConsultEntry {
+  at: number;
+  day: number;
+  minute: number;
+  tool: string;
+  query: string;
+}
+
+/** Last known economy (hello, REST or live discoveries). */
+export interface EconomyState {
+  resources: Map<string, Resource>;
+  recipes: Map<string, Recipe>;
+  techs: Map<string, Tech>;
+  hiddenRecipes: number;
+  known: boolean;
+}
+
 /** Events the store emits after applying a message. */
 export interface StoreEvents {
   hello: HelloMsg;
@@ -70,6 +102,16 @@ export interface StoreEvents {
   rules_changed: { revision: string; changes: RuleChange[] };
   lorebase: LorebaseStatus & { changed: boolean };
   select: { id: string | null };
+  economy: EconomyState;
+  insight: InsightMsg;
+  consult: ConsultMsg & { entry: ConsultEntry };
+  craft: CraftMsg;
+  trade: TradeMsg;
+  discovery: DiscoveryMsg;
+  decay: DecayMsg;
+  flows: FlowsMsg;
+  memory: MemoryMsg;
+  memories: { agentId: string };
   any: void;
 }
 
@@ -96,6 +138,13 @@ export class Store {
   chronicle: Chronicle[] = [];
   selectedId: string | null = null;
   hasHello = false;
+  economy: EconomyState = { resources: new Map(), recipes: new Map(), techs: new Map(), hiddenRecipes: 0, known: false };
+  flows: FlowsMsg | null = null;
+  /** Insights by code: accepted, pending, rejected and retired ones seen so far. */
+  insights = new Map<string, Insight>();
+  consults = new Map<string, ConsultEntry[]>();
+  /** Private memories per agent: filled by REST on demand and kept current by `memory` events. */
+  memories = new Map<string, Map<string, Memory>>();
   private stateInterval = 100;
   private lastStateAt = 0;
   private chronId = 0;
@@ -142,6 +191,46 @@ export class Store {
   groupOf(id: string): Group | undefined {
     const e = this.entities.get(id);
     return e?.groupId ? this.groups.get(e.groupId) : undefined;
+  }
+
+  /** Entity by id, falling back to its name (some events name people instead of ids). */
+  resolve(ref: string | null | undefined): EntityState | undefined {
+    if (!ref) return undefined;
+    const byId = this.entities.get(ref);
+    if (byId) return byId;
+    for (const e of this.entities.values()) if (e.name === ref) return e;
+    return undefined;
+  }
+
+  /** Display name of an item code (economy resource or recipe output), else the code itself. */
+  itemName(code: string): string {
+    return this.economy.resources.get(code)?.name ?? this.economy.recipes.get(code)?.name ?? code.replace(/_/g, ' ');
+  }
+
+  setEconomy(e: Economy): void {
+    this.economy = {
+      resources: new Map(e.resources.map((r) => [r.code, r])),
+      recipes: new Map(e.recipes.map((r) => [r.code, r])),
+      techs: new Map(e.techs.map((t) => [t.code, t])),
+      hiddenRecipes: e.hiddenRecipes,
+      known: true,
+    };
+    this.emit('economy', this.economy);
+  }
+
+  /** Merge insights fetched over REST (the newest status wins). */
+  mergeInsights(list: Insight[]): void {
+    for (const i of list) this.insights.set(i.code, { ...this.insights.get(i.code), ...i });
+  }
+
+  setMemories(agentId: string, list: Memory[]): void {
+    this.memories.set(agentId, new Map(list.map((m) => [m.id, m])));
+    this.emit('memories', { agentId });
+  }
+
+  private clockAt(at: unknown): GameTime {
+    const g = at as Partial<GameTime> | undefined;
+    return g && typeof g.day === 'number' && typeof g.minute === 'number' ? { day: g.day, minute: g.minute } : { day: this.time.day, minute: this.time.minute };
   }
 
   /** Interpolated render position, buffered behind the newest frame. */
@@ -205,6 +294,7 @@ export class Store {
         this.time = msg.time;
         if (msg.roles?.length) this.roles = msg.roles;
         this.lorebase = msg.lorebase;
+        if (msg.economy) this.setEconomy(msg.economy);
         this.emit('hello', msg);
         break;
       }
@@ -317,6 +407,58 @@ export class Store {
         this.emit('rules_changed', { revision: msg.revision, changes: msg.changes });
         this.emit('lorebase', { ...this.lorebase, changed: true });
         break;
+      case 'insight': {
+        const ins = { ...msg.insight, status: msg.action, ...(msg.reviewer ? { reviewer: msg.reviewer } : {}) };
+        this.insights.set(ins.code, ins);
+        this.emit('insight', { ...msg, insight: ins });
+        break;
+      }
+      case 'consult': {
+        const entry: ConsultEntry = { at: Date.now(), day: this.time.day, minute: this.time.minute, tool: msg.tool, query: msg.query };
+        let arr = this.consults.get(msg.agentId);
+        if (!arr) this.consults.set(msg.agentId, (arr = []));
+        arr.push(entry);
+        if (arr.length > config.minds.consultsKept) arr.splice(0, arr.length - config.minds.consultsKept);
+        this.emit('consult', { ...msg, entry });
+        break;
+      }
+      case 'craft':
+        this.emit('craft', msg);
+        break;
+      case 'trade':
+        this.emit('trade', msg);
+        break;
+      case 'decay':
+        this.emit('decay', msg);
+        break;
+      case 'discovery': {
+        const prev = this.economy.techs.get(msg.tech.code);
+        this.economy.techs.set(msg.tech.code, {
+          code: msg.tech.code,
+          name: msg.tech.name,
+          description: msg.tech.description,
+          unlocks: msg.tech.unlocks?.length ? msg.tech.unlocks : (prev?.unlocks ?? []),
+          discovered: true,
+          discoveredBy: this.resolve(msg.by)?.name ?? msg.by,
+          discoveredAt: this.clockAt(msg.at),
+        });
+        this.emit('discovery', msg);
+        this.emit('economy', this.economy);
+        break;
+      }
+      case 'flows':
+        this.flows = msg;
+        this.emit('flows', msg);
+        break;
+      case 'memory': {
+        let mem = this.memories.get(msg.agentId);
+        if (!mem) this.memories.set(msg.agentId, (mem = new Map()));
+        for (const id of msg.mergedFrom ?? []) mem.delete(id);
+        if (msg.action === 'forgotten') mem.delete(msg.memory.id);
+        else mem.set(msg.memory.id, msg.memory);
+        this.emit('memory', msg);
+        break;
+      }
       case 'lorebase': {
         const changed = msg.revision !== this.lorebase.revision || msg.branch !== this.lorebase.branch;
         this.lorebase = { connected: msg.connected, branch: msg.branch, revision: msg.revision };
@@ -346,6 +488,7 @@ export class Store {
     e.hunger = d.hunger;
     e.alive = d.alive;
     if (d.inventory) e.inventory = d.inventory;
+    if (d.tools) e.tools = d.tools;
     e.snaps.push({ t: now, x: d.x, y: d.y });
     if (e.snaps.length > 12) e.snaps.splice(0, e.snaps.length - 12);
     this.emit('entity_delta', { e, prevHp, prevInv, prevAlive });

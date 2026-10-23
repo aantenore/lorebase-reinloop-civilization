@@ -31,9 +31,26 @@ export interface GroupDecision {
 }
 export type ShelterLevel = 0 | 1 | 2;
 
-export interface Inventory {
-  food: number;
-  wood: number;
+/** Item code -> amount. Always carries `food` and `wood`; any other resource code may appear. */
+export type ItemBag = Record<string, number>;
+export type Inventory = ItemBag & { food: number; wood: number };
+
+/** A tool being carried; it wears out with use. */
+export interface ToolState {
+  item: string;
+  durability: number;
+  max: number;
+}
+
+/** Game clock stamp. */
+export interface GameTime {
+  day: number;
+  minute: number;
+}
+
+export interface TilePos {
+  x: number;
+  y: number;
 }
 
 export interface Tile {
@@ -71,6 +88,7 @@ export interface Entity {
   maxHp: number;
   hunger: number;
   inventory: Inventory;
+  tools?: ToolState[];
   /** Tiles per second. */
   speed: number;
   alive: boolean;
@@ -127,7 +145,89 @@ export interface EntityDelta {
   hp: number;
   hunger: number;
   inventory?: Inventory;
+  tools?: ToolState[];
   alive: boolean;
+}
+
+// ---------------------------------------------------------------- economy
+
+export interface Resource {
+  code: string;
+  name: string;
+  perishable: boolean;
+}
+
+export interface Recipe {
+  code: string;
+  name: string;
+  inputs: ItemBag;
+  outputs: ItemBag;
+  /** Role that knows the recipe. */
+  role: string;
+  /** Technology that unlocked it (null: known from the start). */
+  tech: string | null;
+  /** Required station (null: by hand). */
+  station: string | null;
+}
+
+export interface Tech {
+  code: string;
+  /** '???' while undiscovered. */
+  name: string;
+  description: string;
+  discovered: boolean;
+  discoveredBy: string | null;
+  discoveredAt: GameTime | null;
+  /** Recipe codes (or tech codes) unlocked by this technology. */
+  unlocks: string[];
+}
+
+/** Discovered recipes only; `hiddenRecipes` counts the ones still unknown. */
+export interface Economy {
+  resources: Resource[];
+  recipes: Recipe[];
+  techs: Tech[];
+  hiddenRecipes: number;
+}
+
+export interface FlowEdge {
+  fromRole: string;
+  toRole: string;
+  item: string;
+  amount: number;
+}
+
+// ---------------------------------------------------------------- minds
+
+export type InsightStatus = 'proposed' | 'accepted' | 'retired' | 'rejected';
+
+/** A piece of a role's shared consciousness, versioned in Lorebase. `author`/`reviewer` are names. */
+export interface Insight {
+  code: string;
+  role: string;
+  text: string;
+  confidence: number;
+  author: string;
+  reviewer?: string;
+  day: number;
+  evidence?: string;
+  status: InsightStatus;
+}
+
+export type MemoryKind = 'episodic' | 'gist';
+export type MemoryAction = 'added' | 'blurred' | 'merged' | 'forgotten' | 'recalled';
+
+/** One private memory of an agent (never written to Lorebase). Fidelity fades with time. */
+export interface Memory {
+  id: string;
+  text: string;
+  /** 0-1: 1 = vivid, near 0 = about to be forgotten. */
+  fidelity: number;
+  importance: number;
+  emotion: string | number;
+  kind: MemoryKind;
+  createdAt: GameTime;
+  recalls: number;
 }
 
 export type WorldEventKind = 'birth' | 'death' | 'build' | 'season' | 'starvation' | 'cold' | 'rules' | 'group';
@@ -151,6 +251,8 @@ export interface HelloMsg {
   time: WorldTime;
   roles: string[];
   lorebase: LorebaseStatus;
+  /** Absent on servers without the economy. */
+  economy?: Economy;
 }
 export interface StateMsg { type: 'state'; t: number; entities: EntityDelta[] }
 export interface EntityAddedMsg { type: 'entity_added'; entity: Entity }
@@ -177,6 +279,31 @@ export interface TimeMsg { type: 'time'; day: number; minute: number; season: Se
 export interface WorldEventMsg { type: 'world_event'; kind: WorldEventKind; text: string; at?: { x: number; y: number } }
 export interface RulesChangedMsg { type: 'rules_changed'; revision: string; changes: RuleChange[] }
 export interface LorebaseMsg { type: 'lorebase'; connected: boolean; branch: string; revision: string }
+export interface InsightMsg { type: 'insight'; insight: Insight; action: 'proposed' | 'accepted' | 'rejected' | 'retired'; reviewer?: string }
+/** An agent consulted Lorebase; `query` is a short summary of what it asked. */
+export interface ConsultMsg { type: 'consult'; agentId: string; tool: string; query: string }
+export interface CraftMsg { type: 'craft'; by: string; recipe: string; inputs: ItemBag; outputs: ItemBag; at: TilePos }
+export interface TradeMsg { type: 'trade'; from: string; to: string; give: ItemBag; get: ItemBag; kind: 'gift' | 'barter' }
+export interface DiscoveryMsg {
+  type: 'discovery';
+  tech: { code: string; name: string; description: string; unlocks: string[] };
+  by: string;
+  role: string;
+  /** Where (tile) or when (clock) it happened. */
+  at?: TilePos | GameTime;
+}
+/** `id` is the holder (entity id). */
+export interface DecayMsg { type: 'decay'; id: string; item: string; amount: number; reason: 'spoiled' | 'broken' | 'worn' }
+/** Goods moved between roles over the last `window` (seconds of real time). */
+export interface FlowsMsg { type: 'flows'; window: number; edges: FlowEdge[] }
+export interface MemoryMsg {
+  type: 'memory';
+  agentId: string;
+  action: MemoryAction;
+  memory: Memory;
+  /** For `merged`: ids of the memories folded into `memory` (optional). */
+  mergedFrom?: string[];
+}
 
 export type ServerMsg =
   | HelloMsg
@@ -194,11 +321,19 @@ export type ServerMsg =
   | TimeMsg
   | WorldEventMsg
   | RulesChangedMsg
-  | LorebaseMsg;
+  | LorebaseMsg
+  | InsightMsg
+  | ConsultMsg
+  | CraftMsg
+  | TradeMsg
+  | DiscoveryMsg
+  | DecayMsg
+  | FlowsMsg
+  | MemoryMsg;
 
 // ---------------------------------------------------------------- client -> server
 
-export interface JoinMsg { type: 'join'; name: string; role: string }
+export interface JoinMsg { type: 'join'; name: string; role: string; token?: string }
 /** Held movement vector in TILE space (x/y grid axes), length <= 1. Sent only when it changes; {0,0} = stop. */
 export interface InputMsg { type: 'input'; dx: number; dy: number }
 export type ActAction = 'gather' | 'chop' | 'build' | 'eat' | 'give';
@@ -217,3 +352,17 @@ export interface RuleEditRequest {
   mode: 'direct' | 'proposal';
   message: string;
 }
+
+/** GET /api/insights?role= */
+export interface InsightList {
+  pending: Insight[];
+  stored: Insight[];
+}
+/** GET /api/consciousness : accepted insights grouped by role. */
+export type Consciousness = Record<string, Insight[]>;
+/** GET /api/agents/:id/memories (a bare array is accepted too). */
+export interface MemoryList {
+  memories: Memory[];
+}
+/** GET /api/economy */
+export type EconomyResponse = Economy & { flows?: FlowEdge[] };

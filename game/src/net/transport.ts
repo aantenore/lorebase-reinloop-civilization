@@ -10,5 +10,7 @@ export interface Transport {
   onStatus(cb: (s: ConnStatus) => void): void;
   /** HTTP rule edit. Resolves with an error string or null. */
   postRule(req: RuleEditRequest): Promise<string | null>;
+  /** GET a REST resource under the API base (`/economy`, `/agents/:id/memories`...). Rejects on HTTP errors. */
+  getJson<T = unknown>(path: string): Promise<T>;
   close(): void;
 }

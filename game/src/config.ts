@@ -8,8 +8,12 @@ function wsUrl(): string {
   return `${proto}//${location.host}${env.VITE_WS_PATH || '/ws'}`;
 }
 
+/** Optional shared token (server `SIM_API_TOKEN`): `?token=` wins over `VITE_SIM_TOKEN`. Never hardcoded. */
+const apiToken = params.get('token') || String(env.VITE_SIM_TOKEN ?? '');
+
 export const config = {
   wsUrl: wsUrl(),
+  apiToken,
   apiBase: String(env.VITE_API_BASE || '/api').replace(/\/$/, ''),
   /** `?mock=1` forces the in-browser simulated world. */
   forceMock: params.get('mock') === '1',
@@ -27,4 +31,22 @@ export const config = {
   talkRange: 1.8,
   defaultRoles: ['gatherer', 'woodcutter', 'builder', 'healer', 'scout', 'elder'],
   zoom: { min: 1, max: 5, initial: 3, step: 0.5 },
+  render: {
+    /** Share of forest tiles drawn as trees; the rest is low undergrowth (display only, server data unchanged). */
+    forestTreeShare: 0.42,
+    /** Share of tree tiles that get a second tree. */
+    forestPairShare: 0.25,
+    /** Alpha of a tree/hut hiding any inhabitant, and one hiding you or the selected one. */
+    occluderAlpha: 0.5,
+    occluderAlphaFocus: 0.28,
+    /** Opacity of the silhouette drawn over occluders for hidden inhabitants. */
+    silhouetteAlpha: 0.55,
+  },
+  minds: {
+    /** Lorebase consult bubble lifetime (ms) and how many consults the inspector keeps per agent. */
+    consultBubbleMs: 4200,
+    consultsKept: 12,
+    /** Discovery banner lifetime (ms). */
+    discoveryBannerMs: 6500,
+  },
 };

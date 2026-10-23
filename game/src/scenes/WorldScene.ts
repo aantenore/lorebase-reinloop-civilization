@@ -8,7 +8,9 @@ import { WorldView } from '../render/worldView';
 import { store } from '../state/store';
 import { bus } from '../ui/bus';
 import { getPref, setPref } from '../ui/prefs';
+import { itemIcon } from '../ui/itemIcons';
 import { WorldLabels, type Anchor } from '../ui/worldLabels';
+import type { ItemBag, TilePos } from '../net/protocol';
 
 const ZOOMS = [1, 1.5, 2, 3, 4, 5];
 
@@ -108,6 +110,39 @@ export class WorldScene extends Phaser.Scene {
       }
       if (ev.kind === 'season' || ev.kind === 'death' || ev.kind === 'group') bus.emit('toast', { text: ev.text });
     }));
+    u.push(store.on('consult', ({ agentId, query }) => {
+      if (!this.views.has(agentId)) return;
+      const key = `${agentId}#consult`;
+      const dy = this.labels.hasBubble(agentId) ? -80 : -46;
+      this.labels.bubble(key, this.anchorFor(agentId), `💭 ${t('consult.bubble', { q: query })}`, { kind: 'consult', ms: config.minds.consultBubbleMs, dy });
+    }));
+    u.push(store.on('craft', ({ by, outputs, at }) => {
+      const anchor = this.anchorForRef(by, at);
+      this.labels.floater(anchor, this.bagNodes(outputs, '+'), '#ffd84a', 1900);
+      const p = anchor.pos();
+      if (p) burst(this, p.x, p.y - 8, 'build');
+    }));
+    u.push(store.on('trade', ({ from, to, give, get, kind }) => {
+      const a = this.anchorForRef(from);
+      const b = this.anchorForRef(to);
+      if (!a.pos() || !b.pos()) return;
+      this.labels.traveler(a, b, this.bagNodes(give, ''), 1400);
+      if (kind === 'barter' && Object.keys(get ?? {}).length) setTimeout(() => this.labels.traveler(b, a, this.bagNodes(get, ''), 1400), 350);
+    }));
+    u.push(store.on('decay', ({ id, item, amount, reason }) => {
+      if (!this.views.has(id)) return;
+      const word = t(reason === 'spoiled' ? 'float.spoiled' : reason === 'broken' ? 'float.broken' : 'float.worn');
+      this.labels.floater(this.anchorFor(id), [`-${amount} `, itemIcon(item, store.itemName(item), 'ico float-ico'), ` ${word}`], '#b8a8c0', 1800);
+    }));
+    u.push(store.on('discovery', ({ by, at }) => {
+      this.cameras.main.flash(400, 255, 230, 140, false);
+      const pos = at && 'x' in at ? at : undefined;
+      const p = this.anchorForRef(by, pos).pos();
+      if (p) {
+        burst(this, p.x, p.y - 10, 'birth');
+        burst(this, p.x, p.y - 14, 'build');
+      }
+    }));
     u.push(store.on('rules_changed', ({ revision }) => {
       bus.emit('toast', { text: t('laws.changed', { rev: revision.slice(0, 7) }), big: true });
       this.cameras.main.flash(250, 255, 216, 74, false);
@@ -154,6 +189,26 @@ export class WorldScene extends Phaser.Scene {
         return v ? { x: v.sx, y: v.sy } : null;
       },
     };
+  }
+
+  /** Anchor on an entity (id or name), else on a fixed tile. */
+  private anchorForRef(ref: string, at?: TilePos): Anchor {
+    const e = store.resolve(ref);
+    if (e && this.views.has(e.id)) return this.anchorFor(e.id);
+    if (!at) return { pos: () => null };
+    const tile = store.tileAt(at.x, at.y);
+    const p = toScreen(at.x, at.y, tile?.elev ?? 1);
+    return { pos: () => ({ x: p.sx, y: p.sy }) };
+  }
+
+  /** "+2 [icon] +1 [icon]" nodes for an item bag. */
+  private bagNodes(bag: ItemBag, sign: string): (Node | string)[] {
+    const out: (Node | string)[] = [];
+    for (const [code, n] of Object.entries(bag ?? {})) {
+      if (!(n > 0)) continue;
+      out.push(`${out.length ? ' ' : ''}${sign}${n}`, itemIcon(code, store.itemName(code), 'ico float-ico'));
+    }
+    return out;
   }
 
   private setFollow(on: boolean): void {
@@ -227,7 +282,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.world.update(delta);
     this.atmo.update(cam, delta);
-    this.fadeOccluders(you);
+    this.fadeOccluders(delta);
     this.updateTags();
 
     const view = cam.worldView;
@@ -235,22 +290,44 @@ export class WorldScene extends Phaser.Scene {
     bus.emit('camera', { x: view.centerX, y: view.centerY, w: view.width, h: view.height });
   }
 
-  /** Trees and huts turn see-through when they hide you or the selected inhabitant. */
-  private fadeOccluders(you: EntityView | undefined): void {
-    const watch: EntityView[] = [];
-    if (you) watch.push(you);
-    const sel = store.selectedId ? this.views.get(store.selectedId) : undefined;
-    if (sel && sel !== you) watch.push(sel);
-    for (const img of this.world.occluders) {
-      let hide = false;
-      for (const v of watch) {
-        if (v.depth >= img.depth) continue;
-        const left = img.x - img.displayWidth / 2;
-        const top = img.y - img.displayHeight;
-        if (v.sx > left && v.sx < left + img.displayWidth && v.sy - 8 > top && v.sy - 8 < img.y + 2) hide = true;
-      }
-      img.setAlpha(hide ? 0.45 : 1);
+  /**
+   * Trees and huts turn see-through whenever they hide ANY inhabitant on screen (more for you and
+   * the selected one); hidden inhabitants also get a silhouette drawn above the canopy.
+   */
+  private fadeOccluders(delta: number): void {
+    const view = this.cameras.main.worldView;
+    const cfg = config.render;
+    const boxes: { l: number; r: number; t: number; b: number; d: number; focus: boolean; v: EntityView }[] = [];
+    for (const v of this.views.values()) {
+      v.occluded = false;
+      if (v.sx < view.x - 24 || v.sx > view.right + 24 || v.sy < view.y - 8 || v.sy > view.bottom + 48) continue;
+      const focus = v.e.id === store.youId || v.e.id === store.selectedId;
+      boxes.push({ l: v.sx - 7, r: v.sx + 7, t: v.sy - 27, b: v.sy - 2, d: v.depth, focus, v });
     }
+    const k = Math.min(1, delta / 120);
+    for (const img of this.world.occluders) {
+      const left = img.x - img.displayWidth / 2;
+      const right = left + img.displayWidth;
+      const top = img.y - img.displayHeight;
+      const bottom = img.y;
+      if (right < view.x || left > view.right || bottom < view.y || top > view.bottom + 48) {
+        if (img.alpha !== 1) img.setAlpha(1);
+        continue;
+      }
+      let target = 1;
+      for (const b of boxes) {
+        if (b.d >= img.depth) continue;
+        if (b.r > left + 3 && b.l < right - 3 && b.b > top + 3 && b.t < bottom - 1) {
+          b.v.occluded = true;
+          target = Math.min(target, b.focus ? cfg.occluderAlphaFocus : cfg.occluderAlpha);
+        }
+      }
+      if (img.alpha !== target) {
+        const a = img.alpha + (target - img.alpha) * k;
+        img.setAlpha(Math.abs(a - target) < 0.01 ? target : a);
+      }
+    }
+    for (const v of this.views.values()) v.updateGhost(delta);
   }
 
   private updateTags(): void {

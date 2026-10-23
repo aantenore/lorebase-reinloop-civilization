@@ -27,7 +27,7 @@ export class WorldLabels {
   private tags = new Map<string, Label>();
   private floaters: Label[] = [];
 
-  bubble(id: string, anchor: Anchor, text: string, opts: { kind?: 'speech' | 'thought' | 'stream'; to?: string; ms?: number } = {}): void {
+  bubble(id: string, anchor: Anchor, text: string, opts: { kind?: 'speech' | 'thought' | 'stream' | 'consult'; to?: string; ms?: number; dy?: number } = {}): void {
     let b = this.bubbles.get(id);
     if (!b) {
       b = { el: h('div', { class: 'bubble' }), anchor, dy: -46, until: 0 };
@@ -35,6 +35,7 @@ export class WorldLabels {
       this.bubbles.set(id, b);
     }
     b.anchor = anchor;
+    b.dy = opts.dy ?? -46;
     b.el.className = `bubble ${opts.kind ?? 'speech'}`;
     b.el.replaceChildren(...(opts.to ? [h('span', { class: 'to' }, `→ ${opts.to} `)] : []), text.length > 140 ? `${text.slice(0, 137)}…` : text);
     b.until = performance.now() + (opts.ms ?? Math.min(9000, 2600 + text.length * 55));
@@ -63,11 +64,25 @@ export class WorldLabels {
     }
   }
 
-  floater(anchor: Anchor, text: string, color: string): void {
-    const el = h('div', { class: 'floater', style: `color:${color}` }, text);
-    this.root.append(el);
-    this.floaters.push({ el, anchor, dy: -34 - this.floaters.length * 4, until: performance.now() + 1400 });
+  /** True while a bubble with this key is on screen. */
+  hasBubble(id: string): boolean {
+    return this.bubbles.has(id);
   }
+
+  floater(anchor: Anchor, text: string | (Node | string)[], color: string, ms = 1400): void {
+    const el = h('div', { class: 'floater', style: `color:${color};animation-duration:${ms}ms` }, ...(Array.isArray(text) ? text : [text]));
+    this.root.append(el);
+    this.floaters.push({ el, anchor, dy: -34 - this.floaters.length * 4, until: performance.now() + ms });
+  }
+
+  /** Content that flies from one anchor to another (a gift or a barter changing hands). */
+  traveler(from: Anchor, to: Anchor, content: (Node | string)[], ms = 1300): void {
+    const el = h('div', { class: 'traveler' }, ...content);
+    this.root.append(el);
+    this.travelers.push({ el, from, to, start: performance.now(), ms });
+  }
+
+  private travelers: { el: HTMLElement; from: Anchor; to: Anchor; start: number; ms: number }[] = [];
 
   /** Screen rects of open overlay panels, refreshed a few times per second. */
   private obstacles: DOMRect[] = [];
@@ -138,6 +153,23 @@ export class WorldLabels {
         this.tags.delete(id);
       } else t.el.style.visibility = this.bubbles.has(id) ? 'hidden' : 'visible';
     }
+    this.travelers = this.travelers.filter((tr) => {
+      const a = tr.from.pos();
+      const b = tr.to.pos();
+      const k = (now - tr.start) / tr.ms;
+      if (k >= 1 || !a || !b) {
+        tr.el.remove();
+        return false;
+      }
+      const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+      const sa = toScreen(a.x, a.y);
+      const sb = toScreen(b.x, b.y);
+      const arc = Math.sin(Math.PI * e) * 26 * zoom;
+      tr.el.style.left = `${Math.round(sa.x + (sb.x - sa.x) * e)}px`;
+      tr.el.style.top = `${Math.round(sa.y + (sb.y - sa.y) * e - 22 * zoom - arc)}px`;
+      tr.el.style.opacity = String(k < 0.1 ? k * 10 : k > 0.85 ? (1 - k) / 0.15 : 1);
+      return true;
+    });
     this.floaters = this.floaters.filter((f) => {
       if (now > f.until || !place(f)) {
         f.el.remove();
@@ -152,5 +184,6 @@ export class WorldLabels {
     this.bubbles.clear();
     this.tags.clear();
     this.floaters = [];
+    this.travelers = [];
   }
 }

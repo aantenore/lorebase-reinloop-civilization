@@ -4,6 +4,8 @@ const params = new URLSearchParams(typeof window !== 'undefined' ? window.locati
 export const config = {
   /** Base for API calls. Empty = same origin (dev proxy handles /api). */
   apiBase: (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') || '',
+  /** Optional shared API token (server `SIM_API_TOKEN`): `?token=` wins over `VITE_SIM_TOKEN`. Never hardcoded. */
+  apiToken: params.get('token') || (import.meta.env.VITE_SIM_TOKEN as string | undefined) || '',
   /** Force mock stream. */
   mock: params.get('mock') === '1',
   /** Never fall back to mock even if backend unreachable. */

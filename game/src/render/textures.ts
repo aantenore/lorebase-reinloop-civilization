@@ -274,6 +274,32 @@ function bush(look: Look, full: boolean): Pix {
   return p;
 }
 
+/** Low forest undergrowth (ferns, saplings): reads as forest without hiding anyone. */
+function undergrowth(look: Look, seed: number): Pix {
+  const p = new Pix(18, 11);
+  const r = rng(seed);
+  const leaf = look === 'autumn' ? P.leafAutumn : P.leaf;
+  const fronds = 4 + Math.floor(r() * 3);
+  for (let i = 0; i < fronds; i++) {
+    const bx = 3 + Math.floor(r() * 12);
+    const h = 4 + Math.floor(r() * 5);
+    const lean = r() < 0.5 ? -1 : 1;
+    for (let j = 0; j < h; j++) {
+      const x = bx + Math.round((j / h) * lean * 2);
+      const y = 10 - j;
+      p.set(x, y, j > h - 3 ? leaf[3] : leaf[1 + (j % 2)]);
+      if (j > 1 && j % 2 === 0) p.set(x - lean, y, leaf[0]);
+    }
+  }
+  if (seed % 2 === 0) {
+    p.rect(8, 7, 1, 4, P.trunk[0]);
+    p.ellipse(8.5, 5, 3, 2.6, (nx, ny) => (-nx - ny > 0 ? leaf[2] : leaf[1]));
+  }
+  if (look === 'winter') for (let x = 2; x < 16; x++) if (p.get(x, 10) || p.get(x, 9)) p.set(x, 10, P.snow[1]);
+  p.outline(P.outline);
+  return p;
+}
+
 function rockPile(look: Look): Pix {
   const p = new Pix(18, 12);
   const shade = (nx: number, ny: number) => (-nx * 0.5 - ny > 0.4 ? P.rock[2] : -nx * 0.5 - ny > -0.3 ? P.rock[1] : P.rock[3]);
@@ -524,6 +550,7 @@ export function generateWorldTextures(scene: Phaser.Scene): void {
     addStrip(scene, `pine_${look}`, [pine(look, 11), pine(look, 12)]);
     addStrip(scene, `oak_${look}`, [roundTree(look, 21), roundTree(look, 22)]);
     addStrip(scene, `bush_${look}`, [bush(look, true), bush(look, false)]);
+    addStrip(scene, `undergrowth_${look}`, [undergrowth(look, 31), undergrowth(look, 32), undergrowth(look, 33)]);
     addStrip(scene, `rocks_${look}`, [rockPile(look)]);
     addStrip(scene, `tent_${look}`, [tent(look)]);
     addStrip(scene, `hut_${look}`, [hut(look)]);

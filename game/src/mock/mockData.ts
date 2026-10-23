@@ -26,6 +26,8 @@ export const AGENTS: AgentSeed[] = [
   { id: 'a-fosco', name: 'Fosco', role: 'scout', tier: 'sonnet', groupId: 'g-exp', speed: 2.0, persona: 'irrequieto e ottimista' },
   { id: 'a-gaia', name: 'Gaia', role: 'gatherer', tier: 'haiku', groupId: 'g-exp', speed: 1.6, persona: 'allegra e pratica' },
   { id: 'a-ivo', name: 'Ivo', role: 'hunter', tier: 'sonnet', groupId: 'g-exp', speed: 1.7, persona: 'silenzioso e attento' },
+  { id: 'a-ugo', name: 'Ugo', role: 'woodcutter', tier: 'sonnet', groupId: 'g-clan', speed: 1.6, persona: 'costante e diffidente' },
+  { id: 'a-tina', name: 'Tina', role: 'gatherer', tier: 'haiku', groupId: 'g-exp', speed: 1.6, persona: 'chiacchierona e generosa' },
 ];
 
 export const CROWD_NAMES = ['Lino', 'Mira', 'Nello', 'Olga'];
@@ -35,7 +37,7 @@ export const GROUPS: Group[] = [
     id: 'g-clan',
     name: 'Clan del Fiume',
     pattern: 'orchestrator',
-    members: ['a-aurelia', 'a-bruno', 'a-cora'],
+    members: ['a-aurelia', 'a-bruno', 'a-cora', 'a-ugo'],
     leader: 'a-aurelia',
     color: '#e0503a',
     lastDecision: {
@@ -67,7 +69,7 @@ export const GROUPS: Group[] = [
     id: 'g-exp',
     name: 'Spedizione del Nord',
     pattern: 'chain',
-    members: ['a-fosco', 'a-gaia', 'a-ivo'],
+    members: ['a-fosco', 'a-gaia', 'a-ivo', 'a-tina'],
     leader: 'a-fosco',
     color: '#3a9ad0',
     lastDecision: {

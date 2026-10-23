@@ -3,11 +3,14 @@ import { store } from '../state/store';
 import { bus } from './bus';
 import { fmtClock, h, throttle, uiRoot } from './dom';
 import { icon } from './icons';
+import { inventoryChips } from './inventory';
 import { panels } from './panels';
 
 /** Toolbar entries: panel id, label key, shortcut. */
 const TOOLBAR: { id: string; label: I18nKey; key: string }[] = [
   { id: 'laws', label: 'laws.title', key: 'l' },
+  { id: 'consciousness', label: 'hud.consciousness', key: 'c' },
+  { id: 'economy', label: 'hud.economy', key: 'e' },
   { id: 'groups', label: 'hud.groups', key: 'k' },
   { id: 'chronicle', label: 'hud.chronicle', key: 'j' },
   { id: 'minimap', label: 'hud.minimap', key: 'm' },
@@ -24,14 +27,13 @@ export function mountHud(onJoinClick: () => void): void {
   const clock = h('div', { class: 'px clock' }, day, tm, season);
   const hearts = h('div', { class: 'hearts' });
   const hunger = h('i');
-  const food = h('b', {}, '0');
-  const wood = h('b', {}, '0');
+  const inv = h('div', { class: 'inv' });
   const stats = h(
     'div',
     { class: 'px stats hidden' },
     h('div', {}, h('div', { class: 'stat-label' }, t('hud.hp')), hearts),
     h('div', {}, h('div', { class: 'stat-label' }, t('hud.hunger')), h('div', { class: 'meter' }, hunger)),
-    h('div', { class: 'inv' }, h('span', { title: t('hud.food') }, icon('berry'), food), h('span', { title: t('hud.wood') }, icon('wood'), wood)),
+    inv,
   );
   const joinBtn = h('button', { class: 'btn primary hidden', onclick: onJoinClick }, t('join.enter'));
   root.append(h('div', { class: 'hud-tl' }, clock, stats, joinBtn));
@@ -89,8 +91,11 @@ export function mountHud(onJoinClick: () => void): void {
     );
     hunger.style.width = `${Math.min(100, you.hunger)}%`;
     hunger.style.background = you.hunger > 70 ? 'var(--red)' : you.hunger > 40 ? 'var(--gold-d)' : 'var(--green)';
-    food.textContent = String(you.inventory.food);
-    wood.textContent = String(you.inventory.wood);
+    const sig = JSON.stringify([you.inventory, you.tools]);
+    if (inv.dataset.sig !== sig) {
+      inv.dataset.sig = sig;
+      inv.replaceChildren(...inventoryChips(you, 6));
+    }
   }, 200);
   const renderConn = () => {
     const s = store.status;

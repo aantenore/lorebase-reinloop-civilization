@@ -7,7 +7,7 @@ const url = (p: string) => `${config.apiBase}/api${p}`;
 async function post<T = unknown>(path: string, body?: unknown, method = 'POST'): Promise<T> {
   const res = await fetch(url(path), {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(config.apiToken ? { authorization: `Bearer ${config.apiToken}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();

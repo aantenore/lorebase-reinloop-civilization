@@ -3,12 +3,14 @@ import type {
   Dir,
   Entity,
   Group,
+  ItemBag,
   MapData,
   PlanStep,
   RuleEditRequest,
   ServerMsg,
   Season,
   Tile,
+  ToolState,
   WorldTime,
 } from '../net/protocol';
 import type { ConnStatus, Transport } from '../net/transport';
@@ -25,6 +27,9 @@ import {
   RULES,
   THOUGHTS,
 } from './mockData';
+import { consultFor, Minds } from './mockMinds';
+import { CRAFTS, EconomyState, fmtBag, FIRE, FLOW_WINDOW, PERISHABLE, PRODUCE, RES_NAME, ROUTES, START_INVENTORY, START_TOOLS, TECHS, TOOL_ITEMS } from './mockEconomy';
+import type { TechDef } from './mockEconomy';
 import { BUILD_SITE, generateMap, HUTS, STOCKPILE, VILLAGE } from './mockMap';
 
 const params = new URLSearchParams(location.search);
@@ -37,6 +42,10 @@ const MINUTES_PER_SEC = 8;
 /** Real seconds (at speed 1) before scripted events. */
 const RULES_CHANGE_AT = 55;
 const WINTER_AT = 110;
+/** Real seconds between flows broadcasts, perishables spoiling, and the cap on one item in a bag. */
+const FLOWS_EVERY = 10;
+const SPOIL_EVERY: [number, number] = [20, 30];
+const BAG_CAP = 8;
 
 interface Actor extends Entity {
   steps: PlanStep[];
@@ -81,6 +90,10 @@ export class MockServer implements Transport {
   private rulesDone = false;
   private nextPlayer = 1;
   private groupProgress = new Map<string, { refs: GroupStepRef[]; current: number }>();
+  private econ = new EconomyState();
+  private minds: Minds;
+  private flowsAt = FLOWS_EVERY;
+  private spoilAt = SPOIL_EVERY[0];
 
   constructor() {
     this.map = generateMap();
@@ -94,6 +107,16 @@ export class MockServer implements Transport {
       const spot = this.freeNear(VILLAGE.x - 3 + i * 2, VILLAGE.y + 3);
       this.actors.set(`c-${i}`, this.makeActor({ id: `c-${i}`, name, role: 'villager', tier: 'haiku', kind: 'crowd', groupId: 'g-crowd', speed: 1.1, ...spot }, ''));
     });
+    this.minds = new Minds(
+      {
+        emit: (m) => this.emit(m),
+        r: () => this.r(),
+        now: () => ({ day: this.time.day, minute: Math.floor(this.time.minute) }),
+        agents: () => [...this.actors.values()].filter((a) => a.kind === 'agent').map((a) => ({ id: a.id, name: a.name, role: a.role })),
+      },
+      ['gatherer', 'woodcutter', 'builder', 'healer', 'scout', 'wanderer', 'chief', 'elder', 'hunter'],
+    );
+    for (const a of this.actors.values()) if (a.kind === 'agent') this.minds.seedAgent(a.id, a.role);
     // stagger first plans so the opening already looks busy
     let k = 0;
     for (const a of this.actors.values()) {
@@ -152,6 +175,23 @@ export class MockServer implements Transport {
     return null;
   }
 
+  async getJson<T = unknown>(path: string): Promise<T> {
+    const [route, query = ''] = path.split('?');
+    const clean = route.replace(/^\/api(?=\/)/, '').replace(/\/+$/, '');
+    const q = new URLSearchParams(query);
+    let out: unknown;
+    const mem = /^\/agents\/([^/]+)\/memories$/.exec(clean);
+    if (clean === '/economy') out = { ...this.econ.economy(), flows: this.econ.flows(this.elapsed) };
+    else if (mem) {
+      const memories = this.minds.memories(decodeURIComponent(mem[1]));
+      if (!memories) return Promise.reject(new Error('404'));
+      out = { memories };
+    } else if (clean === '/insights') out = this.minds.insightList(q.get('role') || undefined);
+    else if (clean === '/consciousness') out = this.minds.consciousness();
+    else return Promise.reject(new Error('404'));
+    return structuredClone(out) as T;
+  }
+
   private emit(msg: ServerMsg) {
     for (const cb of this.msgCbs) cb(msg);
   }
@@ -170,7 +210,8 @@ export class MockServer implements Transport {
       hp: 100,
       maxHp: 100,
       hunger: 15 + Math.floor(this.r() * 30),
-      inventory: { food: e.kind === 'player' ? 1 : Math.floor(this.r() * 3), wood: 0 },
+      inventory: { food: e.kind === 'player' ? 1 : Math.floor(this.r() * 3), wood: 0, ...(e.kind === 'agent' ? START_INVENTORY[e.role] : {}) },
+      tools: (START_TOOLS[e.id] ?? []).map((t) => ({ ...t })),
       alive: true,
       steps: [],
       current: 0,
@@ -261,7 +302,9 @@ export class MockServer implements Transport {
       time: this.time,
       roles: ['gatherer', 'woodcutter', 'builder', 'healer', 'scout', 'wanderer'],
       lorebase: this.lorebase,
+      economy: this.econ.economy(),
     });
+    this.emitFlows();
     // replay current plans so a late joiner sees them
     for (const a of this.actors.values()) if (a.steps.length && a.kind === 'agent') this.sendPlan(a, 'Piano in corso');
     this.groupPlans();
@@ -290,6 +333,10 @@ export class MockServer implements Transport {
     const dur = (1.2 + this.r() * 2 + (a.tier === 'opus' ? 1 : 0)) / SPEED + delaySec;
     a.thinkingUntil = this.elapsed + dur * SPEED + 0.5;
     setTimeout(() => this.emit({ type: 'thinking', id: a.id, on: true }), delaySec * 1000);
+    if (a.kind === 'agent' && this.r() < 0.6) {
+      const c = consultFor(a.role, () => this.r());
+      setTimeout(() => this.emit({ type: 'consult', agentId: a.id, tool: c.tool, query: c.query }), delaySec * 1000 + (0.3 + this.r() * 0.6) * 1000 / SPEED);
+    }
     setTimeout(() => {
       if (!this.actors.has(a.id)) return;
       this.emit({ type: 'thinking', id: a.id, on: false });
@@ -345,10 +392,41 @@ export class MockServer implements Transport {
         if (role === 'scout' && i === 0) s.push({ action: 'say', args: { to: 'all', text: 'Qui ce ne sono ancora!' }, label: 'Avvisa gli altri' });
       }
     }
+    this.economyPlan(a, s, walk);
     walk(this.freeNear(VILLAGE.x + Math.floor(this.r() * 5) - 2, VILLAGE.y + Math.floor(this.r() * 5) - 2), 'Torna in piazza');
     if (a.inventory.food > 1 && a.hunger > 30) s.push({ action: 'eat', args: {}, label: 'Mangia qualcosa' });
     s.push({ action: 'wait', args: { s: 2 }, label: 'Riposa un momento' });
     return s;
+  }
+
+  /** Circular economy: produce raw goods, craft what the role knows, hand goods over to the roles that need them. */
+  private economyPlan(a: Actor, s: PlanStep[], walk: (t: { x: number; y: number }, label: string) => void) {
+    const prod = PRODUCE[a.role];
+    if (prod) {
+      const biome = a.role === 'scout' ? 'rock' : a.role === 'hunter' ? 'forest' : 'grass';
+      const spot = this.nearest(a, (t) => t.biome === biome && t.shelter === 0, 6);
+      if (spot) walk(this.freeNear(spot.x, spot.y + 1), prod.label);
+      s.push({ action: 'produce', args: { items: prod.items }, label: prod.label });
+    }
+    for (const code of CRAFTS[a.role] ?? []) {
+      const rec = this.econ.recipe(code);
+      if (!rec) continue;
+      if (rec.station === FIRE) walk(this.freeNear(VILLAGE.x, VILLAGE.y), 'Va al fuoco del villaggio');
+      s.push({ action: 'craft', args: { recipe: code }, label: `Fabbrica: ${rec.name}` });
+    }
+    for (const route of ROUTES[a.role] ?? []) {
+      if (this.r() > route.p) continue;
+      if (!this.econ.recipeKnownItem(Object.keys(route.give)[0])) continue;
+      const to = this.pickRole(route.toRole, a);
+      if (!to) continue;
+      walk(this.freeNear(Math.round(to.x) + 1, Math.round(to.y)), `Raggiunge ${to.name}`);
+      s.push({ action: 'give', args: { to: to.id, give: route.give, ...(route.get && this.r() < 0.5 ? { get: route.get } : {}) }, label: `${route.label} (${to.name})` });
+    }
+  }
+
+  private pickRole(role: string, not: Actor): Actor | undefined {
+    const list = [...this.actors.values()].filter((o) => o.kind === 'agent' && o.alive && o.role === role && o.id !== not.id);
+    return list[Math.floor(this.r() * list.length)];
   }
 
   private crowdPlan(a: Actor) {
@@ -431,6 +509,16 @@ export class MockServer implements Transport {
       if (a.kind === 'player') this.movePlayer(a, dt);
       else if (this.elapsed >= a.busyUntil && this.elapsed >= a.thinkingUntil) this.runStep(a, dt);
     }
+    this.minds.tick(dt);
+    for (const t of TECHS) if (t.at !== null && t.at > 0 && this.elapsed >= t.at && !this.econ.isDiscovered(t.code)) this.discover(t);
+    if (this.elapsed >= this.spoilAt) {
+      this.spoilAt = this.elapsed + SPOIL_EVERY[0] + this.r() * (SPOIL_EVERY[1] - SPOIL_EVERY[0]);
+      this.spoil();
+    }
+    if (this.elapsed >= this.flowsAt) {
+      this.flowsAt = this.elapsed + FLOWS_EVERY;
+      this.emitFlows();
+    }
     this.chatterT -= dt;
     if (this.chatterT <= 0) {
       this.chatterT = 5 + this.r() * 5;
@@ -456,6 +544,7 @@ export class MockServer implements Transport {
         hp: Math.round(a.hp),
         hunger: Math.round(a.hunger),
         inventory: { ...a.inventory },
+        tools: (a.tools ?? []).map((t): ToolState => ({ ...t })),
         alive: a.alive,
       })),
     });
@@ -479,6 +568,7 @@ export class MockServer implements Transport {
     this.time.season = 'winter';
     this.emit({ type: 'time', ...this.time, minute: Math.floor(this.time.minute) });
     this.emit({ type: 'world_event', kind: 'season', text: 'È arrivato l’inverno. La neve copre la valle.' });
+    this.minds.rememberAll('È arrivato l’inverno e la neve ha coperto la valle.', 'danger', 0.7, 'paura');
     this.emit({ type: 'lorebase', ...this.lorebase, revision: (this.lorebase.revision = 'b71e0d4') });
     for (const a of this.actors.values()) if (a.kind === 'agent') this.think(a, 'L’inverno è arrivato: servono legna e riparo.', this.r() * 3);
     const exp = this.groups.get('g-exp');
@@ -500,6 +590,7 @@ export class MockServer implements Transport {
     const rev = Math.floor(this.r() * 0xfffffff).toString(16).padStart(7, '0');
     this.lorebase.revision = rev;
     this.emit({ type: 'rules_changed', revision: rev, changes: [{ key, old, new: value, text: rule.text }] });
+    this.minds.rememberAll(`La legge è cambiata: ${rule.text}.`, 'law', 0.6, 'preoccupazione');
     this.emit({ type: 'world_event', kind: 'rules', text: `Legge cambiata: ${rule.text} ${old} → ${value}. ${why}` });
     // a couple of agents react
     const reactors = [...this.actors.values()].filter((a) => a.kind === 'agent').slice(0, 3);
@@ -522,7 +613,7 @@ export class MockServer implements Transport {
       else if (this.elapsed >= a.thinkingUntil && a.thinkingUntil > 0) this.think(a, 'Riprendo da capo.');
       return;
     }
-    const args = step.args as { x?: number; y?: number; s?: number; to?: string; text?: string };
+    const args = step.args as { x?: number; y?: number; s?: number; to?: string; text?: string; items?: ItemBag; give?: ItemBag; get?: ItemBag; recipe?: string };
     const next = () => {
       a.current++;
       a.stepT = 0;
@@ -563,6 +654,41 @@ export class MockServer implements Transport {
         }
         break;
       }
+      case 'produce':
+        a.anim = 'work';
+        a.stepT += dt;
+        if (a.stepT >= 2.8) {
+          for (const [k, n] of Object.entries(args.items ?? {})) a.inventory[k] = Math.min(BAG_CAP, (a.inventory[k] ?? 0) + n);
+          next();
+        }
+        break;
+      case 'craft': {
+        const rec = this.econ.recipe(args.recipe ?? '');
+        if (!rec || !this.hasAll(a, rec.inputs)) {
+          next();
+          break;
+        }
+        a.anim = 'work';
+        a.stepT += dt;
+        if (a.stepT >= 2.4) {
+          for (const [k, n] of Object.entries(rec.inputs)) this.take(a, k, n);
+          for (const [k, n] of Object.entries(rec.outputs)) a.inventory[k] = (a.inventory[k] ?? 0) + n;
+          const at = { x: Math.round(a.x), y: Math.round(a.y) };
+          this.emit({ type: 'craft', by: a.id, recipe: rec.code, inputs: { ...rec.inputs }, outputs: { ...rec.outputs }, at });
+          this.minds.remember(a.id, `Ho fabbricato ${fmtBag(rec.outputs)} con ${fmtBag(rec.inputs)}.`, 'craft', 0.5, 'orgoglio');
+          next();
+        }
+        break;
+      }
+      case 'give': {
+        a.anim = 'idle';
+        a.stepT += dt;
+        if (a.stepT >= 0.8) {
+          this.giveTo(a, this.actors.get(args.to ?? ''), args.give ?? {}, args.get);
+          next();
+        }
+        break;
+      }
       case 'eat':
         a.anim = 'eat';
         a.stepT += dt;
@@ -575,7 +701,14 @@ export class MockServer implements Transport {
         }
         break;
       case 'say':
-        if (a.stepT === 0) this.emit({ type: 'say', from: a.id, to: args.to ?? 'all', text: args.text ?? '…', kind: 'speech' });
+        if (a.stepT === 0) {
+          this.emit({ type: 'say', from: a.id, to: args.to ?? 'all', text: args.text ?? '…', kind: 'speech' });
+          const other = this.actors.get(args.to ?? '');
+          if (other?.kind === 'agent') {
+            this.minds.remember(a.id, `Ho parlato con ${other.name}.`, 'talk', 0.3, 'calma');
+            this.minds.remember(other.id, `${a.name} mi ha parlato.`, 'talk', 0.3, 'calma');
+          }
+        }
         a.stepT += dt;
         if (a.stepT > 2.5) next();
         break;
@@ -620,10 +753,12 @@ export class MockServer implements Transport {
       const got = Math.min(t.wood, this.rule('wood.per_chop'));
       t.wood -= got;
       a.inventory.wood += got;
+      this.wear(a, 'stone_axe', false);
     } else if (action === 'gather' && t.food > 0) {
       const got = Math.min(t.food, this.rule('food.per_gather'));
       t.food -= got;
       a.inventory.food += got;
+      if (this.r() < 0.35) this.wear(a, 'basket', true);
     } else if (action === 'take' && t.wood > 0) {
       const got = Math.min(t.wood, 4);
       t.wood -= got;
@@ -638,6 +773,108 @@ export class MockServer implements Transport {
       }
     } else return;
     this.emit({ type: 'tile', x: t.x, y: t.y, food: t.food, wood: t.wood, shelter: t.shelter });
+  }
+
+  // ------------------------------------------------------------ economy helpers
+
+  private hasAll(a: Actor, bag: ItemBag): boolean {
+    return Object.entries(bag).every(([k, n]) => (a.inventory[k] ?? 0) >= n);
+  }
+
+  /** Remove up to `n` from a bag; zero entries are dropped (food and wood always stay). */
+  private take(a: Actor, item: string, n: number): number {
+    const got = Math.min(n, a.inventory[item] ?? 0);
+    if (got <= 0) return 0;
+    a.inventory[item] -= got;
+    if (a.inventory[item] <= 0 && item !== 'food' && item !== 'wood') delete a.inventory[item];
+    return got;
+  }
+
+  private receive(a: Actor, item: string, n: number) {
+    const max = TOOL_ITEMS[item];
+    if (max && a.kind === 'agent') {
+      const tool = a.tools?.find((t) => t.item === item);
+      if (tool) tool.durability = tool.max;
+      else (a.tools ??= []).push({ item, durability: max, max });
+    } else a.inventory[item] = (a.inventory[item] ?? 0) + n;
+  }
+
+  /** Hand goods over (gift, or barter when `get` is given and the other side can pay). */
+  private giveTo(from: Actor, to: Actor | undefined, give: ItemBag, get?: ItemBag) {
+    if (!to || !to.alive) return;
+    const gave: ItemBag = {};
+    for (const [k, n] of Object.entries(give)) {
+      const got = this.take(from, k, n);
+      if (got > 0) gave[k] = got;
+    }
+    if (!Object.keys(gave).length) return;
+    const got: ItemBag = {};
+    for (const [k, n] of Object.entries(get ?? {})) {
+      const g = this.take(to, k, n);
+      if (g > 0) got[k] = g;
+    }
+    for (const [k, n] of Object.entries(gave)) this.receive(to, k, n);
+    for (const [k, n] of Object.entries(got)) this.receive(from, k, n);
+    const barter = Object.keys(got).length > 0;
+    this.emit({ type: 'trade', from: from.id, to: to.id, give: gave, get: got, kind: barter ? 'barter' : 'gift' });
+    this.econ.record(this.elapsed, from.role, to.role, gave);
+    if (barter) this.econ.record(this.elapsed, to.role, from.role, got);
+    this.minds.remember(from.id, `Ho dato ${fmtBag(gave)} a ${to.name}${barter ? ` in cambio di ${fmtBag(got)}` : ''}.`, 'trade', 0.35, 'generosità');
+    this.minds.remember(to.id, `Ho ricevuto ${fmtBag(gave)} da ${from.name}${barter ? `, ho dato ${fmtBag(got)}` : ''}.`, 'trade', 0.35, 'gratitudine');
+  }
+
+  /** Use a tool once; it breaks at zero. Baskets also report plain wear. */
+  private wear(a: Actor, item: string, reportWorn: boolean) {
+    const tool = a.tools?.find((t) => t.item === item);
+    if (!tool) return;
+    tool.durability--;
+    if (tool.durability <= 0) {
+      a.tools = a.tools!.filter((t) => t !== tool);
+      this.emit({ type: 'decay', id: a.id, item, amount: 1, reason: 'broken' });
+      this.minds.remember(a.id, `Si è rotto ${RES_NAME[item] ?? item} mentre lo usavo.`, 'danger', 0.55, 'delusione');
+    } else if (reportWorn) {
+      this.emit({ type: 'decay', id: a.id, item, amount: 1, reason: 'worn' });
+    }
+  }
+
+  /** A random holder loses a bit of a perishable; pots and baskets protect. */
+  private spoil() {
+    const holders = [...this.actors.values()].filter((a) => a.kind === 'agent' && a.alive && PERISHABLE.some((k) => (a.inventory[k] ?? 0) > 0));
+    if (!holders.length) return;
+    const a = holders[Math.floor(this.r() * holders.length)];
+    if ((a.inventory.pot ?? 0) > 0 || a.tools?.some((t) => t.item === 'basket')) {
+      if (this.r() < 0.6) return;
+    }
+    const items = PERISHABLE.filter((k) => (a.inventory[k] ?? 0) > 0);
+    const item = items[Math.floor(this.r() * items.length)];
+    const lost = this.take(a, item, a.inventory[item] > 3 ? 2 : 1);
+    if (!lost) return;
+    this.emit({ type: 'decay', id: a.id, item, amount: lost, reason: 'spoiled' });
+    this.minds.remember(a.id, `${RES_NAME[item] ?? item} marcite prima di essere usate.`, 'danger', 0.3, 'delusione');
+  }
+
+  private emitFlows() {
+    this.emit({ type: 'flows', window: FLOW_WINDOW, edges: this.econ.flows(this.elapsed) });
+  }
+
+  private discover(def: TechDef) {
+    const agents = [...this.actors.values()].filter((a) => a.kind === 'agent' && a.alive);
+    const by = agents.find((a) => a.role === def.byRole) ?? agents[0];
+    if (!by) return;
+    const at = { day: this.time.day, minute: Math.floor(this.time.minute) };
+    this.econ.discover(def.code, by.name, at);
+    this.emit({ type: 'discovery', tech: { code: def.code, name: def.name, description: def.description, unlocks: [...def.unlocks] }, by: by.id, role: by.role, at: { x: Math.round(by.x), y: Math.round(by.y) } });
+    this.emit({ type: 'world_event', kind: 'build', text: `Scoperta: ${def.name}`, at: { x: Math.round(by.x), y: Math.round(by.y) } });
+    for (const a of agents) {
+      if (a === by) this.minds.remember(a.id, `Ho scoperto ${def.name}! ${def.description}`, 'discovery', 0.95, 'gioia');
+      else this.minds.remember(a.id, `${by.name} ha scoperto ${def.name}.`, 'discovery', 0.6, 'meraviglia');
+    }
+    const roles = new Set([def.byRole]);
+    for (const code of def.unlocks) {
+      const rec = this.econ.recipe(code);
+      if (rec) roles.add(rec.role);
+    }
+    for (const a of agents) if (roles.has(a.role)) this.think(a, `Nuova scoperta: ${def.name}`, this.r() * 2);
   }
 
   private movePlayer(p: Actor, dt: number) {

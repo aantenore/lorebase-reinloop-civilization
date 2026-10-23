@@ -1,4 +1,7 @@
 import { mountChronicle } from './chronicle';
+import { mountConsciousness } from './consciousness';
+import { mountDiscoveryBanner } from './discovery';
+import { mountEconomy } from './economy';
 import { installControls } from './controls';
 import { mountDialog } from './dialog';
 import { mountGroupPanel } from './groupPanel';
@@ -16,6 +19,9 @@ export function mountOverlay(): void {
   mountInspector();
   mountGroupPanel();
   mountLaws();
+  mountConsciousness();
+  mountEconomy();
+  mountDiscoveryBanner();
   mountDialog();
   const join = mountJoin();
   mountHud(() => join.show());

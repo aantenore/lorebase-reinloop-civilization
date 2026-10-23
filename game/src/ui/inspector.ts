@@ -3,8 +3,9 @@ import type { Group, PlanStep } from '../net/protocol';
 import { drawPortrait } from '../render/portrait';
 import { store, type EntityState, type Plan } from '../state/store';
 import { bus } from './bus';
-import { h, throttle, uiRoot } from './dom';
-import { icon } from './icons';
+import { fmtClock, h, throttle, uiRoot } from './dom';
+import { inventoryChips, toolRows } from './inventory';
+import { MemoryView } from './memoryView';
 import { panels } from './panels';
 
 export function tierBadge(tier: string): HTMLElement {
@@ -45,7 +46,11 @@ function bar(label: string, value: number, max: number, color: string): HTMLElem
 
 /** Card for the selected inhabitant: vitals, group, live plan, thoughts and dialogue. */
 export function mountInspector(): void {
-  const body = h('div', { class: 'scroll' });
+  // `dyn` is rebuilt on every refresh; the consult and memory blocks persist so their animations survive
+  const dyn = h('div', { class: 'insp-dyn' });
+  const consults = h('div', { class: 'consults' });
+  const memory = new MemoryView();
+  const body = h('div', { class: 'scroll' }, dyn, consults, memory.el);
   const el = h('div', { class: 'px panel inspector hidden' }, h('button', { class: 'btn x-btn', onclick: () => store.select(null) }, 'X'), body);
   uiRoot().append(el);
   panels.register({
@@ -97,7 +102,8 @@ export function mountInspector(): void {
         ...bar(t('hud.hp'), e.hp, e.maxHp, 'var(--red)'),
         ...bar(t('hud.hunger'), e.hunger, 100, e.hunger > 70 ? 'var(--red)' : 'var(--bronze)'),
       ),
-      h('div', { class: 'sub' }, `${t('insp.inventory')}: `, icon('berry'), ` ${e.inventory.food}  `, icon('wood'), ` ${e.inventory.wood}`),
+      h('div', { class: 'sub inv-line' }, `${t('insp.inventory')}: `, ...inventoryChips(e)),
+      toolRows(e.tools),
       g
         ? h(
             'div',
@@ -117,7 +123,7 @@ export function mountInspector(): void {
         ? h('button', { class: 'btn primary', onclick: () => bus.emit('dialog', { id: e.id }) }, t('insp.speak'))
         : null,
     ];
-    body.replaceChildren(...parts.filter((p): p is Node => !!p));
+    dyn.replaceChildren(...parts.filter((p): p is Node => !!p));
     // keep the active step in view when the plan advances, otherwise preserve the user's scroll
     body.scrollTop = prevScroll;
     const key = `${e.id}:${plan?.createdAt}:${plan?.current}`;
@@ -130,10 +136,39 @@ export function mountInspector(): void {
     }
   };
 
+  let freshConsult = 0;
+  const renderConsults = () => {
+    const id = store.selectedId;
+    const e = id ? store.entities.get(id) : undefined;
+    consults.classList.toggle('hidden', !e || e.kind !== 'agent');
+    if (!e || e.kind !== 'agent') return;
+    const list = [...(store.consults.get(e.id) ?? [])].reverse();
+    consults.replaceChildren(
+      h('div', { class: 'section-title' }, t('insp.consulted')),
+      h('div', { class: 'note' }, list.length ? t('insp.consultedNote') : t('insp.noConsults')),
+      ...list.slice(0, 6).map((c, i) =>
+        h(
+          'div',
+          { class: `consult${i === 0 && freshConsult > Date.now() - 1500 ? ' fresh' : ''}` },
+          h('span', { class: 'c-tool' }, c.tool.replace(/^lorebase_/, '')),
+          h('span', { class: 'c-q' }, c.query),
+          h('span', { class: 'muted c-when' }, fmtClock(c.minute)),
+        ),
+      ),
+    );
+  };
+
   const schedule = throttle(() => panels.isOpen('inspector') && render(), 300);
   store.on('select', ({ id }) => {
     panels.set('inspector', !!id, false);
+    memory.setAgent(id);
+    renderConsults();
     if (id) render();
+  });
+  store.on('consult', ({ agentId }) => {
+    if (agentId !== store.selectedId) return;
+    freshConsult = Date.now();
+    renderConsults();
   });
   store.on('any', schedule);
 }

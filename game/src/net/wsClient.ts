@@ -1,5 +1,6 @@
 import { config } from '../config';
 import type { ClientMsg, RuleEditRequest, ServerMsg } from './protocol';
+import { authHeaders, getJson, withToken } from './http';
 import type { ConnStatus, Transport } from './transport';
 
 /** Reconnecting WebSocket transport. Re-sends the last `join` after a reconnect. */
@@ -14,7 +15,7 @@ export class WsTransport implements Transport {
   private closed = false;
   everOpened = false;
 
-  constructor(private url = config.wsUrl) {
+  constructor(private url = withToken(config.wsUrl)) {
     this.connect();
   }
 
@@ -53,7 +54,10 @@ export class WsTransport implements Transport {
   }
 
   send(msg: ClientMsg): void {
-    if (msg.type === 'join') this.lastJoin = msg;
+    if (msg.type === 'join') {
+      if (config.apiToken && !msg.token) msg = { ...msg, token: config.apiToken };
+      this.lastJoin = msg;
+    }
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
     else if (msg.type !== 'input' && msg.type !== 'join') this.queue.push(msg);
   }
@@ -70,7 +74,7 @@ export class WsTransport implements Transport {
     try {
       const res = await fetch(`${config.apiBase}/rules`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...authHeaders() },
         body: JSON.stringify(req),
       });
       if (!res.ok) return `${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`;
@@ -78,6 +82,10 @@ export class WsTransport implements Transport {
     } catch (e) {
       return String(e);
     }
+  }
+
+  getJson<T = unknown>(path: string): Promise<T> {
+    return getJson<T>(path);
   }
 
   close(): void {

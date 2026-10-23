@@ -2,8 +2,13 @@ import Phaser from 'phaser';
 import type { EntityState, Store } from '../state/store';
 import { CHAR_FEET, CHAR_H, ensureCharacter, frameFor } from './characters';
 import { depthOf, toScreen } from './iso';
-import { hash, hexToInt } from './palette';
-import { ensureBanner } from './textures';
+import { config } from '../config';
+import { hash, hexToInt, roleColors } from './palette';
+import { ensureSilhouette } from './silhouette';
+import { ensureBanner, lighten } from './textures';
+
+/** Silhouettes sit above every world prop but below the day/night overlay. */
+const SILHOUETTE_DEPTH = 9e6;
 
 /** All the sprites that make up one inhabitant on screen. */
 export class EntityView {
@@ -18,6 +23,10 @@ export class EntityView {
   private you: Phaser.GameObjects.Image | null = null;
   private selArrow: Phaser.GameObjects.Image;
   private glow: Phaser.FX.Glow | null = null;
+  /** Outline drawn over occluders while the body is hidden behind a tree or hut. */
+  private ghost: Phaser.GameObjects.Sprite;
+  /** Set each frame by the scene's occlusion pass. */
+  occluded = false;
   private phase: number;
   private elev = 1;
   private zzzT = 0;
@@ -49,7 +58,21 @@ export class EntityView {
     if (this.you) parts.push(this.you);
     parts.push(this.thought, this.selArrow);
     this.root.add(parts);
+    const tint = e.kind === 'player' ? 0xffffff : hexToInt(lighten(roleColors(e.role).shirt[0], 0.18));
+    this.ghost = scene.add.sprite(0, 0, ensureSilhouette(scene, key), 0).setOrigin(0.5, CHAR_FEET / CHAR_H).setTint(tint).setAlpha(0).setDepth(SILHOUETTE_DEPTH).setVisible(false);
     this.refreshGroup();
+  }
+
+  /** Fade the silhouette in/out; called after the occlusion pass. */
+  updateGhost(dt: number): void {
+    const show = this.occluded && this.e.alive;
+    const target = show ? config.render.silhouetteAlpha : 0;
+    const a = this.ghost.alpha + (target - this.ghost.alpha) * Math.min(1, dt / 110);
+    this.ghost.setAlpha(a < 0.02 && !show ? 0 : a);
+    this.ghost.setVisible(this.ghost.alpha > 0);
+    if (!this.ghost.visible) return;
+    this.ghost.setPosition(this.root.x, this.root.y);
+    this.ghost.setFrame(this.body.frame.name).setFlipX(this.body.flipX);
   }
 
   /** Group ring colour, and the banner if this entity carries the group flag. */
@@ -118,6 +141,7 @@ export class EntityView {
   }
 
   destroy(): void {
+    this.ghost.destroy();
     this.root.destroy();
   }
 }

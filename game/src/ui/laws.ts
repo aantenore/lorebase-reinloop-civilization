@@ -20,7 +20,7 @@ export function mountLaws(): void {
     list,
   );
   uiRoot().append(el);
-  panels.register({ id: 'laws', key: 'l', defaultOpen: false, el, onOpen: () => render() });
+  panels.register({ id: 'laws', key: 'l', defaultOpen: false, el, onOpen: () => render(), slot: 'center' });
 
   let editing: string | null = null;
   let mode: 'direct' | 'proposal' = 'direct';

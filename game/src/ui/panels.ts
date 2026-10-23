@@ -7,6 +7,8 @@ export interface PanelDef {
   defaultOpen: boolean;
   el: HTMLElement;
   onOpen?: () => void;
+  /** Panels sharing a slot: opening one closes the others in the same slot. */
+  slot?: string;
 }
 
 type Listener = (id: string, open: boolean) => void;
@@ -18,7 +20,8 @@ class PanelRegistry {
   register(def: PanelDef): void {
     this.panels.set(def.id, def);
     // restore the remembered state silently: components render themselves once data arrives
-    def.el.classList.toggle('hidden', !getPref(`panel.${def.id}`, def.defaultOpen));
+    const slotTaken = !!def.slot && [...this.panels.values()].some((o) => o !== def && o.slot === def.slot && this.isOpen(o.id));
+    def.el.classList.toggle('hidden', slotTaken || !getPref(`panel.${def.id}`, def.defaultOpen));
   }
 
   isOpen(id: string): boolean {
@@ -31,6 +34,7 @@ class PanelRegistry {
     if (!p) return;
     p.el.classList.toggle('hidden', !open);
     if (remember) setPref(`panel.${id}`, open);
+    if (open && p.slot) for (const o of this.panels.values()) if (o !== p && o.slot === p.slot && this.isOpen(o.id)) this.set(o.id, false, remember);
     if (open) p.onOpen?.();
     this.listeners.forEach((l) => l(id, open));
   }

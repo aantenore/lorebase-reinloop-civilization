@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { config } from '../config';
 import type { Season, Tile } from '../net/protocol';
 import type { Store } from '../state/store';
 import { depthOf, TILE_H, TILE_SIDE, toScreen } from './iso';
@@ -111,9 +112,13 @@ export class WorldView {
     }
     if (t.shelter === 0) {
       if (t.biome === 'forest' && t.wood > 0) {
+        // display density only: a share of forest tiles shows trees, the rest low undergrowth
+        const roll = ((h >>> 8) % 1000) / 1000;
         const kind = h % 3 === 0 ? 'oak' : 'pine';
         const fr = (h >>> 3) % 2;
-        if (t.wood >= 5) {
+        if (roll >= config.render.forestTreeShare) {
+          add(`undergrowth_${look}`, (h >>> 6) % 3, ((h >>> 4) % 7) - 3, 5, 1);
+        } else if (t.wood >= 5 && roll < config.render.forestTreeShare * config.render.forestPairShare) {
           add(`${kind}_${look}`, fr, -6, 0, 2, true);
           add(`${h % 2 ? 'pine' : 'oak'}_${look}`, 1 - fr, 6, 5, 3, true);
         } else {
