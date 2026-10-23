@@ -2,6 +2,7 @@
 // are Lorebase Rules; this file holds engine, decision, player and group knobs.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { ModelParams } from 'reinloop';
 import { ROOT } from '../config.ts';
 import type { Tier } from '../world/types.ts';
 import type { EconomyConfig } from './economy-book.ts';
@@ -102,6 +103,9 @@ export interface SocietyConfig {
 
 export type ReplanTrigger = 'planExhausted' | 'stepFailed' | 'spokenTo' | 'critical' | 'nightfall' | 'dawn' | 'seasonChange' | 'rulesChanged' | 'offer' | 'offerAnswered';
 
+/** Per-call model params taken from config. */
+export type CallParams = Pick<ModelParams, 'thinking' | 'effort' | 'retryMaxTokens'>;
+
 export interface GameConfig {
   ws: { path: string; maxPayloadBytes: number };
   /** `tiles` messages: changed tiles are coalesced and flushed at most every tileFlushMs. */
@@ -122,8 +126,11 @@ export interface GameConfig {
     replanOn: Record<ReplanTrigger, boolean>;
     startStaggerMs: number;
     offersMax: number;
-    /** Provider-specific request fields per kind of call (e.g. thinking effort), so short answers are not eaten by thinking. */
-    modelExtra: { plan: Record<string, unknown>; reply: Record<string, unknown>; prose: Record<string, unknown> };
+    /**
+     * Model params per kind of call (reinloop `thinking`, `effort`, `retryMaxTokens`), so short answers are not
+     * eaten by thinking; `maxTokens` comes from the tier or call settings.
+     */
+    modelParams: { plan: CallParams; reply: CallParams; prose: CallParams };
   };
   conversation: { replyMaxOutputTokens: number; replyTimeoutMs: number; replyMaxTurns: number; replyMaxConsults: number; agentReplyDepth: number; replanAfterReply: boolean };
   player: { speechMinIntervalMs: number; speechPerMinute: number; speechMaxChars: number; nameMaxChars: number; maxPlayers: number; inputMax: number };

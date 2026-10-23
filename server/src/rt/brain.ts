@@ -59,9 +59,9 @@ export class Brain {
   async connect(): Promise<void> {
     if (!this.cfg.mcpUrl || this.stopped) return;
     try {
-      // Keeper runs with auth mode `none` locally; Herald still requires a bearer to forward.
-      const token = process.env.HERALD_API_KEY || 'local';
-      this.client = await McpClient.connect('lorebase', { url: this.cfg.mcpUrl, headers: { Authorization: `Bearer ${token}` }, timeoutMs: this.cfg.callTimeoutMs });
+      // A Lorebase API key when Keeper needs one; locally Herald forwards credential-less calls (HERALD_ALLOW_ANONYMOUS).
+      const token = process.env.HERALD_API_KEY;
+      this.client = await McpClient.connect('lorebase', { url: this.cfg.mcpUrl, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}), timeoutMs: this.cfg.callTimeoutMs });
       const all = await this.client.listTools();
       // Read tools only, whatever the server offers.
       this.infos = all.filter((i) => this.cfg.tools.includes(i.name) && i.annotations?.readOnlyHint !== false);

@@ -1,5 +1,5 @@
 // Creates and disposes one reinloop agent per person, from a roster entry.
-import { agent, anthropic, type EasyAgent, memoryNotes, type MemoryStore, memoryStore, mockProvider, type ModelRef, type Provider, splitModel, windowCompaction, withRetry } from 'reinloop';
+import { agent, type EasyAgent, memoryNotes, type MemoryStore, memoryStore, mockProvider, windowCompaction } from 'reinloop';
 import type { RosterEntry, SimConfig } from '../config.ts';
 import type { Translate } from '../i18n.ts';
 import type { Role, Rule } from '../lorebase/rules.ts';
@@ -21,28 +21,6 @@ export interface RegisteredAgent {
   controller?: AbortController;
   /** Laws as this person last saw them, to tell them what changed. */
   lastLaws?: Rule[];
-}
-
-let workspaceProvider: Provider | undefined;
-
-/**
- * Model reference for a real model. `"anthropic/<model>"` resolves through reinloop's preset,
- * except when ANTHROPIC_WORKSPACE_ID is set: keys not scoped to a workspace must send the
- * `anthropic-workspace-id` header, which the preset cannot add, so the provider is built here.
- */
-export function realModel(model: string): string | ModelRef {
-  const parts = splitModel(model);
-  const workspace = process.env.ANTHROPIC_WORKSPACE_ID;
-  if (parts?.provider !== 'anthropic' || !workspace) return model;
-  workspaceProvider ??= withRetry(anthropic({
-    name: 'anthropic',
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    baseUrl: process.env.ANTHROPIC_BASE_URL,
-    stream: true,
-    cache: true,
-    headers: { 'anthropic-workspace-id': workspace },
-  }));
-  return { provider: workspaceProvider, model: parts.model };
 }
 
 export class AgentRegistry {
@@ -100,7 +78,8 @@ export class AgentRegistry {
       name: state.id,
       model: provider === 'mock'
         ? { provider: mockProvider([(req) => ({ ...mockStep(this.mockHost, state.id)(req), delayMs: this.cfg.mock.thinkDelayMs })], { loop: true }), model }
-        : realModel(model),
+        // `anthropic/<model>` through reinloop's preset (ANTHROPIC_WORKSPACE_ID becomes the workspace header).
+        : model,
       params: { maxTokens: a.maxOutputTokens },
       instructions: this.instructionsFor(state),
       tools: [...worldTools(this.toolHost), ...(a.memory ? notebookTools(this.t, this.notebooks) : [])],

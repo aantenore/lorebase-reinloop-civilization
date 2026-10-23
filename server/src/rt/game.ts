@@ -85,7 +85,7 @@ export class Game {
   private readonly minds = new Map<string, AgentMind>();
   private readonly groupMinds = new Map<string, GroupMind>();
   private readonly limiter: Limiter;
-  private readonly stats = { decisions: 0, groupDecisions: 0, replies: 0, failures: 0 };
+  private readonly stats = { decisions: 0, groupDecisions: 0, replies: 0, failures: 0, thoughts: 0 };
   /** Set while a reply is spoken, so a reply never triggers another reply. */
   private speakingReply = false;
   readonly offers = new OfferBook();
@@ -250,6 +250,11 @@ export class Game {
         if (e.kind !== 'agent') return [];
         const hits = await this.mnemo.recall(memoryKey(e.name), query);
         return (hits ?? []).map((m) => this.t('rt.act.recallLine', { day: m.createdAt.day, text: m.text, vivid: this.t(m.fidelity >= 0.5 ? 'rt.act.vivid' : 'rt.act.faded') }).replace(/^- /, ''));
+      },
+      reasoned: (e, text) => {
+        this.stats.thoughts++;
+        this.broadcastPrivileged({ type: 'say', from: e.id, to: e.id, text, kind: 'thought' });
+        this.recent(this.thoughts, e.id, { at: this.now(), text });
       },
       consulted: (e, ev) => {
         this.recent(this.consults, e.id, { at: this.now(), tool: ev.tool, query: ev.query });

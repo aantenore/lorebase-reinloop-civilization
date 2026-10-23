@@ -218,8 +218,7 @@ export class AgentMind {
         this.host.replyDelta(this.e, speaker, d, false);
       }, this.abort.signal));
       this.host.stats.replies++;
-      // No answer from the model: the person stays silent (not a failure).
-      if (out.silent && !this.stopped) console.warn(`[reply ${this.e.name}] silent: ${out.silent}`);
+      if (out.error && !this.stopped) failed(this.host, 'reply', this.e.name, out.error);
       this.host.replyDelta(this.e, speaker, '', true);
       if (out.text && this.e.alive) this.host.sayReply(this.e, speaker, out.text);
       if (out.rethink && this.host.cfg.conversation.replanAfterReply) this.box.push({ kind: 'conversation', with: speaker });

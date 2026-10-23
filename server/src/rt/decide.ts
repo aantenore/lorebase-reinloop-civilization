@@ -3,7 +3,6 @@
 // when spoken to (streamed text, optional `rethink`). Each person uses its own model; the mock
 // provider is only an offline fallback.
 import { agent, type MockTurn, mockProvider, type ModelRef, type ModelRequest, type Tool, tool } from 'reinloop';
-import { realModel } from '../agents/registry.ts';
 import type { SimConfig } from '../config.ts';
 import type { Translate } from '../i18n.ts';
 import type { Role, RuleChange } from '../lorebase/rules.ts';
@@ -47,6 +46,8 @@ export interface DecideHost {
   ranModel(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number }): void;
   /** A person consulted Lorebase (shown to clients). */
   consulted(e: RtEntity, ev: ConsultEvent): void;
+  /** The model's reasoning summary behind a decision (privileged clients only). */
+  reasoned(e: RtEntity, text: string): void;
   /** What the person's private memory brings back for `query` (formatted lines; empty when none or unavailable). */
   recall(e: RtEntity, query: string): Promise<string[]>;
   /** Barter: propose an exchange, answer one addressed to you. */
@@ -107,7 +108,8 @@ export function limitsOf(cfg: GameConfig): PromptLimits {
 /** Model reference for an entity: its own model, or a scripted mock when offline. */
 export function modelRef(host: Pick<DecideHost, 'mock'>, model: string, script: (req: ModelRequest, i: number) => MockTurn, delayMs: number): string | ModelRef {
   if (host.mock) return { provider: mockProvider([(req, i) => ({ delayMs, ...script(req, i) })], { loop: true, name: 'mock' }), model: `mock/${model}` };
-  return realModel(model);
+  // `anthropic/<model>` resolves through reinloop's preset (ANTHROPIC_WORKSPACE_ID becomes the workspace header).
+  return model;
 }
 
 /** JSON Schema of the commit_plan tool. The step count is a suggestion (`maxSteps` only caps what is kept). */
@@ -284,29 +286,31 @@ export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: 
   const tc = tierConfig(e, cfg);
   const horizon = w.r('plan_horizon_minutes') * tc.horizonFactor;
   const textMax = cfg.decisions.textMaxChars;
-  const controller = new AbortController();
   let committed: Decision | undefined;
   const commit = tool<{ reason: string; steps: unknown[] }>('commit_plan', t('rt.tools.commitPlan'), planSchema(t, textMax, false, tc.maxSteps), (args) => {
     const steps = normalizeSteps(args?.steps, textMax, tc.maxSteps);
     if (!steps.length) return { content: t('rt.act.noSteps'), isError: true };
     committed = { steps, reason: String(args?.reason ?? '').slice(0, textMax) };
-    // The plan is all this call is for: end the run without another model turn.
-    queueMicrotask(() => controller.abort(new Error('plan committed')));
-    return t('rt.act.planned', { n: steps.length });
+    // The plan is all this call is for: the run ends without another model turn.
+    return { content: t('rt.act.planned', { n: steps.length }), stop: true };
   });
   const runner = agent({
     name: e.id,
     model: modelRef(host, e.model, (req) => mockDecision(host, e, tc, req), cfg.mock.thinkDelayMs),
-    params: { maxTokens: tc.maxOutputTokens, extra: cfg.decisions.modelExtra.plan },
+    params: { ...cfg.decisions.modelParams.plan, maxTokens: tc.maxOutputTokens },
     instructions: rtInstructions(t, e, host.roleOf(e.role), { horizon }),
     tools: [commit, ...socialTools(host, e), ...faculties(host, e, tc.maxConsults)],
     budget: { maxTurns: tc.maxTurns, maxToolCalls: tc.maxConsults + tc.maxTurns * 4 },
     toolSettings: { concurrency: 1 },
   });
   const prompt = rtObservation(t, w, e, why, host.groups(), host.roleTitle, limitsOf(cfg), host.changedLaws(e), host.perceived);
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.decisions.timeoutMs), ...(stop ? [stop] : [])]);
-  const res = await runner.run(prompt, { signal });
+  const signal = AbortSignal.any([AbortSignal.timeout(cfg.decisions.timeoutMs), ...(stop ? [stop] : [])]);
+  const handle = runner.stream(prompt, { signal });
+  let thought = '';
+  for await (const ev of handle) if (ev.type === 'thinking_delta') thought += (ev.data as { text: string }).text;
+  const res = await handle.result;
   host.ranModel(e, res);
+  if (thought.trim()) host.reasoned(e, thought.trim().slice(0, textMax));
   if (committed) return committed;
   return { error: res.status === 'completed' ? 'no plan committed' : `${res.status}${res.reason ? `: ${res.reason}` : ''}` };
 }
@@ -314,8 +318,8 @@ export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: 
 export interface Reply {
   text: string;
   rethink: boolean;
-  /** Why nothing was said, when the model gave no answer (the person stays silent: not a failure). */
-  silent?: string;
+  /** Why the reply run did not complete (timeout, max_tokens, provider error): a failure. */
+  error?: string;
 }
 
 /** What the speaker last said to this person (to recall related memories). */
@@ -333,11 +337,9 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
   const w = host.world();
   const tc = tierConfig(e, cfg);
   let rethink = false;
-  const controller = new AbortController();
   const rethinkTool = tool('rethink', t('rt.tools.rethink'), {}, () => {
     rethink = true;
-    queueMicrotask(() => controller.abort(new Error('reply done')));
-    return t('rt.act.rethink');
+    return { content: t('rt.act.rethink'), stop: true };
   });
   const mockReply = (): MockTurn => {
     const n = Number(String(e.id).replace(/\D/g, '')) || 0;
@@ -349,7 +351,7 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
   const runner = agent({
     name: e.id,
     model: modelRef(host, e.model, mockReply, cfg.mock.replyDelayMs),
-    params: { maxTokens: cfg.conversation.replyMaxOutputTokens, extra: cfg.decisions.modelExtra.reply },
+    params: { ...cfg.decisions.modelParams.reply, maxTokens: cfg.conversation.replyMaxOutputTokens },
     instructions: `${rtInstructions(t, e, host.roleOf(e.role), { horizon: w.r('plan_horizon_minutes') * tc.horizonFactor })}\n${t('rt.replyInstructions')}`,
     tools: [rethinkTool, ...lorebase],
     // Consultations, plus rethink and one refused extra call, then the answer.
@@ -370,7 +372,7 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
     inboxBlock(t, e),
   ].filter(Boolean).join('\n\n');
   let text = '';
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.conversation.replyTimeoutMs), ...(stop ? [stop] : [])]);
+  const signal = AbortSignal.any([AbortSignal.timeout(cfg.conversation.replyTimeoutMs), ...(stop ? [stop] : [])]);
   const handle = runner.stream(prompt, { signal });
   for await (const ev of handle) {
     // Speech before and after a consultation is one answer; nothing is said after rethink.
@@ -388,6 +390,7 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
   const res = await handle.result;
   host.ranModel(e, res);
   const said = text.trim();
-  const silent = !said && !rethink ? (res.status === 'completed' ? 'no words' : `${res.status}${res.reason ? `: ${res.reason}` : ''}`) : undefined;
-  return { text: said, rethink, ...(silent ? { silent } : {}) };
+  // A run cut short (max_tokens is reported as such) is a failure; a completed run without words is a silence.
+  const error = res.status === 'completed' ? undefined : `${res.status}${res.reason ? `: ${res.reason}` : ''}`;
+  return { text: said, rethink, ...(error ? { error } : {}) };
 }

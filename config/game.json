@@ -111,17 +111,20 @@
     },
     "startStaggerMs": 400,
     "offersMax": 5,
-    "modelExtra": {
-      "plan": {},
-      "reply": {
-        "output_config": {
-          "effort": "low"
+    "modelParams": {
+      "plan": {
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
         }
       },
+      "reply": {
+        "effort": "low",
+        "retryMaxTokens": 2000
+      },
       "prose": {
-        "output_config": {
-          "effort": "low"
-        }
+        "effort": "low",
+        "retryMaxTokens": 2000
       }
     }
   },
