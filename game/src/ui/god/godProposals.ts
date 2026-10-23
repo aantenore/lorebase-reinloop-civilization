@@ -9,10 +9,9 @@ import { focusEntity, segmented } from './godShared';
 type Filter = 'all' | LawProposalStatus;
 const STATUS_ORDER: Record<LawProposalStatus, number> = { open: 0, merged: 1, rejected: 2 };
 
-/** Review page of the Lorebase UI for a proposal branch (approval happens there, not here). */
+/** Review page of the Lorebase UI for one proposal, `<reviewPath>/<proposal id>` (approval happens there, not here). */
 function reviewUrl(p: LawProposal): string {
-  const base = `${config.lorebaseUi.base}${config.lorebaseUi.reviewPath}`;
-  return p.branch ? `${base}?branch=${encodeURIComponent(p.branch)}` : base;
+  return `${config.lorebaseUi.base}${config.lorebaseUi.reviewPath}/${encodeURIComponent(p.id)}`;
 }
 
 /** Law changes proposed by the agents themselves (`law_proposal`), with their review status. */

@@ -46,8 +46,8 @@ export const config = {
   lorebaseUi: {
     base: String(env.VITE_LOREBASE_UI_URL || 'http://localhost:5180').replace(/\/$/, ''),
     explorerPath: '/world/explorer',
-    /** Review page where agents' law proposals are approved or rejected. */
-    reviewPath: String(env.VITE_LOREBASE_REVIEW_PATH || '/review'),
+    /** Review list of the Domain (`/<domain>/review`); a law proposal opens at `<reviewPath>/<proposal id>`. */
+    reviewPath: String(env.VITE_LOREBASE_REVIEW_PATH || '/world/review').replace(/\/$/, ''),
   },
   society: {
     /** Esteem change (0-1 scale) that earns a floating "esteem up/down" label. */

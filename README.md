@@ -311,8 +311,8 @@ At most `decisions.offersMax` pending offers per person.
   `proponi_legge {key?, text, category, value?}` is accepted from people with esteem ≥
   `law_proposal_min_esteem`: it writes `create_rule`/`update_rule` on `law/agent-…` and opens a Proposal
   that the world NEVER merges: a human approves it (god mode `POST /api/law-proposals/:id/approve|reject`,
-  or the Lorebase web app at `/<domain>/review/<proposal id>`, e.g. `/world/review/prp_…`; set
-  `VITE_LOREBASE_REVIEW_PATH` in `game/.env` accordingly). The world polls it (`society.lawProposals.pollMs`)
+  or the Lorebase web app at `/<domain>/review/<proposal id>`, e.g. `/world/review/prp_…`; god mode links
+  there, `VITE_LOREBASE_REVIEW_PATH` in `game/.env` is the `/<domain>/review` part). The world polls it (`society.lawProposals.pollMs`)
   and the merged law reaches everyone through the change feed. Trade trust: see barter.
 - **Ages.** `child` until `age_child_days`, `elder` from `age_elder_days` (game days); founders arrive at
   `founder_age_days` (the elder role already elder). Children work at `child_work_factor`, walk at
