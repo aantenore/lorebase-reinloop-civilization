@@ -8,6 +8,8 @@ live in [Lorebase](https://github.com/aantenore/lorebase), a versioned knowledge
 [reinloop](https://github.com/aantenore/reinloop). Change a law in Lorebase while the simulation runs, directly or through a
 branch → Proposal → merge, and the colony learns of it from Lorebase's change feed and adapts.
 
+Latest live run (budget-capped, real models): [docs/run-report.md](docs/run-report.md).
+
 ## Screenshots
 
 ![Game world](docs/screenshots/game-world.png)

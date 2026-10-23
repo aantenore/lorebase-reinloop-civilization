@@ -66,9 +66,19 @@ let stopping = false;
 function stop(code: number): void {
   if (stopping) return;
   stopping = true;
-  for (const c of children) if (c.exitCode === null) c.kill('SIGTERM');
-  if (heraldStarted && svc.herald.stopOnExit) spawnSync('bash', [resolve(ROOT, svc.herald.script), 'down'], { stdio: 'inherit' });
-  setTimeout(() => process.exit(code), 1500).unref();
+  // The game first (it saves the society to mnemo on its way out), then the services.
+  let done = false;
+  const rest = () => {
+    if (done) return;
+    done = true;
+    for (const c of children) if (c.exitCode === null) c.kill('SIGTERM');
+    if (heraldStarted && svc.herald.stopOnExit) spawnSync('bash', [resolve(ROOT, svc.herald.script), 'down'], { stdio: 'inherit' });
+    setTimeout(() => process.exit(code), 1500).unref();
+  };
+  if (game.exitCode !== null) return rest();
+  game.once('exit', rest);
+  game.kill('SIGTERM');
+  setTimeout(rest, 5000).unref();
 }
 game.on('exit', (code) => stop(code ?? 0));
 process.on('SIGINT', () => stop(0));
