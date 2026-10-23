@@ -4,12 +4,20 @@
 import type { Translate } from '../i18n.ts';
 import { knownRecipes, stationsOf } from './economy.ts';
 import { createRng } from '../world/rng.ts';
-import type { PlanStep } from './plan.ts';
+import { ACTION_ALIASES, type PlanStep } from './plan.ts';
 import { tileOf } from './plan.ts';
 import type { Point } from './path.ts';
 import type { RtEntity, RtWorld } from './world.ts';
 
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+/** Mock knobs from config (`mock`). */
+export interface MockKnobs {
+  wanderRadius: number;
+  experimentChance?: number;
+  /** Hunger at which a mock person eats what it carries (well before the critical level). */
+  eatAtHunger?: number;
+}
 
 export interface MockPlan {
   steps: PlanStep[];
@@ -96,7 +104,8 @@ export function mockEconomy(t: Translate, w: RtWorld, e: RtEntity, experimentCha
 }
 
 /** Plans `count` steps for one person by simulating its position and inventory forward. */
-export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: number; max: number }, wanderRadius: number, experimentChance = 0): MockPlan {
+export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: number; max: number }, knobs: MockKnobs): MockPlan {
+  const { wanderRadius, experimentChance = 0 } = knobs;
   const rng = createRng(hash(`${e.id}:${Math.floor(w.clock)}`));
   const steps: PlanStep[] = [];
   let pos: Point = tileOf(e);
@@ -123,6 +132,15 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
     pos = { x: p.x, y: p.y };
   };
   const why = (key: string) => (reason ||= t(`rt.mock.reason.${key}`));
+  // Plans take longer in game time than the steps suggest (walking, waiting for a decision): eat early.
+  const eatAt = Math.min(crit - 1, knobs.eatAtHunger ?? crit - 1);
+  const eat = () => {
+    why('eat');
+    push({ action: 'eat', args: {}, label: L('eat') });
+    food -= Math.min(food, Math.ceil(hunger));
+    hunger = 0;
+  };
+  if (hunger >= eatAt && food >= 1) eat();
 
   const eco = e.hunger < w.r('critical_hunger') - 1 ? mockEconomy(t, w, e, experimentChance) : [];
   for (const s of eco) push(s);
@@ -147,11 +165,8 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
         continue;
       }
     }
-    if (hunger >= crit - 1 && food >= 1) {
-      why('eat');
-      push({ action: 'eat', args: {}, label: L('eat') });
-      food -= Math.min(food, Math.ceil(hunger));
-      hunger = 0;
+    if (hunger >= eatAt && food >= 1) {
+      eat();
       continue;
     }
     if (food < 2 || (e.role === 'gatherer' && food < 6)) {
@@ -213,18 +228,20 @@ export function mockSteps(t: Translate, w: RtWorld, e: RtEntity, count: { min: n
 }
 
 /** A joint plan: each member's own mock plan, tagged with `who`. */
-export function mockGroupPlan(t: Translate, w: RtWorld, members: RtEntity[], count: { min: number; max: number }, wanderRadius: number, experimentChance = 0): { summary: string; steps: PlanStep[] } {
+export function mockGroupPlan(t: Translate, w: RtWorld, members: RtEntity[], count: { min: number; max: number }, knobs: MockKnobs): { summary: string; steps: PlanStep[] } {
   const parts: string[] = [];
   const steps: PlanStep[] = [];
   for (const m of members) {
-    const p = mockSteps(t, w, m, count, wanderRadius, experimentChance);
+    const p = mockSteps(t, w, m, count, knobs);
     parts.push(t('rt.mock.part', { name: m.name, label: p.steps[0]?.label ?? t('rt.mock.label.wait') }));
     for (const s of p.steps) steps.push({ ...s, args: { ...s.args, who: m.id } });
   }
   return { summary: t('rt.mock.summary', { parts: parts.join('; ') }), steps };
 }
 
-/** Flattens steps to the shape a model writes (`{who?, action, ...args, label}`). */
+const MODEL_NAME: Record<string, string> = Object.fromEntries(Object.entries(ACTION_ALIASES).map(([model, step]) => [step, model]));
+
+/** Flattens steps to the shape a model writes (`{who?, action, ...args, label}`, model action names). */
 export function flatSteps(steps: PlanStep[]): Array<Record<string, unknown>> {
-  return steps.map((s) => ({ action: s.action, ...s.args, label: s.label }));
+  return steps.map((s) => ({ action: MODEL_NAME[s.action] ?? s.action, ...s.args, label: s.label }));
 }

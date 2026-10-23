@@ -122,7 +122,8 @@ const IDLE_WAIT_MS = 60_000;
 function cooldownMs(host: MindHost, e: RtEntity): number {
   const w = host.world();
   const tc = host.cfg.decisions.tiers[decisionTier(e, host.cfg)];
-  return (w.r('replan_cooldown_minutes') * tc.cooldownFactor / Math.max(1e-6, w.r('game_minutes_per_real_second'))) * 1000;
+  // Game minutes per real second include the time scale, so a sped-up world replans as often in game time.
+  return (w.r('replan_cooldown_minutes') * tc.cooldownFactor / Math.max(1e-6, w.r('game_minutes_per_real_second') * w.timeScale)) * 1000;
 }
 
 const idle = (e: RtEntity) => !e.plan || e.plan.current >= e.plan.steps.length;

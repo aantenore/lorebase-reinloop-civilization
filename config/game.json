@@ -229,6 +229,7 @@
     "wanderRadius": 6,
     "planSteps": 12,
     "experimentChance": 0.5,
+    "eatAtHunger": 1,
     "offerChance": 0.35,
     "judgeChance": 0.5,
     "lawChance": 0.1

@@ -148,7 +148,7 @@ export interface GameConfig {
   };
   crowd: { count: number; tier: Tier; groupName: string; names: string[]; roles: string[]; personality: string };
   chronicle: { enabled: boolean; kind: string; operation: string; flushMs: number; maxBatch: number; maxQueue: number; retryBaseMs: number; retryMaxMs: number };
-  mock: { thinkDelayMs: number; replyDelayMs: number; wanderRadius: number; planSteps: number; experimentChance: number; offerChance: number; judgeChance: number; lawChance: number };
+  mock: { thinkDelayMs: number; replyDelayMs: number; wanderRadius: number; planSteps: number; experimentChance: number; eatAtHunger: number; offerChance: number; judgeChance: number; lawChance: number };
   brain: BrainConfig;
   insights: InsightConfig;
   barter: BarterConfig;

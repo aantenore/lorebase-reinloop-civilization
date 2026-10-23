@@ -282,12 +282,12 @@ export class GroupManager {
   /** Offline: the joint plan writer commits a scripted plan. */
   private mockPlanCall(members: RtEntity[]): MockTurn {
     const c = this.counts(members);
-    const p = mockGroupPlan(this.t, this.host.world(), members, { min: c.min, max: c.max }, this.cfg.mock.wanderRadius, this.cfg.mock.experimentChance);
+    const p = mockGroupPlan(this.t, this.host.world(), members, { min: c.min, max: c.max }, this.cfg.mock);
     return { toolCalls: [{ name: 'commit_plan', args: { reason: p.summary, steps: flatSteps(p.steps).map((s) => ({ who: (s as { who?: string }).who, ...s })) } }] };
   }
 
   private mockProse(m: RtEntity): string {
-    const p = mockSteps(this.t, this.host.world(), m, { min: 3, max: 3 }, this.cfg.mock.wanderRadius);
+    const p = mockSteps(this.t, this.host.world(), m, { min: 3, max: 3 }, { ...this.cfg.mock, experimentChance: 0 });
     return this.t('rt.mock.proposal', { label: p.steps[0]?.label ?? this.t('rt.mock.label.wait') });
   }
 

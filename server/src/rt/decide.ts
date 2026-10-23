@@ -105,9 +105,14 @@ export function limitsOf(cfg: GameConfig): PromptLimits {
   return { lookMaxTiles: cfg.decisions.lookMaxTiles, lookMaxPeople: cfg.decisions.lookMaxPeople, nearbyGroupsMax: cfg.decisions.nearbyGroupsMax };
 }
 
-/** Model reference for an entity: its own model, or a scripted mock when offline. */
-export function modelRef(host: Pick<DecideHost, 'mock'>, model: string, script: (req: ModelRequest, i: number) => MockTurn, delayMs: number): string | ModelRef {
-  if (host.mock) return { provider: mockProvider([(req, i) => ({ delayMs, ...script(req, i) })], { loop: true, name: 'mock' }), model: `mock/${model}` };
+/**
+ * Model reference for an entity: its own model, or a scripted mock when offline. The mock's delay is in
+ * game time (divided by the time scale), so a sped-up world does not leave people idle while it "thinks".
+ */
+export function modelRef(host: Pick<DecideHost, 'mock' | 'world'>, model: string, script: (req: ModelRequest, i: number) => MockTurn, delayMs: number): string | ModelRef {
+  if (host.mock) {
+    return { provider: mockProvider([(req, i) => ({ delayMs: delayMs / Math.max(1, host.world().timeScale), ...script(req, i) })], { loop: true, name: 'mock' }), model: `mock/${model}` };
+  }
   // `anthropic/<model>` resolves through reinloop's preset (ANTHROPIC_WORKSPACE_ID becomes the workspace header).
   return model;
 }
@@ -273,7 +278,7 @@ function mockPlanTurn(host: DecideHost, e: RtEntity, tc: TierDecision): MockTurn
     const f = w.tiles.filter((x) => x.food >= 3 && Math.hypot(x.x - e.x, x.y - e.y) < 8)[0];
     if (f) calls.push({ name: 'share_insight', args: { text: t('rt.mock.insight', { x: f.x, y: f.y }), confidence: 0.6, evidence: t('rt.mock.insightEvidence', { day: w.day }) } });
   }
-  const plan = mockSteps(t, w, e, { min: Math.min(host.cfg.mock.planSteps, tc.maxSteps), max: tc.maxSteps }, host.cfg.mock.wanderRadius, host.cfg.mock.experimentChance);
+  const plan = mockSteps(t, w, e, { min: Math.min(host.cfg.mock.planSteps, tc.maxSteps), max: tc.maxSteps }, host.cfg.mock);
   calls.push({ name: 'commit_plan', args: { reason: plan.reason, steps: flatSteps(plan.steps) } });
   return { text: plan.reason, toolCalls: calls };
 }
