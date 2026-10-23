@@ -3,13 +3,13 @@
 // number of game minutes) that advances with real time at the person's own speed.
 import type { Point } from './path.ts';
 
-export const STEP_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'give', 'say', 'rest', 'sleep', 'wait', 'craft', 'experiment', 'use'] as const;
+export const STEP_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'give', 'say', 'rest', 'sleep', 'wait', 'craft', 'experiment', 'use', 'offer'] as const;
 export type StepAction = (typeof STEP_ACTIONS)[number];
 
 /** Names agents write for some actions (the people of the world speak Italian); normalized to STEP_ACTIONS. */
-export const ACTION_ALIASES: Record<string, StepAction> = { crea: 'craft', sperimenta: 'experiment', usa: 'use', dai: 'give' };
+export const ACTION_ALIASES: Record<string, StepAction> = { crea: 'craft', sperimenta: 'experiment', usa: 'use', dai: 'give', scambia: 'offer' };
 /** Actions offered to models in the commit_plan schema. */
-export const MODEL_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'dai', 'say', 'rest', 'sleep', 'wait', 'crea', 'sperimenta', 'usa'] as const;
+export const MODEL_ACTIONS = ['move_to', 'approach', 'gather', 'eat', 'build', 'dai', 'scambia', 'say', 'rest', 'sleep', 'wait', 'crea', 'sperimenta', 'usa'] as const;
 export type Dir = 'n' | 'e' | 's' | 'w';
 export type Anim = 'idle' | 'walk' | 'work' | 'sleep' | 'eat';
 
@@ -17,7 +17,7 @@ export interface PlanStep {
   action: StepAction;
   /**
    * move_to {x,y} · approach {to} · gather {resource} · eat {amount?, item?} · give {to,item,amount} · say {to,text} ·
-   * rest/sleep/wait {minutes} · craft {recipe} · experiment {items} · use {item}. Group plans add `who`.
+   * rest/sleep/wait {minutes} · craft {recipe} · experiment {items} · use {item} · offer {to, give, want} (bags). Group plans add `who`.
    */
   args: Record<string, unknown>;
   label: string;
@@ -50,8 +50,8 @@ export interface ExecContext {
   /** Tile coordinates of a person by id or name, if alive. */
   locate(who: string): Point | undefined;
   durations: { gather: number; build: number; eat: number; experiment: number; use: number };
-  /** Work minutes of a recipe, undefined when there is no such recipe. */
-  craftMinutes(recipe: string): number | undefined;
+  /** Work minutes of a recipe for this person (practice shortens it), undefined when there is no such recipe. */
+  craftMinutes(recipe: string, who?: Mover): number | undefined;
   /** Upper bound of rest/sleep/wait in game minutes. */
   maxWaitMinutes: number;
 }
@@ -64,6 +64,26 @@ const code = (v: unknown): string | undefined => {
   const c = typeof v === 'string' ? v.trim().toLowerCase() : '';
   return /^[a-z][a-z0-9_]{0,40}$/.test(c) ? c : undefined;
 };
+/** A bag of items `{code: amount}` (also `[{item, amount}]` or "code:n,code:n"), or undefined when empty or unreadable. */
+export function bagOf(v: unknown): Record<string, number> | undefined {
+  const out: Record<string, number> = {};
+  const put = (k: unknown, n: unknown) => {
+    const c = code(k);
+    const amount = Math.floor(num(n ?? 1));
+    if (c && Number.isFinite(amount) && amount >= 1) out[c] = (out[c] ?? 0) + Math.min(amount, 999);
+  };
+  if (Array.isArray(v)) for (const x of v) {
+    if (x && typeof x === 'object') put((x as Record<string, unknown>).item ?? (x as Record<string, unknown>).code, (x as Record<string, unknown>).amount);
+    else put(x, 1);
+  }
+  else if (typeof v === 'string') for (const part of v.split(',')) {
+    const [k, n] = part.split(/[:=x ]+/).filter(Boolean);
+    put(k, n ?? 1);
+  }
+  else if (v && typeof v === 'object') for (const [k, n] of Object.entries(v)) put(k, n);
+  return Object.keys(out).length ? out : undefined;
+}
+
 const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
 
 /**
@@ -133,6 +153,14 @@ export function normalizeStep(raw: unknown, textMax: number): PlanStep | undefin
       args.item = item;
       break;
     }
+    case 'offer': {
+      const to = str(a.to, 64);
+      const give = bagOf(a.give);
+      const want = bagOf(a.want);
+      if (!to || !give || !want) return undefined;
+      Object.assign(args, { to, give, want });
+      break;
+    }
     case 'say': {
       const text = str(a.text, textMax);
       if (!text) return undefined;
@@ -184,7 +212,7 @@ export function prepareStep(step: PlanStep, mover: Mover, ctx: ExecContext): Pre
       return { activity: { kind: 'timed', remaining: minutes, anim: step.action === 'sleep' ? 'sleep' : 'idle', scaled: false } };
     }
     case 'craft': {
-      const minutes = ctx.craftMinutes(String(step.args.recipe));
+      const minutes = ctx.craftMinutes(String(step.args.recipe), mover);
       if (minutes === undefined) return { error: 'unknown_recipe' };
       return { activity: { kind: 'timed', remaining: minutes, anim: 'work', scaled: true } };
     }
@@ -194,6 +222,7 @@ export function prepareStep(step: PlanStep, mover: Mover, ctx: ExecContext): Pre
       return { activity: { kind: 'timed', remaining: ctx.durations.use, anim: 'eat', scaled: false } };
     case 'give':
     case 'say':
+    case 'offer':
       return { activity: { kind: 'instant' } };
   }
 }

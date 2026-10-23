@@ -56,7 +56,13 @@
     "noTools": "none",
     "itemLine": "{amount} {name} ({code})",
     "toolLine": "{name} ({code}) wear {durability}/{max}",
-    "recalled": "COMES BACK TO YOUR MIND:\n{memory}"
+    "recalled": "COMES BACK TO YOUR MIND:\n{memory}",
+    "age": "AGE: you are {days} days old, {stage}.",
+    "offers": "EXCHANGE OFFERS:\n{offers}",
+    "offerForYou": "- {id}: {from} offers you {give} for {want}",
+    "offerByYou": "- {id}: you offered {to} {give} for {want}",
+    "hearsay": "WHAT PEOPLE SAY:\n{lines}",
+    "hearsayLine": "- {from} said of {about}: \"{text}\""
   },
   "why": {
     "start": "you look around for the first time",
@@ -70,7 +76,9 @@
     "seasonChange": "a new season has begun: {season}",
     "rulesChanged": "the book of laws has changed",
     "groupChanged": "your group has changed",
-    "conversation": "you have just spoken with {name}"
+    "conversation": "you have just spoken with {name}",
+    "offer": "{name} offers you an exchange",
+    "offerAnswered": "your exchange offer to {name} was {status}"
   },
   "reason": {
     "unreachable": "that place cannot be reached",
@@ -96,7 +104,19 @@
     "unknown_item": "there is no item with that code",
     "not_usable": "it cannot be used like that",
     "no_item": "you did not carry it",
-    "not_here": "none to be found here"
+    "not_here": "none to be found here",
+    "too_young": "you are too young to do it",
+    "empty_offer": "an exchange gives and receives something",
+    "too_many_kinds": "too many different items in one exchange",
+    "too_many_offers": "you already have too many offers waiting",
+    "offerer_lacks": "the one who offered no longer has what they offered",
+    "category": "unknown category",
+    "key": "invalid code",
+    "value": "invalid value",
+    "empty": "empty text",
+    "too_many": "you already have too many proposals waiting",
+    "self": "you cannot judge yourself",
+    "duplicate": "the same proposal is already waiting"
   },
   "look": {
     "here": "You are at ({x},{y}) on {biome}, altitude {elev}: food {food}, wood {wood}{shelter}.",
@@ -119,10 +139,14 @@
     "noGroups": "none",
     "structures": ", structures: {list}",
     "structureLine": "{name} ({code})",
-    "wild": " You are in the wilds."
+    "wild": " You are in the wilds.",
+    "reputeHigh": ", held in high esteem",
+    "reputeLow": ", held in low esteem",
+    "reputeFamous": ", everyone talks of what they did",
+    "reputeHeard": ", of {name} they say: \"{text}\""
   },
   "tools": {
-    "commitPlan": "Fix what you will do from now on: a list of steps executed in order, in real time. Actions: move_to(x,y); approach(to); gather(resource) gather an item by code on your tile (food, wood or other); eat(amount?, item?); build a shelter on your tile; dai(to, item, amount) give to someone next to you; say(to, text); rest(minutes); sleep(minutes); wait(minutes); crea(recipe) follow a recipe by code; sperimenta(items) combine some items you carry, one of each, which are used up; usa(item) use an item you carry.",
+    "commitPlan": "Fix what you will do from now on: a list of steps executed in order, in real time. Actions: move_to(x,y); approach(to); gather(resource) gather an item by code on your tile (food, wood or other); eat(amount?, item?); build a shelter on your tile; dai(to, item, amount) give to someone next to you; scambia(to, give, want) offer someone near you the items in give for those in want (code -> amount), which they accept or reject; say(to, text); rest(minutes); sleep(minutes); wait(minutes); crea(recipe) follow a recipe by code; sperimenta(items) combine some items you carry, one of each, which are used up; usa(item) use an item you carry.",
     "planReason": "your thinking: why you do this, in one sentence",
     "planSteps": "the steps, in order",
     "stepLabel": "short description of the step, in English",
@@ -151,7 +175,22 @@
     "stepItem": "code of an item",
     "stepItems": "codes of the items to combine",
     "stepRecipe": "code of the recipe",
-    "rememberImportance": "how much it matters to you, 0 to 1"
+    "rememberImportance": "how much it matters to you, 0 to 1",
+    "offer": "Offer an exchange to someone near you: you give the items in give and ask for those in want. They accept or reject it when they think about it; the offer expires with time.",
+    "offerTo": "the person's name",
+    "offerGive": "what you give: item code -> amount",
+    "offerWant": "what you ask for: item code -> amount",
+    "answerOffer": "Answer an exchange offered to you: accept it (the exchange happens at once, if you are close and both have the items) or reject it.",
+    "offerId": "code of the offer",
+    "offerAccept": "true to accept, false to reject",
+    "judge": "Say what you think of a person: it stays in your memory, and those near you hear what you say of them.",
+    "judgeWho": "the person's name",
+    "judgeScore": "your judgement, from -1 (terrible) to 1 (excellent)",
+    "judgeReason": "why, in one sentence",
+    "proposeLaw": "Propose a new law or a change to a law of the law book. It comes into force only if it is approved.",
+    "lawKey": "code of the law (snake_case); if it exists the proposal changes it",
+    "lawText": "the text of the law",
+    "lawValue": "numeric value of the law, if it has one"
   },
   "act": {
     "planned": "plan fixed ({n} steps)",
@@ -177,7 +216,18 @@
     "recallLine": "- day {day} ({vivid}): {text}",
     "vivid": "vivid",
     "faded": "faded",
-    "recallNone": "you remember nothing like that"
+    "recallNone": "you remember nothing like that",
+    "offerMade": "exchange {id} offered to {name}: waiting for their answer",
+    "offerFailed": "offer not made: {reason}",
+    "offerAccepted": "exchange done with {name}",
+    "offerRejected": "you rejected {name}'s offer",
+    "offerUnknown": "no offer with that code is waiting for you",
+    "offerFailedSwap": "exchange failed: {reason}",
+    "judged": "judgement of {name} noted in your memory",
+    "judgeFailed": "judgement not noted: {reason}",
+    "lawProposed": "law proposed ({key}): it now waits for approval",
+    "lawFailed": "law not proposed: {reason}",
+    "lawNotEsteemed": "your voice does not carry enough weight yet to propose a law"
   },
   "group": {
     "header": "YOU ARE THE GROUP {name} ({pattern}). Now decide together what each of you will do in the next {horizon} minutes.",
@@ -235,7 +285,13 @@
     "spoiled": "spoiled",
     "broken": "broke",
     "worn": "wore out",
-    "epitaph": "Epitaph of {name}: «{memory}»"
+    "epitaph": "Epitaph of {name}: «{memory}»",
+    "trade": "{a} and {b} exchange {give} for {get}",
+    "family": "The family {name} is founded by {founder}",
+    "aged": "{name} is now {stage}",
+    "lawProposed": "{name} proposes a law: \"{text}\"",
+    "lawMerged": "The law proposed by {name} enters the law book: {key}",
+    "lawRejected": "The law proposed by {name} is rejected: {key}"
   },
   "memory": {
     "planned": "I decided: {reason}",
@@ -253,7 +309,11 @@
     "discovered": "I discovered {tech} by combining {items}!",
     "experimented": "I combined {items}, but nothing happened",
     "decayed": "My {amount} {item} {reason}",
-    "learned": "{tech} was discovered (by {name})"
+    "learned": "{tech} was discovered (by {name})",
+    "offered": "I offered {name}: {give} for {want}",
+    "traded": "I exchanged with {name}: gave {give} and got {get}",
+    "judged": "I judged {name}: {reason}",
+    "offerClosed": "My exchange offer to {name} was {status}"
   },
   "mock": {
     "reason": {
@@ -311,7 +371,12 @@
     "consult": "laws of the world",
     "insight": "Around ({x},{y}) food is plentiful.",
     "insightEvidence": "I saw it with my own eyes on day {day}.",
-    "discoveryInsight": "Combining {items} reveals {tech}."
+    "discoveryInsight": "Combining {items} reveals {tech}.",
+    "opinion": {
+      "good": "{name} works well and helps others.",
+      "bad": "{name} only thinks of themselves."
+    },
+    "law": "Whoever has extra food shares it with the hungry."
   },
   "memberInstructions": [
     "You are {name}. Your character: {personality}",
@@ -325,7 +390,8 @@
     "unknown": "no idea with that code waits for a judgement",
     "too_many": "too many ideas of your role are already waiting",
     "empty": "the idea is empty",
-    "disabled": "not available"
+    "disabled": "not available",
+    "already": "you already approved this idea"
   },
   "mcp": {
     "lorebase_get": "Read a Lorebase Record by reference Kind/key (for example Rule/max_hp, Role/healer).",
@@ -342,5 +408,19 @@
     "new": "A law has been proclaimed: «{text}» ({key} = {value})",
     "changed": "A law has been amended: «{text}» ({key}: {old} → {new})",
     "removed": "A law has been repealed: «{text}» ({key})"
+  },
+  "stage": {
+    "child": "a child",
+    "adult": "an adult",
+    "elder": "an elder"
+  },
+  "offerStatus": {
+    "accepted": "accepted",
+    "rejected": "rejected",
+    "expired": "left to expire"
+  },
+  "offerInbox": "I offer you an exchange ({id}): I give you {give}, for {want}.",
+  "society": {
+    "familyName": "House of {name}"
   }
 }

@@ -42,6 +42,17 @@ export interface ChangesPage {
   more: boolean;
 }
 
+export interface ProposalInfo {
+  id: string;
+  title: string;
+  description?: string | null;
+  source_ref: string;
+  target_ref: string;
+  status: 'open' | 'merged' | 'closed';
+  created_at: string;
+  merged_revision?: string | null;
+}
+
 export interface ExecuteOptions {
   branch: string;
   message?: string;
@@ -148,6 +159,42 @@ export class LorebaseClient {
 
   merge(proposalId: string, message?: string): Promise<{ status?: string; result: string; revision: string }> {
     return this.request('POST', `${this.base}/proposals/${encodeURIComponent(proposalId)}/merge`, { message }, { 'Idempotency-Key': randomUUID() });
+  }
+
+  getProposal(proposalId: string): Promise<ProposalInfo> {
+    return this.request('GET', `${this.base}/proposals/${encodeURIComponent(proposalId)}`);
+  }
+
+  closeProposal(proposalId: string): Promise<unknown> {
+    return this.request('POST', `${this.base}/proposals/${encodeURIComponent(proposalId)}/close`, {});
+  }
+
+  /** Every Proposal with this status (follows cursors). */
+  async listProposals(status: 'open' | 'merged' | 'closed'): Promise<ProposalInfo[]> {
+    const out: ProposalInfo[] = [];
+    let cursor: string | undefined;
+    do {
+      const q = new URLSearchParams({ status, limit: '100' });
+      if (cursor) q.set('cursor', cursor);
+      const page = await this.request<{ items: ProposalInfo[]; next_cursor?: string | null }>('GET', `${this.base}/proposals?${q}`);
+      out.push(...page.items);
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor);
+    return out;
+  }
+
+  /** Every branch of the Domain (follows cursors). */
+  async listBranches(): Promise<Array<{ name: string; head: string; protected: boolean; created_at?: string }>> {
+    const out: Array<{ name: string; head: string; protected: boolean; created_at?: string }> = [];
+    let cursor: string | undefined;
+    do {
+      const q = new URLSearchParams({ limit: '200' });
+      if (cursor) q.set('cursor', cursor);
+      const page = await this.request<{ items: typeof out; next_cursor?: string | null }>('GET', `${this.base}/branches?${q}`);
+      out.push(...page.items);
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor);
+    return out;
   }
 
   changes(branch: string, since: string, kinds: string[]): Promise<ChangesPage> {

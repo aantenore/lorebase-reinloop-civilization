@@ -89,7 +89,7 @@ kinds:
         required: true
       event:
         description: What kind of event this is.
-        type: {enum: [birth, death, arrival, departure, group_formed, group_dissolved, laws_changed, discovery]}
+        type: {enum: [birth, death, arrival, departure, group_formed, group_dissolved, laws_changed, discovery, family_founded, law_proposed]}
         required: true
         indexed: true
       text:
@@ -100,6 +100,34 @@ kinds:
       actors:
         description: Names of the people involved, comma separated.
         type: string
+
+  Family:
+    description: A family (dynasty) of the civilization, founded at the first birth of parents who had none. Lineage (who was born of whom) is told by the Chronicle's birth entries.
+    primary_key: [code]
+    title_attribute: name
+    attributes:
+      code:
+        description: Unique id of the family, minted by the world (session and sequence).
+        type: string
+        required: true
+      name:
+        description: Name of the family as people say it.
+        type: string
+        required: true
+        searchable: true
+      founder:
+        description: Name of the person who founded it.
+        type: string
+        required: true
+      founded_day:
+        description: Day of the world on which it was founded.
+        type: integer
+        required: true
+      session:
+        description: Id of the world run it belongs to.
+        type: string
+        required: true
+        indexed: true
 
   Insight:
     description: A piece of the shared consciousness of a social role - something people holding that role came to believe about the world, accepted by a peer of the same role.

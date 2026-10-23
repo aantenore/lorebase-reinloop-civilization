@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { type LorebaseClient, LorebaseError } from '../lorebase/client.ts';
 
-export type ChronicleEvent = 'birth' | 'death' | 'arrival' | 'departure' | 'group_formed' | 'group_dissolved' | 'laws_changed' | 'discovery';
+export type ChronicleEvent = 'birth' | 'death' | 'arrival' | 'departure' | 'group_formed' | 'group_dissolved' | 'laws_changed' | 'discovery' | 'family_founded' | 'law_proposed';
 
 export interface ChronicleEntry {
   event: ChronicleEvent;
@@ -65,6 +65,13 @@ export class Chronicle {
       text: e.text,
       actors: e.actors.join(', '),
     });
+  }
+
+  /** Queues a raw row of the configured Kind (e.g. a Family record). */
+  addRow(row: Record<string, unknown>): void {
+    if (!this.cfg.enabled) return;
+    if (this.queue.length >= this.cfg.maxQueue) this.queue.shift();
+    this.queue.push(row);
   }
 
   get pending(): number {

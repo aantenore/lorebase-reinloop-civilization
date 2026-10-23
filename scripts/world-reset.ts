@@ -1,0 +1,151 @@
+// Returns the world data of Lorebase `main` to the seed state, through the governed flow only
+// (Operations on a `reset/` branch, merged by a Proposal; never direct DB access):
+//   - laws not in lorebase/rules.seed.yaml are repealed, seed laws get their seed value and wording back
+//     (missing ones are re-created), roles get their seed values back;
+//   - discovered technologies and their recipes leave main (back to nature/hidden, rebuilt by the seed);
+//   - Chronicle, Insight and Family records are archived on `archive/<timestamp>` and removed from main;
+//   - stale branches (role/, law/, tech/, seed/, reset/, probe/) and their open Proposals are closed.
+// Then the private memory database of mnemo (config/mnemo.json db.path, MNEMO_DB) is deleted
+// (the downloaded embedding model in data/models is kept). Stop the game and mnemo first.
+//   node scripts/world-reset.ts [--dry-run] [--keep-memory] [--force]
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { parseYaml } from 'reinloop';
+import { loadConfig, ROOT } from '../server/src/config.ts';
+import { LorebaseClient, LorebaseError, type RecordItem } from '../server/src/lorebase/client.ts';
+import { loadGameConfig } from '../server/src/rt/config.ts';
+
+const argv = process.argv.slice(2);
+const dry = argv.includes('--dry-run');
+const keepMemory = argv.includes('--keep-memory');
+const force = argv.includes('--force');
+const cfg = loadConfig([]);
+const game = loadGameConfig();
+const lb = cfg.lorebase;
+const main = lb.branch;
+const client = new LorebaseClient(lb.url, lb.domain);
+const STALE_PREFIXES = [game.insights.branchPrefix, lb.proposalBranchPrefix, game.economy.discoveryBranchPrefix, 'seed/', 'reset/', 'probe/'];
+const ARCHIVE_KINDS = [game.chronicle.kind, game.insights.kind, game.society.families.kind];
+type Row = Record<string, unknown>;
+const seed = parseYaml(readFileSync(resolve(ROOT, 'lorebase/rules.seed.yaml'), 'utf8')) as { rules: Row[]; roles: Row[] };
+
+interface Action {
+  op: string;
+  params: Row;
+  what: string;
+}
+
+/** Runs a write, waiting out the Keeper's write rate limit (429, retry_after_s). */
+async function patiently<T>(fn: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!(err instanceof LorebaseError) || err.status !== 429 || i >= 20) throw err;
+      const after = Number((err.body as Record<string, unknown> | undefined)?.retry_after_s);
+      await new Promise((r) => setTimeout(r, (Number.isFinite(after) && after > 0 ? after : 1) * 1000));
+    }
+  }
+}
+
+const snake = (kind: string) => kind.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+const records = async (kind: string): Promise<RecordItem[]> => (await client.listRecords(kind, main).catch(() => ({ items: [] as RecordItem[] }))).items;
+const same = (a: unknown, b: unknown) => (a ?? '') === (b ?? '') || (typeof b === 'number' && Number(a) === b);
+
+await client.ready().catch(() => {
+  console.error(`Keeper is not reachable at ${lb.url}; run: npm run lorebase:up`);
+  process.exit(1);
+});
+
+// ---- plan ----------------------------------------------------------------------
+const actions: Action[] = [];
+const rules = await records(lb.ruleKind);
+const seedRules = new Map(seed.rules.map((r) => [String(r.code), r]));
+for (const r of rules) {
+  const code = String(r.values.code ?? r.key);
+  const s = seedRules.get(code);
+  if (!s) {
+    actions.push({ op: lb.deleteOperation, params: { key: r.key }, what: `repeal law ${code}` });
+    continue;
+  }
+  const changed = (['value', 'text', 'category', 'unit'] as const).filter((k) => !same(r.values[k], s[k]));
+  if (changed.length) actions.push({ op: lb.updateOperation, params: { key: r.key, value: s.value, text: s.text, category: s.category, unit: s.unit ?? null }, what: `restore law ${code} (${changed.join(', ')})` });
+}
+const have = new Set(rules.map((r) => String(r.values.code ?? r.key)));
+for (const s of seed.rules) if (!have.has(String(s.code))) actions.push({ op: lb.createOperation, params: { code: s.code, value: s.value, text: s.text, category: s.category, ...(s.unit ? { unit: s.unit } : {}) }, what: `re-create law ${s.code}` });
+
+const roleOp = `update_${snake(lb.roleKind)}`;
+for (const r of await records(lb.roleKind)) {
+  const s = seed.roles.find((x) => String(x.code) === String(r.values.code ?? r.key));
+  if (!s) continue;
+  const changed = (['title', 'description', 'move_factor', 'work_factor'] as const).filter((k) => s[k] !== undefined && !same(r.values[k], s[k]));
+  if (changed.length) actions.push({ op: roleOp, params: { key: r.key, ...Object.fromEntries(changed.map((k) => [k, s[k]])) }, what: `restore role ${s.code} (${changed.join(', ')})` });
+}
+
+const eco = game.economy.kinds;
+for (const t of await records(eco.technology)) actions.push({ op: `delete_${snake(eco.technology)}`, params: { key: t.key }, what: `re-hide technology ${t.key}` });
+for (const r of await records(eco.recipe)) {
+  if (String(r.values.tech ?? '')) actions.push({ op: `delete_${snake(eco.recipe)}`, params: { key: r.key }, what: `re-hide recipe ${r.key}` });
+}
+const archived: Record<string, number> = {};
+for (const kind of ARCHIVE_KINDS) {
+  const items = await records(kind);
+  archived[kind] = items.length;
+  for (const x of items) actions.push({ op: `delete_${snake(kind)}`, params: { key: x.key }, what: `archive ${kind} ${x.key}` });
+}
+
+const branches = await client.listBranches();
+const stale = branches.filter((b) => STALE_PREFIXES.some((p) => b.name.startsWith(p)));
+const open = (await client.listProposals('open')).filter((p) => stale.some((b) => b.name === p.source_ref));
+
+// ---- report ----------------------------------------------------------------------
+const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').toLowerCase();
+const byKind = (prefix: string) => actions.filter((a) => a.what.startsWith(prefix));
+console.log(`world reset of ${lb.domain}/${main}${dry ? ' (dry run)' : ''}:`);
+for (const prefix of ['repeal law', 'restore law', 're-create law', 'restore role', 're-hide technology', 're-hide recipe']) {
+  const list = byKind(prefix);
+  if (list.length) console.log(`  ${prefix}: ${list.map((a) => a.what.slice(prefix.length + 1)).join('; ')}`);
+}
+for (const [kind, n] of Object.entries(archived)) console.log(`  archive ${kind}: ${n} record(s) -> archive/${stamp}, removed from ${main}`);
+console.log(`  close ${open.length} open Proposal(s) and delete ${stale.length} stale branch(es)${stale.length ? `: ${stale.map((b) => b.name).join(', ')}` : ''}`);
+const mnemoDb = resolve(ROOT, process.env.MNEMO_DB || (JSON.parse(readFileSync(resolve(ROOT, process.env.MNEMO_CONFIG ?? 'config/mnemo.json'), 'utf8')) as { db: { path: string } }).db.path);
+console.log(`  private memory: ${keepMemory ? 'kept' : `delete ${mnemoDb} (models kept)`}`);
+if (dry) process.exit(0);
+
+// ---- apply ----------------------------------------------------------------------
+if (!keepMemory && !force) {
+  const up = await fetch(game.services.mnemo.healthUrl, { signal: AbortSignal.timeout(1500) }).then(() => true, () => false);
+  if (up) {
+    console.error('mnemo is running: stop the game first (or pass --force, or --keep-memory)');
+    process.exit(1);
+  }
+}
+for (const p of open) await client.closeProposal(p.id).catch((err) => console.warn(`  close ${p.id}: ${err.message}`));
+for (const b of stale) await client.deleteBranch(b.name).catch((err) => console.warn(`  delete ${b.name}: ${err.message}`));
+if (actions.length) {
+  if (Object.values(archived).some((n) => n > 0)) await patiently(() => client.createBranch(`archive/${stamp}`, main));
+  const work = `reset/${stamp}`;
+  await patiently(() => client.createBranch(work, main));
+  let done = 0;
+  for (const a of actions) {
+    await patiently(() => client.execute(a.op, a.params, { branch: work, message: `World reset: ${a.what}` }));
+    if (++done % 50 === 0) console.log(`  ${done}/${actions.length} operations`);
+  }
+  const pr = await client.createProposal(work, main, 'World reset', `Back to the seed state: ${actions.length} change(s). History archived on archive/${stamp}.`);
+  await client.review(pr.id, 'approve', 'World reset');
+  const merged = await client.merge(pr.id, 'World reset');
+  await client.deleteBranch(work).catch(() => undefined);
+  console.log(`merged ${pr.id} into ${main}: ${merged.result} @ ${merged.revision.slice(0, 12)}`);
+} else console.log(`${main} already matches the seed`);
+
+// The hidden catalog is rebuilt from main (and anything missing is seeded back).
+// A short pause first: the reset may have used up the Keeper's write rate budget.
+await new Promise((r) => setTimeout(r, 3000));
+const seeded = spawnSync(process.execPath, [resolve(ROOT, 'scripts/lorebase-seed.ts')], { stdio: 'inherit', env: process.env });
+if (seeded.status !== 0) console.warn('seed step failed: run npm run lorebase:seed');
+
+if (!keepMemory) {
+  for (const f of [mnemoDb, `${mnemoDb}-wal`, `${mnemoDb}-shm`]) if (existsSync(f)) rmSync(f);
+  console.log(`private memory deleted (${mnemoDb})`);
+}

@@ -3,13 +3,15 @@
     "path": "/ws",
     "maxPayloadBytes": 16384
   },
+  "net": {
+    "tileFlushMs": 1000
+  },
   "loop": {
     "tickHz": 20,
     "stateHz": 10,
     "timeBroadcastMs": 1000,
     "deadLingerMs": 8000,
     "statusLogMs": 15000,
-    "tileFlushMs": 1000,
     "timeScale": 1
   },
   "map": {
@@ -223,7 +225,10 @@
     "replyDelayMs": 40,
     "wanderRadius": 6,
     "planSteps": 12,
-    "experimentChance": 0.5
+    "experimentChance": 0.5,
+    "offerChance": 0.35,
+    "judgeChance": 0.5,
+    "lawChance": 0.1
   },
   "brain": {
     "mcpUrl": "http://127.0.0.1:8190/mcp",
@@ -255,7 +260,11 @@
     "autoAcceptMinutes": 120,
     "maxPendingPerRole": 10,
     "textMaxChars": 400,
-    "listMax": 5
+    "listMax": 5,
+    "reconcile": {
+      "mode": "reload",
+      "maxAgeHours": 24
+    }
   },
   "economy": {
     "enabled": true,
@@ -347,6 +356,14 @@
       "law": {
         "importance": 0.9,
         "emotion": 0.2
+      },
+      "opinion": {
+        "importance": 0.5,
+        "emotion": 0.3
+      },
+      "offer": {
+        "importance": 0.4,
+        "emotion": 0.2
       }
     },
     "retries": 4,
@@ -391,5 +408,34 @@
   "death": {
     "forgetMemories": true,
     "epitaph": true
+  },
+  "barter": {
+    "enabled": true,
+    "checkMs": 1000,
+    "textMaxChars": 160
+  },
+  "society": {
+    "enabled": true,
+    "broadcastMs": 5000,
+    "maxOpinions": 2000,
+    "reasonMaxChars": 160,
+    "hearsay": {
+      "perPerson": 2,
+      "maxKept": 12,
+      "lowBelow": 0.35,
+      "highAbove": 0.65,
+      "famousAbove": 3
+    },
+    "lawProposals": {
+      "branchPrefix": "law/agent-",
+      "textMaxChars": 400,
+      "pollMs": 15000,
+      "maxOpen": 5,
+      "defaultValue": 1
+    },
+    "families": {
+      "kind": "Family",
+      "flushMs": 10000
+    }
   }
 }

@@ -19,6 +19,7 @@ import { type DecideHost, decisionTier, type Failure, faculties, limitsOf, model
 import { flatSteps, mockGroupPlan, mockSteps } from './mock.ts';
 import type { PlanStep } from './plan.ts';
 import { inboxBlock, look, memberLine, timeLine } from './prompt.ts';
+import { weightedWinner } from './society.ts';
 import { tally } from './vote.ts';
 import type { RtEntity } from './world.ts';
 
@@ -158,7 +159,8 @@ export class GroupManager {
     if (!g) return undefined;
     g.members = g.members.filter((id) => id !== e.id);
     e.groupId = null;
-    if (g.leader === e.id) g.leader = g.pattern === 'crowd' ? null : (g.members[0] ?? null);
+    // The most esteemed member takes the lead (rule esteem_vote_weight; ties: who joined first).
+    if (g.leader === e.id) g.leader = g.pattern === 'crowd' ? null : ([...g.members].sort((a, b) => this.host.voteWeight(b) - this.host.voteWeight(a))[0] ?? null);
     this.events.left(g, e);
     if (!g.members.length || (g.complete && g.pattern !== 'crowd' && g.members.length < this.cfg.groups.minMembers)) this.dissolve(g);
     else this.events.changed(g);
@@ -208,7 +210,7 @@ export class GroupManager {
       timeLine(t, w),
       t('rt.group.members', { members: members.map((m) => memberLine(t, w, m, this.host.roleTitle)).join('\n') }),
       t('rt.observation.why', { why }),
-      t('rt.observation.perceive', { look: look(t, w, lead, this.host.groups(), this.host.roleTitle, limitsOf(this.cfg)) }),
+      t('rt.observation.perceive', { look: look(t, w, lead, this.host.groups(), this.host.roleTitle, limitsOf(this.cfg), (b) => this.host.perceived.about(lead, b)) }),
       inboxBlock(t, inbox),
       t('rt.observation.memory', { memory: g.memory.length ? g.memory.map((m) => `- ${m}`).join('\n') : t('rt.observation.noMemory') }),
       t('rt.group.format', { minSteps: c.min, maxSteps: c.max }),
@@ -451,8 +453,10 @@ export class GroupManager {
           return Number.isInteger(n) ? n - 1 : null;
         });
         const result = tally(votes, plans.length, [0]);
-        const win = plans[result.winner]!;
-        return { output: JSON.stringify(win.plan), data: { votes: result.counts, winner: result.winner + 1, majority: result.majority } };
+        // Each ballot weighs by the voter's esteem (rule esteem_vote_weight).
+        const weighted = weightedWinner(votes, members.map((m) => this.host.voteWeight(m.id)), plans.length);
+        const win = plans[weighted.winner]!;
+        return { output: JSON.stringify(win.plan), data: { votes: result.counts, weights: weighted.weights, winner: weighted.winner + 1, majority: result.majority } };
       },
     });
   }

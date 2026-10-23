@@ -56,7 +56,13 @@
     "noTools": "nessuno",
     "itemLine": "{amount} {name} ({code})",
     "toolLine": "{name} ({code}) usura {durability}/{max}",
-    "recalled": "TI TORNA IN MENTE:\n{memory}"
+    "recalled": "TI TORNA IN MENTE:\n{memory}",
+    "age": "ETÀ: hai {days} giorni, sei {stage}.",
+    "offers": "PROPOSTE DI SCAMBIO:\n{offers}",
+    "offerForYou": "- {id}: {from} ti propone {give} in cambio di {want}",
+    "offerByYou": "- {id}: hai proposto a {to} {give} in cambio di {want}",
+    "hearsay": "CIÒ CHE SI DICE IN GIRO:\n{lines}",
+    "hearsayLine": "- {from} ha detto di {about}: «{text}»"
   },
   "why": {
     "start": "ti guardi intorno per la prima volta",
@@ -70,7 +76,9 @@
     "seasonChange": "è cominciata la stagione: {season}",
     "rulesChanged": "il libro delle leggi è cambiato",
     "groupChanged": "il tuo gruppo è cambiato",
-    "conversation": "hai appena parlato con {name}"
+    "conversation": "hai appena parlato con {name}",
+    "offer": "{name} ti propone uno scambio",
+    "offerAnswered": "la tua proposta di scambio a {name} è stata {status}"
   },
   "reason": {
     "unreachable": "non si può arrivare lì",
@@ -96,7 +104,19 @@
     "unknown_item": "non esiste una cosa con quel codice",
     "not_usable": "non si può usare così",
     "no_item": "non la portavi",
-    "not_here": "qui non se ne trova"
+    "not_here": "qui non se ne trova",
+    "too_young": "sei troppo giovane per farlo",
+    "empty_offer": "uno scambio chiede di dare e di ricevere qualcosa",
+    "too_many_kinds": "troppe cose diverse in un solo scambio",
+    "too_many_offers": "hai già troppe proposte in attesa",
+    "offerer_lacks": "chi ha proposto non ha più ciò che offriva",
+    "category": "categoria sconosciuta",
+    "key": "codice non valido",
+    "value": "valore non valido",
+    "empty": "testo vuoto",
+    "too_many": "hai già troppe proposte in attesa",
+    "self": "non puoi giudicare te stesso",
+    "duplicate": "la stessa proposta aspetta già"
   },
   "look": {
     "here": "Sei in ({x},{y}) su {biome}, altitudine {elev}: cibo {food}, legna {wood}{shelter}.",
@@ -119,10 +139,14 @@
     "noGroups": "nessuno",
     "structures": ", strutture: {list}",
     "structureLine": "{name} ({code})",
-    "wild": " Sei nelle terre selvagge."
+    "wild": " Sei nelle terre selvagge.",
+    "reputeHigh": ", gode di molta stima",
+    "reputeLow": ", gode di poca stima",
+    "reputeFamous": ", tutti parlano di ciò che ha fatto",
+    "reputeHeard": ", di {name} si dice: «{text}»"
   },
   "tools": {
-    "commitPlan": "Fissa ciò che farai da ora in avanti: una lista di passi eseguiti in ordine, in tempo reale. Azioni: move_to(x,y) cammina fino a una casella; approach(to) avvicinati a una persona; gather(resource) raccogli sulla tua casella una cosa per codice (food, wood o altro); eat(amount?, item?) mangia; build costruisci o amplia un rifugio sulla tua casella; dai(to, item, amount) dai a chi ti sta accanto; say(to, text) parla a una persona o a \"all\"; rest(minutes) riposa; sleep(minutes) dormi; wait(minutes) aspetta; crea(recipe) segui una ricetta per codice; sperimenta(items) combina alcune cose che porti, una per tipo, che si consumano; usa(item) usa una cosa che porti.",
+    "commitPlan": "Fissa ciò che farai da ora in avanti: una lista di passi eseguiti in ordine, in tempo reale. Azioni: move_to(x,y) cammina fino a una casella; approach(to) avvicinati a una persona; gather(resource) raccogli sulla tua casella una cosa per codice (food, wood o altro); eat(amount?, item?) mangia; build costruisci o amplia un rifugio sulla tua casella; dai(to, item, amount) dai a chi ti sta accanto; scambia(to, give, want) proponi a chi ti sta vicino di scambiare le cose in give con quelle in want (codice -> quantità), che lui accetta o rifiuta; say(to, text) parla a una persona o a \"all\"; rest(minutes) riposa; sleep(minutes) dormi; wait(minutes) aspetta; crea(recipe) segui una ricetta per codice; sperimenta(items) combina alcune cose che porti, una per tipo, che si consumano; usa(item) usa una cosa che porti.",
     "planReason": "il tuo pensiero: perché fai questo, in una frase",
     "planSteps": "i passi, in ordine",
     "stepLabel": "breve descrizione del passo, in italiano",
@@ -151,7 +175,22 @@
     "stepItem": "codice di una cosa",
     "stepItems": "codici delle cose da combinare",
     "stepRecipe": "codice della ricetta",
-    "rememberImportance": "quanto conta per te, da 0 a 1"
+    "rememberImportance": "quanto conta per te, da 0 a 1",
+    "offer": "Proponi uno scambio a una persona vicina: dai le cose in give e chiedi quelle in want. La persona lo accetta o lo rifiuta quando ci pensa; la proposta decade col tempo.",
+    "offerTo": "nome della persona",
+    "offerGive": "ciò che dai: codice della cosa -> quantità",
+    "offerWant": "ciò che chiedi: codice della cosa -> quantità",
+    "answerOffer": "Rispondi a una proposta di scambio che ti è stata fatta: accettala (lo scambio avviene subito, se siete vicini e avete entrambi le cose) o rifiutala.",
+    "offerId": "codice della proposta",
+    "offerAccept": "true per accettare, false per rifiutare",
+    "judge": "Esprimi il tuo giudizio su una persona: resta nella tua memoria, e chi ti sta vicino sente ciò che dici di lei.",
+    "judgeWho": "nome della persona",
+    "judgeScore": "il tuo giudizio, da -1 (pessimo) a 1 (ottimo)",
+    "judgeReason": "perché, in una frase",
+    "proposeLaw": "Proponi una legge nuova o il cambiamento di una legge del libro delle leggi. Entra in vigore solo se viene approvata.",
+    "lawKey": "codice della legge (snake_case); se esiste già la proposta la cambia",
+    "lawText": "il testo della legge, in italiano",
+    "lawValue": "valore numerico della legge, se ne ha uno"
   },
   "act": {
     "planned": "piano fissato ({n} passi)",
@@ -177,7 +216,18 @@
     "recallLine": "- giorno {day} ({vivid}): {text}",
     "vivid": "ricordo nitido",
     "faded": "ricordo sbiadito",
-    "recallNone": "non ricordi niente del genere"
+    "recallNone": "non ricordi niente del genere",
+    "offerMade": "proposta di scambio {id} fatta a {name}: aspetta la sua risposta",
+    "offerFailed": "proposta non fatta: {reason}",
+    "offerAccepted": "scambio fatto con {name}",
+    "offerRejected": "hai rifiutato la proposta di {name}",
+    "offerUnknown": "nessuna proposta con quel codice ti aspetta",
+    "offerFailedSwap": "scambio non riuscito: {reason}",
+    "judged": "giudizio su {name} annotato nella tua memoria",
+    "judgeFailed": "giudizio non annotato: {reason}",
+    "lawProposed": "legge proposta ({key}): ora aspetta l'approvazione",
+    "lawFailed": "legge non proposta: {reason}",
+    "lawNotEsteemed": "la tua voce non ha ancora abbastanza peso per proporre una legge"
   },
   "group": {
     "header": "SIETE IL GRUPPO {name} ({pattern}). Ora decidete insieme cosa farà ciascuno nei prossimi {horizon} minuti.",
@@ -235,7 +285,13 @@
     "spoiled": "si è guastato",
     "broken": "si è rotto",
     "worn": "si è logorato",
-    "epitaph": "Epitaffio di {name}: «{memory}»"
+    "epitaph": "Epitaffio di {name}: «{memory}»",
+    "trade": "{a} e {b} si scambiano {give} con {get}",
+    "family": "Nasce la famiglia {name}, fondata da {founder}",
+    "aged": "{name} ora è {stage}",
+    "lawProposed": "{name} propone una legge: «{text}»",
+    "lawMerged": "La legge proposta da {name} entra nel libro delle leggi: {key}",
+    "lawRejected": "La legge proposta da {name} è respinta: {key}"
   },
   "memory": {
     "planned": "Ho deciso: {reason}",
@@ -253,7 +309,11 @@
     "discovered": "Ho scoperto {tech} combinando {items}!",
     "experimented": "Ho combinato {items}, ma non è successo niente",
     "decayed": "Mi si è {reason} {amount} {item}",
-    "learned": "Si è scoperto {tech} (lo ha scoperto {name})"
+    "learned": "Si è scoperto {tech} (lo ha scoperto {name})",
+    "offered": "Ho proposto a {name}: {give} in cambio di {want}",
+    "traded": "Ho scambiato con {name}: ho dato {give} e ricevuto {get}",
+    "judged": "Ho giudicato {name}: {reason}",
+    "offerClosed": "La mia proposta di scambio a {name} è stata {status}"
   },
   "mock": {
     "reason": {
@@ -311,7 +371,12 @@
     "consult": "leggi del mondo",
     "insight": "Intorno a ({x},{y}) il cibo abbonda.",
     "insightEvidence": "L'ho visto con i miei occhi il giorno {day}.",
-    "discoveryInsight": "Combinando {items} si scopre {tech}."
+    "discoveryInsight": "Combinando {items} si scopre {tech}.",
+    "opinion": {
+      "good": "{name} lavora bene e aiuta gli altri.",
+      "bad": "{name} pensa solo a sé."
+    },
+    "law": "Chi ha cibo in più lo divida con chi ha fame."
   },
   "memberInstructions": [
     "Sei {name}. Il tuo carattere: {personality}",
@@ -325,7 +390,8 @@
     "unknown": "nessuna idea con quel codice aspetta un giudizio",
     "too_many": "troppe idee del tuo ruolo aspettano già",
     "empty": "l'idea è vuota",
-    "disabled": "non disponibile"
+    "disabled": "non disponibile",
+    "already": "hai già approvato questa idea"
   },
   "mcp": {
     "lorebase_get": "Leggi un Record di Lorebase per riferimento Kind/chiave (per esempio Rule/max_hp, Role/healer).",
@@ -342,5 +408,19 @@
     "new": "È stata proclamata una legge: «{text}» ({key} = {value})",
     "changed": "È stata modificata una legge: «{text}» ({key}: {old} → {new})",
     "removed": "È stata abrogata la legge: «{text}» ({key})"
+  },
+  "stage": {
+    "child": "bambino",
+    "adult": "adulto",
+    "elder": "anziano"
+  },
+  "offerStatus": {
+    "accepted": "accettata",
+    "rejected": "rifiutata",
+    "expired": "lasciata scadere"
+  },
+  "offerInbox": "Ti propongo uno scambio ({id}): ti do {give}, in cambio di {want}.",
+  "society": {
+    "familyName": "Casata di {name}"
   }
 }

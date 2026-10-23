@@ -25,7 +25,11 @@ import { AgentMind, GroupMind, Limiter, type MindHost, type Perception } from '.
 import { type Plan, type PlanStep, tileOf } from './plan.ts';
 import { type GroupView, proclamation } from './prompt.ts';
 import { canAddAgentMind, childSpec } from './births.ts';
-import { missingRtRules, RT_RULE_KEYS, type Resource, type RtEntity, RtWorld, type WorldEvent } from './world.ts';
+import { missingRtRules, RT_RULE_KEYS, type Resource, type RtEntity, type RtTile, RtWorld, type WorldEvent } from './world.ts';
+import { offerError, OfferBook, offerMinutes, type Offer, swap } from './barter.ts';
+import { bagOf } from './plan.ts';
+import { type Family, Society } from './society.ts';
+import { type LawProposal, LawDesk, lawDraft } from './law-proposals.ts';
 
 type Msg = Record<string, unknown> & { type: string };
 
@@ -84,6 +88,17 @@ export class Game {
   private readonly stats = { decisions: 0, groupDecisions: 0, replies: 0, failures: 0 };
   /** Set while a reply is spoken, so a reply never triggers another reply. */
   private speakingReply = false;
+  readonly offers = new OfferBook();
+  readonly society: Society;
+  readonly laws_: LawDesk;
+  private readonly familyLog: Chronicle;
+  /** Tiles changed since the last `tiles` flush, and what each client last got. */
+  private readonly dirtyTiles = new Map<number, RtTile>();
+  private readonly tileSent = new Map<number, string>();
+  private lastTileFlushMs = 0;
+  private lastReputationMs = 0;
+  private lastOfferCheckMs = 0;
+  private lastLawPollMs = 0;
 
   constructor(cfg: SimConfig, game: GameConfig) {
     this.cfg = cfg;
@@ -103,10 +118,29 @@ export class Game {
     this.world = this.newWorld();
     this.groups = this.newGroups();
     this.chronicle = new Chronicle(this.client, cfg.lorebase.branch, game.chronicle);
+    this.familyLog = new Chronicle(this.client, cfg.lorebase.branch, { ...game.chronicle, kind: game.society.families.kind, flushMs: game.society.families.flushMs }, this.chronicle.session);
+    this.society = new Society((k) => this.world.r(k), { maxOpinions: game.society.maxOpinions, hearsayKept: game.society.hearsay.maxKept });
+    this.society.stageOf = (id) => {
+      const e = this.world.entities.get(id);
+      return e && e.alive ? e.stage : undefined;
+    };
+    this.laws_ = new LawDesk(this.client, cfg.lorebase.branch, game.society.lawProposals, { create: cfg.lorebase.createOperation, update: cfg.lorebase.updateOperation, ruleKind: cfg.lorebase.ruleKind }, {
+      changed: (p) => this.onLawProposal(p),
+    });
     this.insights = new InsightBook(this.client, cfg.lorebase.branch, game.insights, {
       changed: (insight, action, reviewer) => {
-        if (action === 'accepted') this.brain.invalidate();
+        if (action === 'accepted') {
+          this.brain.invalidate();
+          const author = this.byName(insight.author);
+          if (author) this.society.deed(author.id, 'insight_accepted', this.world.clock);
+        }
         this.broadcast({ type: 'insight', insight, action, ...(reviewer ? { reviewer } : {}) });
+      },
+      approvalWeight: (rev) => {
+        const e = this.byName(rev.name);
+        if (!e) return 1;
+        const esteem = this.society.esteemOf(e.id);
+        return esteem >= this.world.r('insight_solo_approve_esteem') ? Infinity : esteem * this.world.r('insight_review_esteem_factor');
       },
     });
     const lb = cfg.lorebase;
@@ -132,6 +166,10 @@ export class Game {
     w.timeScale = this.game.loop.timeScale;
     w.minExperimentItems = this.game.economy.minExperimentItems;
     w.onEvent = (ev) => this.onWorldEvent(ev);
+    w.offerHook = (e, to, give, want) => {
+      const out = this.makeOffer(e, to, give, want);
+      return out.ok ? { ok: true } : { ok: false, reason: out.reason };
+    };
     w.childOf = (a, b, rnd) => {
       const spec = childSpec(this.game, a, b, this.agentMinds(), rnd);
       return spec && { ...spec, model: this.modelFor({ tier: spec.tier }) };
@@ -217,7 +255,260 @@ export class Game {
         this.recent(this.consults, e.id, { at: this.now(), tool: ev.tool, query: ev.query });
         this.broadcastPrivileged({ type: 'consult', agentId: e.id, tool: ev.tool, query: ev.query });
       },
+      offer: (e, to, give, want) => {
+        const out = this.makeOffer(e, to, give, want);
+        return out.ok ? { ok: true, text: this.t('rt.act.offerMade', { id: out.offer.id, name: this.world.entities.get(out.offer.to)?.name ?? to }) } : { ok: false, text: this.t('rt.act.offerFailed', { reason: this.t(`rt.reason.${out.reason}`) }) };
+      },
+      answerOffer: (e, id, accept) => this.answerOffer(e, id, accept),
+      judge: (e, who, score, reason) => this.judge(e, who, score, reason),
+      proposeLaw: (e, input) => this.proposeLaw(e, input),
+      voteWeight: (id) => this.society.voteWeight(id),
+      perceived: {
+        about: (e, b) => this.repute(e, b),
+        blocks: (e) => this.societyBlocks(e),
+        offersFor: (e) => this.offers.pendingFor(e.id).map((o) => ({ id: o.id, want: o.want })),
+      },
     };
+  }
+
+  private byName(name: string): RtEntity | undefined {
+    return this.world.living().find((x) => x.name === name);
+  }
+
+  // ---- barter -------------------------------------------------------------------
+
+  private bagWords(bag: Record<string, number>): string {
+    return this.bagText(bag) || '-';
+  }
+
+  /** An offer from `e` to a person near it (plan step or tool). */
+  private makeOffer(e: RtEntity, to: string, giveRaw: unknown, wantRaw: unknown): { ok: true; offer: Offer } | { ok: false; reason: string } {
+    if (!this.game.barter.enabled) return { ok: false, reason: 'failed' };
+    const w = this.world;
+    const target = w.find(to);
+    const give = bagOf(giveRaw) ?? {};
+    const want = bagOf(wantRaw) ?? {};
+    const err = offerError(this.catalog, e, target?.kind === 'agent' ? target : undefined, give, want, { maxKinds: this.game.economy.maxTradeKinds, maxPending: this.game.decisions.offersMax }, this.offers.pendingFrom(e.id).length);
+    if (err) return { ok: false, reason: err };
+    if (Math.hypot(target!.x - e.x, target!.y - e.y) > w.r('speech_radius')) return { ok: false, reason: 'too_far' };
+    const minutes = offerMinutes(w.r('offer_minutes'), w.r('trade_trust_esteem'), this.society.esteemOf(e.id));
+    const offer = this.offers.add({ from: e.id, to: target!.id, give, want, madeAt: w.clock, expiresAt: w.clock + minutes });
+    this.broadcastOffer(offer);
+    w.deliver(target!, { from: e.id, fromName: e.name, to: target!.id, text: this.t('rt.offerInbox', { id: offer.id, give: this.bagWords(give), want: this.bagWords(want) }), day: w.day, minute: w.minute });
+    this.live(e, 'offer', this.t('rt.memory.offered', { name: target!.name, give: this.bagWords(give), want: this.bagWords(want) }));
+    this.perceive(target, { kind: 'offer', from: e });
+    return { ok: true, offer };
+  }
+
+  private broadcastOffer(o: Offer): void {
+    this.broadcast({ type: 'offer', id: o.id, from: o.from, to: o.to, give: o.give, want: o.want, status: o.status });
+  }
+
+  private answerOffer(e: RtEntity, id: string, accept: boolean): ToolOutcome {
+    const t = this.t;
+    const w = this.world;
+    const o = this.offers.get(id.trim());
+    if (!o || o.to !== e.id || o.status !== 'pending') return { ok: false, text: t('rt.act.offerUnknown') };
+    const from = w.entities.get(o.from);
+    if (!from || !from.alive) {
+      this.closeOffer(o, 'expired');
+      return { ok: false, text: t('rt.act.offerUnknown') };
+    }
+    if (!accept) {
+      this.closeOffer(o, 'rejected');
+      return { ok: true, text: t('rt.act.offerRejected', { name: from.name }) };
+    }
+    if (Math.hypot(from.x - e.x, from.y - e.y) > w.r('speech_radius')) return { ok: false, text: t('rt.act.offerFailedSwap', { reason: t('rt.reason.too_far') }) };
+    const err = swap(this.catalog, o, from, e);
+    if (err) return { ok: false, text: t('rt.act.offerFailedSwap', { reason: t(`rt.reason.${err}`) }) };
+    this.broadcast({ type: 'trade', from: from.id, to: e.id, give: o.give, get: o.want, kind: 'barter' });
+    for (const [k, n] of Object.entries(o.give)) this.flows.add(from.role, e.role, k, n);
+    for (const [k, n] of Object.entries(o.want)) this.flows.add(e.role, from.role, k, n);
+    this.live(from, 'trade', t('rt.memory.traded', { name: e.name, give: this.bagWords(o.give), get: this.bagWords(o.want) }));
+    this.live(e, 'trade', t('rt.memory.traded', { name: from.name, give: this.bagWords(o.want), get: this.bagWords(o.give) }));
+    this.event('trade', t('rt.events.trade', { a: from.name, b: e.name, give: this.bagWords(o.give), get: this.bagWords(o.want) }), e);
+    this.closeOffer(o, 'accepted');
+    return { ok: true, text: t('rt.act.offerAccepted', { name: from.name }) };
+  }
+
+  private closeOffer(o: Offer, status: 'accepted' | 'rejected' | 'expired'): void {
+    this.offers.close(o, status);
+    this.broadcastOffer(o);
+    const from = this.world.entities.get(o.from);
+    const to = this.world.entities.get(o.to);
+    if (!from || !from.alive) return;
+    const said = this.t(`rt.offerStatus.${status}`);
+    if (status !== 'accepted') this.live(from, 'offer', this.t('rt.memory.offerClosed', { name: to?.name ?? o.to, status: said }));
+    if (to) this.perceive(from, { kind: 'offerAnswered', with: to, status: said });
+  }
+
+  // ---- society ------------------------------------------------------------------
+
+  /** A person enters the society (and gets its family, when born of two). */
+  private register(e: RtEntity, parents?: [string, string]): void {
+    this.society.add({ id: e.id, name: e.name, role: e.role, tier: e.tier, kind: e.kind, bornAt: e.bornAt, parents: parents ?? e.parents });
+    if (!parents) return;
+    const { family, founded } = this.society.familyForBirth(e.id, parents[0], parents[1], this.world.day, (name) => this.t('rt.society.familyName', { name }), this.chronicle.session);
+    for (const id of family.members) {
+      const m = this.world.entities.get(id);
+      if (m) m.family = this.society.people.get(id)?.family ?? m.family;
+    }
+    if (founded) {
+      const founder = this.society.people.get(family.founder)?.name ?? family.founder;
+      const text = this.t('rt.events.family', { name: family.name, founder });
+      this.event('birth', text, e);
+      this.chron('family_founded', text, [founder]);
+      this.familyLog.addRow({ code: family.id, name: family.name, founder, founded_day: family.foundedDay, session: this.chronicle.session });
+    }
+    this.broadcastFamily(family);
+  }
+
+  private broadcastFamily(f: Family): void {
+    this.broadcast({ type: 'family', family: this.society.familyDto(f) });
+  }
+
+  private judge(e: RtEntity, who: string, score: number, reason: string): ToolOutcome {
+    const t = this.t;
+    const w = this.world;
+    if (!this.game.society.enabled) return { ok: false, text: t('rt.act.judgeFailed', { reason: t('rt.insightReason.disabled') }) };
+    const b = w.find(who);
+    if (!b || !b.alive || b.kind === 'player') return { ok: false, text: t('rt.act.judgeFailed', { reason: t('rt.reason.no_such_person') }) };
+    if (b.id === e.id) return { ok: false, text: t('rt.act.judgeFailed', { reason: t('rt.reason.self') }) };
+    const s = Math.max(-1, Math.min(1, Number.isFinite(score) ? score : 0));
+    const why = reason.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, this.game.society.reasonMaxChars);
+    this.society.opinion({ from: e.id, to: b.id, score: s, reason: why, at: w.clock });
+    this.live(e, 'opinion', t('rt.memory.judged', { name: b.name, reason: why || '-' }));
+    if (why) {
+      const radius = w.r('speech_radius');
+      const hearers = w.living().filter((x) => x.id !== e.id && x.kind !== 'player' && Math.hypot(x.x - e.x, x.y - e.y) <= radius).map((x) => x.id);
+      this.society.hear(hearers, { about: b.id, from: e.name, text: why, at: w.clock });
+    }
+    this.broadcastPrivileged({ type: 'opinion', from: e.id, to: b.id, score: s, reason: why });
+    return { ok: true, text: t('rt.act.judged', { name: b.name }) };
+  }
+
+  private async proposeLaw(e: RtEntity, input: { key?: unknown; text?: unknown; category?: unknown; value?: unknown }): Promise<ToolOutcome> {
+    const t = this.t;
+    const cfg = this.game.society.lawProposals;
+    if (!this.game.society.enabled || e.kind !== 'agent') return { ok: false, text: t('rt.act.lawFailed', { reason: t('rt.insightReason.disabled') }) };
+    if (this.society.esteemOf(e.id) < this.world.r('law_proposal_min_esteem')) return { ok: false, text: t('rt.act.lawNotEsteemed') };
+    const draft = lawDraft(input, cfg.textMaxChars, cfg.defaultValue);
+    if ('error' in draft) return { ok: false, text: t('rt.act.lawFailed', { reason: t(`rt.reason.${draft.error}`) }) };
+    const out = await this.laws_.propose({ id: e.id, name: e.name }, draft, this.laws);
+    if (typeof out === 'string') return { ok: false, text: t('rt.act.lawFailed', { reason: this.t(`rt.reason.${out}`) === `rt.reason.${out}` ? out : t(`rt.reason.${out}`) }) };
+    return { ok: true, text: t('rt.act.lawProposed', { key: out.key }) };
+  }
+
+  private onLawProposal(p: LawProposal): void {
+    const t = this.t;
+    this.broadcast({ type: 'law_proposal', id: p.id, by: p.by, text: p.text, key: p.key, category: p.category, value: p.value, branch: p.branch, status: p.status });
+    if (p.status === 'open') {
+      const text = t('rt.events.lawProposed', { name: p.byName, text: p.text });
+      this.event('rules', text, this.world.entities.get(p.by));
+      this.chron('law_proposed', text, [p.byName]);
+      return;
+    }
+    this.event('rules', t(p.status === 'merged' ? 'rt.events.lawMerged' : 'rt.events.lawRejected', { name: p.byName, key: p.key }));
+    const by = this.world.entities.get(p.by) ?? this.byName(p.byName);
+    if (p.status === 'merged' && by) this.society.deed(by.id, 'law_enacted', this.world.clock);
+  }
+
+  /** GET /api/law-proposals and POST /api/law-proposals/:id/approve|reject (god mode). */
+  lawProposals(): LawProposal[] {
+    return [...this.laws_.proposals.values()];
+  }
+
+  decideLawProposal(id: string, verdict: 'approve' | 'reject', note: string): Promise<LawProposal | string> {
+    return this.laws_.decide(id, verdict, note);
+  }
+
+  /** What `e` perceives of `b`'s standing: bands of esteem and fame, never numbers. */
+  private repute(e: RtEntity, b: RtEntity): string {
+    if (!this.game.society.enabled || b.kind === 'player') return '';
+    const h = this.game.society.hearsay;
+    const t = this.t;
+    const esteem = this.society.esteemOf(b.id);
+    const parts = [
+      esteem >= h.highAbove ? t('rt.look.reputeHigh') : esteem < h.lowBelow ? t('rt.look.reputeLow') : '',
+      this.society.fameOf(b.id, this.world.clock) >= h.famousAbove ? t('rt.look.reputeFamous') : '',
+      ...this.society.hearsayOf(e.id, b.id).slice(-h.perPerson).map((x) => t('rt.look.reputeHeard', { name: b.name, text: x.text })),
+    ];
+    return parts.join('');
+  }
+
+  /** Age, open exchange offers and hearsay, as factual blocks of the observation. */
+  private societyBlocks(e: RtEntity): string[] {
+    const t = this.t;
+    const w = this.world;
+    const out = [t('rt.observation.age', { days: Math.floor(w.ageDays(e)), stage: t(`rt.stage.${e.stage}`) })];
+    const name = (id: string) => w.entities.get(id)?.name ?? id;
+    const lines = [
+      ...this.offers.pendingFor(e.id).map((o) => t('rt.observation.offerForYou', { id: o.id, from: name(o.from), give: this.bagWords(o.give), want: this.bagWords(o.want) })),
+      ...this.offers.pendingFrom(e.id).map((o) => t('rt.observation.offerByYou', { id: o.id, to: name(o.to), give: this.bagWords(o.give), want: this.bagWords(o.want) })),
+    ];
+    if (lines.length) out.push(t('rt.observation.offers', { offers: lines.join('\n') }));
+    const heard = this.society.hearsayOf(e.id);
+    if (heard.length) out.push(t('rt.observation.hearsay', { lines: heard.map((x) => t('rt.observation.hearsayLine', { from: x.from, about: this.society.people.get(x.about)?.name ?? x.about, text: x.text })).join('\n') }));
+    return out;
+  }
+
+  /** GET /api/society (opinions only for privileged callers). */
+  societyView(privileged: boolean) {
+    const clock = this.world.clock;
+    const people = [...this.society.people.values()].filter((p) => p.kind !== 'player').map((p) => this.personDto(p.id, clock)!);
+    return {
+      people,
+      families: [...this.society.families.values()].map((f) => this.society.familyDto(f)),
+      ...(privileged ? { opinions: this.society.opinions.map((o) => ({ from: o.from, to: o.to, score: o.score })) } : {}),
+    };
+  }
+
+  private personDto(id: string, clock = this.world.clock) {
+    const p = this.society.people.get(id);
+    if (!p) return undefined;
+    const end = p.diedAt ?? clock;
+    const days = Math.max(0, (end - p.bornAt) / 1440);
+    const e = this.world.entities.get(id);
+    const stage = e?.stage ?? (days < this.world.r('age_child_days') ? 'child' : days >= this.world.r('age_elder_days') ? 'elder' : 'adult');
+    return {
+      id: p.id, name: p.name, role: p.role, tier: p.tier, age: { stage, days: Math.round(days * 10) / 10 }, esteem: this.society.esteemOf(p.id),
+      fame: this.society.fameOf(p.id, clock), rank: this.society.ranks.get(p.id) ?? 0, family: p.family, parents: p.parents, alive: p.alive,
+    };
+  }
+
+  private tickSociety(now: number): void {
+    const w = this.world;
+    if (this.game.barter.enabled && now - this.lastOfferCheckMs >= this.game.barter.checkMs) {
+      this.lastOfferCheckMs = now;
+      for (const o of this.offers.stale(w.clock, (id) => !!w.entities.get(id)?.alive)) this.closeOffer(o, 'expired');
+    }
+    if (!this.game.society.enabled) return;
+    if (now - this.lastReputationMs >= this.game.society.broadcastMs) {
+      this.lastReputationMs = now;
+      this.society.recompute(w.clock);
+      const people = w.living().filter((e) => e.kind !== 'player').map((e) => ({ id: e.id, esteem: this.society.esteemOf(e.id), fame: this.society.fameOf(e.id, w.clock), rank: this.society.ranks.get(e.id) ?? 0 }));
+      this.broadcast({ type: 'reputation', people });
+    }
+    if (now - this.lastLawPollMs >= this.game.society.lawProposals.pollMs) {
+      this.lastLawPollMs = now;
+      void this.laws_.poll().catch(() => undefined);
+    }
+  }
+
+  /** Coalesced tile updates: only tiles whose state changed since they were last sent. */
+  private flushTiles(now: number): void {
+    if (now - this.lastTileFlushMs < this.game.net.tileFlushMs || !this.dirtyTiles.size) return;
+    this.lastTileFlushMs = now;
+    const items: Msg[] = [];
+    for (const [i, tile] of this.dirtyTiles) {
+      const dto = this.tileDto(tile);
+      const key = JSON.stringify(dto);
+      if (this.tileSent.get(i) === key) continue;
+      this.tileSent.set(i, key);
+      items.push(dto as unknown as Msg);
+    }
+    this.dirtyTiles.clear();
+    if (items.length) this.broadcast({ type: 'tiles', items });
   }
 
   private insightReason(code: string): string {
@@ -243,13 +534,26 @@ export class Game {
       }
     }
     if (this.game.economy.enabled) await this.loadEconomy();
+    await this.reconcile();
     this.world.clock = this.world.epoch = this.values.dawn_minute ?? 0;
     this.mnemo.follow((ev) => this.onMemory(ev));
     this.roster = loadRosterFile(this.cfg, this.roles.map((r) => r.key));
     this.populate();
     this.chronicle.start();
+    this.familyLog.start();
     await this.brain.connect();
     this.start();
+  }
+
+  /** Startup reconciliation: pending insights and agents' law proposals left in Lorebase by an earlier run. */
+  private async reconcile(): Promise<void> {
+    try {
+      const ins = await this.insights.reconcile(this.world.clock);
+      const laws = await this.laws_.reconcile(this.cfg.lorebase.proposalBranchPrefix);
+      console.log(`[reconcile] insights: ${ins.reloaded} reloaded, ${ins.closed} closed, ${ins.branchesDeleted} stale role/ branches deleted; law proposals: ${laws.reloaded} followed, ${laws.branchesDeleted} stale law/ branches deleted`);
+    } catch (err) {
+      console.warn(`[reconcile] skipped: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /** Loads the economy catalog (retrying until Lorebase has it). */
@@ -299,7 +603,9 @@ export class Game {
     for (let i = 0; i < crowd.count; i++) {
       const name = crowd.names.find((n) => !this.world.nameTaken(n)) ?? `${crowd.groupName} ${i + 1}`;
       const role = crowd.roles[i % crowd.roles.length] ?? this.roles[0]?.key ?? 'gatherer';
-      extras.push(this.world.spawn({ name, role, tier: crowd.tier, model: this.modelFor({ tier: crowd.tier }), kind: 'crowd', personality: crowd.personality }));
+      const x = this.world.spawn({ name, role, tier: crowd.tier, model: this.modelFor({ tier: crowd.tier }), kind: 'crowd', personality: crowd.personality });
+      this.register(x);
+      extras.push(x);
     }
     if (extras.length) this.groups.create(crowd.groupName, 'crowd', extras, null);
     for (const s of this.game.groups.seeded) {
@@ -324,6 +630,7 @@ export class Game {
   private spawnAgent(entry: RosterEntry): RtEntity {
     const e = this.world.spawn({ id: entry.id, name: entry.name, role: entry.role, tier: entry.tier, model: this.modelFor(entry), kind: 'agent', personality: entry.personality });
     this.lawsSeen.set(e.id, this.laws);
+    this.register(e);
     return e;
   }
 
@@ -347,6 +654,7 @@ export class Game {
     await this.brain.close();
     this.mnemo.stop();
     await this.chronicle.stop();
+    await this.familyLog.stop();
   }
 
   // ---- rules ------------------------------------------------------------------
@@ -415,6 +723,8 @@ export class Game {
         this.broadcast({ type: 'entity_removed', id: e.id, reason: 'death' });
       }
     }
+    this.flushTiles(now);
+    this.tickSociety(now);
     if (now - this.lastStateMs >= 1000 / this.game.loop.stateHz) {
       this.lastStateMs = now;
       this.sendState();
@@ -480,7 +790,16 @@ export class Game {
         this.onSay(ev.from, ev.to, ev.text, ev.hearers);
         break;
       case 'tile':
-        this.broadcast({ type: 'tile', ...this.tileDto(ev.tile) });
+        this.dirtyTiles.set(ev.tile.y * w.width + ev.tile.x, ev.tile);
+        break;
+      case 'aged': {
+        const e = w.entities.get(ev.id);
+        this.broadcast({ type: 'aged', id: ev.id, stage: ev.stage });
+        if (e) this.event('birth', t('rt.events.aged', { name: e.name, stage: t(`rt.stage.${ev.stage}`) }), e);
+        break;
+      }
+      case 'skill':
+        this.broadcast({ type: 'skill', id: ev.id, recipe: ev.recipe, level: ev.level });
         break;
       case 'craft': {
         const e = w.entities.get(ev.id);
@@ -505,6 +824,9 @@ export class Game {
         const text = t('rt.events.death', { name: e.name, cause: t(`rt.events.cause_${ev.cause}`) });
         this.event('death', text, e);
         this.chron('death', text, [e.name]);
+        this.society.died(e.id, w.clock);
+        const fam = e.family ? this.society.families.get(e.family) : undefined;
+        if (fam) this.broadcastFamily(fam);
         void this.release(e);
         break;
       }
@@ -513,6 +835,7 @@ export class Game {
         if (ev.child.kind === 'crowd') this.joinCrowd(ev.child);
         ev.child.personality = t('rt.events.childOf', { a: a!, b: b! });
         this.lawsSeen.set(ev.child.id, this.laws);
+        this.register(ev.child, ev.parents);
         const text = t('rt.events.birth', { name: ev.child.name, a: a!, b: b! });
         this.broadcast({ type: 'entity_added', entity: this.entityDto(ev.child) });
         this.event('birth', text, ev.child);
@@ -534,6 +857,9 @@ export class Game {
         this.live(b, 'gift', t('rt.memory.got', { amount: ev.amount, resource: res, name: a.name }));
         this.broadcast({ type: 'trade', from: a.id, to: b.id, give: { [ev.resource]: ev.amount }, get: {}, kind: 'gift' });
         this.flows.add(a.role, b.role, ev.resource, ev.amount);
+        this.society.deed(a.id, 'gift', w.clock);
+        // A supply: something a recipe of the receiver's (other) role consumes.
+        if (a.role !== b.role && [...this.catalog.recipes.values()].some((r) => r.role === b.role && (r.inputs[ev.resource] ?? 0) > 0)) this.society.deed(a.id, 'recipe_supply', w.clock);
         break;
       }
       case 'critical': {
@@ -633,6 +959,7 @@ export class Game {
     const unlocks = unlocksOf(this.catalog, tech.code);
     const recipes = unlocks.map((c) => this.catalog.recipes.get(c)!).filter(Boolean);
     this.economy.record(tech, recipes, d, this.chronicle.session);
+    this.society.deed(e.id, 'discovery', w.clock);
     this.brain.invalidate();
     const text = t('rt.events.discovery', { name: e.name, role: this.roles.find((r) => r.key === e.role)?.title ?? e.role, tech: tech.name, recipes: recipes.map((r) => r.name).join(', ') });
     this.broadcast({ type: 'discovery', tech: { code: tech.code, name: tech.name, description: tech.description, unlocks }, by: e.id, role: e.role, at: tileOf(e) });
@@ -668,6 +995,10 @@ export class Game {
       case 'groupChanged':
       case 'groupFailed':
         return t('rt.why.groupChanged');
+      case 'offer':
+        return t('rt.why.offer', { name: p.from.name });
+      case 'offerAnswered':
+        return t('rt.why.offerAnswered', { name: p.with.name, status: p.status });
     }
   }
 
@@ -826,6 +1157,7 @@ export class Game {
     for (let i = 2; this.world.nameTaken(name); i++) name = `${name.replace(/ \d+$/, '')} ${i}`;
     const role = this.roles.some((r) => r.key === msg.role) ? String(msg.role) : (this.roles[0]?.key ?? 'gatherer');
     const e = this.world.spawn({ name, role, tier: 'human', model: 'human', kind: 'player' });
+    this.register(e);
     pc.entityId = e.id;
     pc.conn.send(this.hello(e.id, this.privileged(pc.conn)));
     this.broadcast({ type: 'entity_added', entity: this.entityDto(e) }, undefined, pc.conn.id);
@@ -910,6 +1242,8 @@ export class Game {
       id: e.id, name: e.name, role: e.role, tier: e.tier, model: e.model, kind: e.kind, groupId: e.groupId,
       x: r2(e.x), y: r2(e.y), dir: e.dir, anim: e.anim, hp: r1(e.hp), maxHp: e.maxHp, hunger: r1(e.hunger),
       inventory: { ...e.inventory }, tools: e.tools.map((x) => ({ ...x })), speed: e.alive ? this.world.speedOf(e) : 0, alive: e.alive,
+      age: { stage: e.stage, days: Math.round(this.world.ageDays(e) * 10) / 10 }, esteem: this.society.esteemOf(e.id), fame: this.society.fameOf(e.id, this.world.clock),
+      rank: this.society.ranks.get(e.id) ?? 0, family: e.family, parents: e.parents,
     };
   }
 
@@ -974,6 +1308,7 @@ export class Game {
       roles: this.roles.map((r) => r.key),
       lorebase: { connected: this.watcher.connected, branch: this.cfg.lorebase.branch, revision: this.revision },
       economy: this.economyDto(),
+      society: this.societyView(full),
     };
   }
 
@@ -1236,6 +1571,10 @@ export class Game {
     for (const m of this.groupMinds.values()) m.stop();
     this.groupMinds.clear();
     this.sent.clear();
+    this.offers.clear();
+    this.society.clear();
+    this.dirtyTiles.clear();
+    this.tileSent.clear();
     this.world = this.newWorld();
     this.world.rules = this.values;
     this.world.clock = this.world.epoch = this.values.dawn_minute ?? 0;

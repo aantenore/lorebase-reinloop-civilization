@@ -15,6 +15,7 @@ import { type Activity, advance, type Anim, type Dir, type ExecContext, type Pla
 export type Biome = 'grass' | 'forest' | 'water' | 'rock' | 'sand';
 export type EntityTier = 'opus' | 'sonnet' | 'haiku' | 'human';
 export type EntityKind = 'agent' | 'player' | 'crowd';
+export type AgeStage = 'child' | 'adult' | 'elder';
 /** Item code (Lorebase Resource). `food` and `wood` are the tile stocks. */
 export type Resource = string;
 
@@ -26,6 +27,12 @@ export const RT_RULE_KEYS = [
   'dawn_minute', 'dusk_minute', 'plan_horizon_minutes', 'replan_cooldown_minutes', 'base_move_speed', 'base_work_speed',
   'gather_minutes', 'build_minutes', 'eat_minutes', 'weak_speed_factor', 'critical_hunger', 'critical_hp_fraction', 'speech_radius',
   'max_shelter_level', 'shelter_decay_per_day', 'wild_distance', 'wild_damage', 'experiment_minutes', 'use_minutes', 'tool_wear_per_use', 'season_turn_minutes',
+  // barter, ages, skills and society
+  'offer_minutes', 'trade_trust_esteem', 'age_child_days', 'age_elder_days', 'founder_age_days', 'child_work_factor', 'child_move_factor',
+  'child_max_recipe_inputs', 'elder_work_factor', 'elder_move_factor', 'elder_esteem_weight', 'skill_gain_per_practice', 'skill_max_level',
+  'esteem_prior', 'esteem_prior_weight', 'opinion_half_life_days', 'esteem_judge_weight', 'reputation_inheritance', 'fame_gift',
+  'fame_recipe_supply', 'fame_insight_accepted', 'fame_discovery', 'fame_law_enacted', 'fame_half_life_days', 'esteem_vote_weight',
+  'insight_review_esteem_factor', 'insight_solo_approve_esteem', 'law_proposal_min_esteem',
 ] as const;
 export type RtRuleKey = (typeof RT_RULE_KEYS)[number];
 
@@ -110,6 +117,16 @@ export interface RtEntity {
   memory: string[];
   inbox: InboxItem[];
   lastBirthTurn: number;
+  /** Game clock (minutes) of birth; founders arrive already grown (rule founder_age_days). */
+  bornAt: number;
+  /** Life stage last reported (an `aged` event fires when it changes). */
+  stage: AgeStage;
+  /** Ids of the two parents, null for founders and players. */
+  parents: [string, string] | null;
+  /** Family (dynasty) id, null until the person belongs to one. */
+  family: string | null;
+  /** Times each recipe was followed (practice). */
+  skills: Record<string, number>;
   diedAtMs?: number;
   /** Players: brief work animation after an act. */
   busyUntilMinute?: number;
@@ -130,6 +147,8 @@ export type WorldEvent =
   | { type: 'decay'; id: string; item: string; amount: number; reason: 'spoiled' | 'broken' | 'worn' }
   | { type: 'used'; id: string; item: string }
   | { type: 'critical'; id: string; what: 'hunger' | 'hp' }
+  | { type: 'aged'; id: string; stage: AgeStage }
+  | { type: 'skill'; id: string; recipe: string; level: number }
   | { type: 'season'; season: Season }
   | { type: 'night'; night: boolean };
 
@@ -141,6 +160,12 @@ export interface ActResult {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** A recipe a child cannot follow: it needs tools or a station, or consumes more than `maxInputs` units. */
+export function tooComplexForChild(r: Pick<RecipeDef, 'tools' | 'station' | 'inputs'>, maxInputs: number): boolean {
+  const units = Object.values(r.inputs).reduce((s, n) => s + n, 0);
+  return r.tools.length > 0 || !!r.station || units > maxInputs;
+}
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export class RtWorld {
@@ -169,6 +194,8 @@ export class RtWorld {
   private rng: Rng;
   /** Who the child of two parents is (tier, model, kind), or undefined when no birth may happen. Default: like a random parent. */
   childOf?: (a: RtEntity, b: RtEntity, rnd: () => number) => { tier: EntityTier; model: string; kind: EntityKind } | undefined;
+  /** Barter (plan step `offer`): the game's offer book handles it. */
+  offerHook?: (e: RtEntity, to: string, give: unknown, want: unknown) => ActResult;
   private nextId = 1;
   private lastSeason: Season | undefined;
   private lastNight: boolean | undefined;
@@ -286,7 +313,8 @@ export class RtWorld {
     return p;
   }
 
-  spawn(spec: { id?: string; name: string; role: string; tier: EntityTier; model: string; kind: EntityKind; personality?: string }, near?: Point): RtEntity {
+  /** `ageDays`: age at arrival (default: rule founder_age_days, or age_elder_days for the elder role). */
+  spawn(spec: { id?: string; name: string; role: string; tier: EntityTier; model: string; kind: EntityKind; personality?: string; ageDays?: number; parents?: [string, string] }, near?: Point): RtEntity {
     let id = spec.id && !this.entities.has(spec.id) ? spec.id : `${spec.kind === 'player' ? 'p' : spec.kind === 'crowd' ? 'c' : 'a'}${this.nextId++}`;
     while (this.entities.has(id)) id = `e${this.nextId++}`;
     const at = this.spawnPoint(near);
@@ -295,7 +323,11 @@ export class RtWorld {
       id, name: spec.name, role: spec.role, tier: spec.tier, model: spec.model, kind: spec.kind, personality: spec.personality ?? '',
       groupId: null, x: at.x, y: at.y, dir: 's', anim: 'idle', hp: maxHp, maxHp, hunger: 0, inventory: newInventory(),
       tools: [], spoilAcc: {}, alive: true, input: { dx: 0, dy: 0 }, memory: [], inbox: [], lastBirthTurn: this.turn,
+      bornAt: 0, stage: 'adult', parents: spec.parents ?? null, family: null, skills: {},
     };
+    const ageDays = spec.ageDays ?? (spec.role === 'elder' ? this.r('age_elder_days') : this.r('founder_age_days'));
+    e.bornAt = this.clock - Math.max(0, ageDays) * DAY_MINUTES;
+    e.stage = this.stageOf(e);
     this.entities.set(id, e);
     this.namesUsed.add(spec.name);
     return e;
@@ -335,6 +367,28 @@ export class RtWorld {
     return (this.tile(t.x, t.y)?.shelter ?? 0) > 0;
   }
 
+  /** Age in game days. */
+  ageDays(e: Pick<RtEntity, 'bornAt'>): number {
+    return Math.max(0, (this.clock - e.bornAt) / DAY_MINUTES);
+  }
+
+  stageOf(e: Pick<RtEntity, 'bornAt'>): AgeStage {
+    const d = this.ageDays(e);
+    return d < this.r('age_child_days') ? 'child' : d >= this.r('age_elder_days') ? 'elder' : 'adult';
+  }
+
+  private ageFactor(e: RtEntity, what: 'work' | 'move'): number {
+    const stage = this.stageOf(e);
+    if (stage === 'adult') return 1;
+    return this.r(`${stage}_${what}_factor` as RtRuleKey);
+  }
+
+  /** Work-time multiplier of a recipe from practice: 1 / (1 + gain × min(practice, max)). */
+  skillFactor(e: Pick<RtEntity, 'skills'>, recipe: string): number {
+    const level = Math.min(e.skills[recipe] ?? 0, Math.max(0, this.r('skill_max_level')));
+    return 1 / (1 + Math.max(0, this.r('skill_gain_per_practice')) * level);
+  }
+
   /** Health factor in [weak_speed_factor, 1]. */
   private vigor(e: RtEntity): number {
     const weak = clamp(this.r('weak_speed_factor'), 0, 1);
@@ -344,11 +398,11 @@ export class RtWorld {
   /** Walking speed in tiles per real second. */
   speedOf(e: RtEntity): number {
     const role = this.roleOf(e.role)?.moveFactor ?? 1;
-    return round2(this.r('base_move_speed') * this.r('game_minutes_per_real_second') * role * this.vigor(e));
+    return round2(this.r('base_move_speed') * this.r('game_minutes_per_real_second') * role * this.vigor(e) * this.ageFactor(e, 'move'));
   }
 
   workSpeedOf(e: RtEntity): number {
-    return this.r('base_work_speed') * (this.roleOf(e.role)?.workFactor ?? 1) * this.vigor(e);
+    return this.r('base_work_speed') * (this.roleOf(e.role)?.workFactor ?? 1) * this.vigor(e) * this.ageFactor(e, 'work');
   }
 
   private execContext(): ExecContext {
@@ -359,7 +413,10 @@ export class RtWorld {
         return t && t.alive ? tileOf(t) : undefined;
       },
       durations: { gather: this.r('gather_minutes'), build: this.r('build_minutes'), eat: this.r('eat_minutes'), experiment: this.r('experiment_minutes'), use: this.r('use_minutes') },
-      craftMinutes: (code) => this.catalog.recipes.get(code)?.minutes,
+      craftMinutes: (code, who) => {
+        const minutes = this.catalog.recipes.get(code)?.minutes;
+        return minutes === undefined ? undefined : minutes * (who ? this.skillFactor(who as RtEntity, code) : 1);
+      },
       maxWaitMinutes: Math.max(1, this.r('plan_horizon_minutes')),
     };
   }
@@ -411,11 +468,16 @@ export class RtWorld {
     if (!t) return { ok: false, reason: 'outside' };
     const check = canCraft(this.catalog, e, recipe, { stations: stationsOf(t), discovered: new Set(this.discovered.keys()) });
     if ('error' in check) return { ok: false, reason: check.error };
+    if (this.stageOf(e) === 'child' && tooComplexForChild(check.recipe, this.r('child_max_recipe_inputs'))) return { ok: false, reason: 'too_young' };
     const out = applyCraft(this.catalog, e, check.recipe, this.r('tool_wear_per_use'));
     for (const [k] of Object.entries(out.structures)) t.structures[k] = this.catalog.resources.get(k)?.durability || 1;
     if (Object.keys(out.structures).length) this.onEvent({ type: 'tile', tile: t });
     this.onEvent({ type: 'craft', id: e.id, recipe, inputs: out.inputs, outputs: out.outputs, at: here, broken: out.broken });
     for (const b of out.broken) this.onEvent({ type: 'decay', id: e.id, item: b, amount: 1, reason: 'broken' });
+    const before = Math.min(e.skills[recipe] ?? 0, this.r('skill_max_level'));
+    e.skills[recipe] = (e.skills[recipe] ?? 0) + 1;
+    const level = Math.min(e.skills[recipe], this.r('skill_max_level'));
+    if (level !== before) this.onEvent({ type: 'skill', id: e.id, recipe, level });
     return { ok: true, amount: 1 };
   }
 
@@ -500,9 +562,17 @@ export class RtWorld {
       if (e.kind === 'player') this.movePlayer(e, dtSeconds);
       else this.runPlan(e, dtSeconds * this.timeScale, minutes, ctx);
       this.body(e, minutes, nowMs);
+      if (e.alive && e.kind !== 'player') this.age(e);
       if (e.alive) for (const [item, n] of Object.entries(spoil(this.catalog, e, e.spoilAcc, minutes, DAY_MINUTES))) this.onEvent({ type: 'decay', id: e.id, item, amount: n, reason: 'spoiled' });
     }
     this.wearTiles(minutes);
+  }
+
+  private age(e: RtEntity): void {
+    const stage = this.stageOf(e);
+    if (stage === e.stage) return;
+    e.stage = stage;
+    this.onEvent({ type: 'aged', id: e.id, stage });
   }
 
   /** Shelters and structures wear with the days. */
@@ -602,6 +672,8 @@ export class RtWorld {
         return this.use(e, String(args.item));
       case 'say':
         return this.say(e, String(args.to ?? 'all'), String(args.text ?? ''));
+      case 'offer':
+        return this.offerHook ? this.offerHook(e, String(args.to ?? ''), args.give, args.want) : { ok: false, reason: 'failed' };
       default:
         return { ok: true };
     }
@@ -705,7 +777,7 @@ export class RtWorld {
       b.inventory.food = round2(b.inventory.food - (cost - fromA));
       a.lastBirthTurn = b.lastBirthTurn = turn;
       used.add(a.id).add(b.id);
-      const child = this.spawn({ name: this.childName(), role: parent.role, ...spec }, ta);
+      const child = this.spawn({ name: this.childName(), role: parent.role, ...spec, ageDays: 0, parents: [a.id, b.id] }, ta);
       child.lastBirthTurn = turn;
       this.onEvent({ type: 'birth', child, parents: [a.id, b.id] });
     }

@@ -32,6 +32,11 @@ export interface HttpHost {
   observatory?(path: string, q: URLSearchParams): Promise<{ status: number; body: unknown } | undefined>;
   conversations?(q: URLSearchParams): Promise<unknown[]>;
   mind?(id: string): Promise<unknown | undefined>;
+  /** Society: people, families, opinions (only for privileged callers). */
+  societyView?(privileged: boolean): unknown;
+  /** Laws proposed by agents and the human decision on them. */
+  lawProposals?(): unknown[];
+  decideLawProposal?(id: string, verdict: 'approve' | 'reject', note: string): Promise<unknown>;
   /** Law keys the engine needs: they can be changed but not repealed. */
   engineKeys?(): readonly string[];
 }
@@ -184,6 +189,19 @@ export function createHttpServer(sim: HttpHost): Server {
       if (method === 'GET' && path.startsWith('/api/observatory/')) {
         const out = sim.observatory ? await sim.observatory(path, url.searchParams) : undefined;
         return out ? send(res, out.status, out.body) : unsupported();
+      }
+      if (method === 'GET' && path === '/api/society') {
+        if (!sim.societyView) return unsupported();
+        return send(res, 200, sim.societyView(!guard.apiToken || tokenMatches(bearer(req), guard.apiToken)));
+      }
+      if (method === 'GET' && path === '/api/law-proposals') return sim.lawProposals ? send(res, 200, sim.lawProposals()) : unsupported();
+      const lawDecision = method === 'POST' ? /^\/api\/law-proposals\/([^/]+)\/(approve|reject)$/.exec(path) : null;
+      if (lawDecision) {
+        if (!sim.decideLawProposal) return unsupported();
+        const body = (await readBody(req)) as { message?: string };
+        const note = typeof body.message === 'string' && body.message.trim() ? body.message.trim().slice(0, 200) : `${lawDecision[2]} from god mode`;
+        const out = await sim.decideLawProposal(decodeURIComponent(lawDecision[1]!), lawDecision[2] as 'approve' | 'reject', note);
+        return typeof out === 'string' ? send(res, out === 'unknown' ? 404 : 502, { ok: false, error: out }) : send(res, 200, { ok: true, proposal: out });
       }
       if (method === 'GET' && path === '/api/economy') return sim.economyView ? send(res, 200, sim.economyView()) : unsupported();
       const mem = method === 'GET' ? /^\/api\/agents\/([^/]+)\/memories$/.exec(path) : null;

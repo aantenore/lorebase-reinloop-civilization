@@ -19,7 +19,9 @@ export type Perception =
   | { kind: 'season'; season: Season }
   | { kind: 'rules' }
   | { kind: 'groupChanged' }
-  | { kind: 'groupFailed' };
+  | { kind: 'groupFailed' }
+  | { kind: 'offer'; from: RtEntity }
+  | { kind: 'offerAnswered'; with: RtEntity; status: string };
 
 /** Bounded concurrency for model calls. */
 export class Limiter {
@@ -83,6 +85,8 @@ const TRIGGER: Record<Perception['kind'], ReplanTrigger | undefined> = {
   rules: 'rulesChanged',
   groupChanged: undefined,
   groupFailed: undefined,
+  offer: 'offer',
+  offerAnswered: 'offerAnswered',
 };
 
 /** Mailbox with an awaitable "something arrived" signal. */
@@ -171,11 +175,13 @@ export class AgentMind {
       }
       const why = wanted.map((p) => this.host.why(p)).filter(Boolean).join('; ');
       const group = this.host.groupMind(this.e);
-      if (group && wanted.every((p) => p.kind !== 'groupFailed')) {
+      // An offer is answered by the person itself (its own tool), even inside a group.
+      const solo = wanted.some((p) => p.kind === 'groupFailed' || p.kind === 'offer');
+      if (group && !solo) {
         group.perceive(why, urgent);
         continue;
       }
-      await this.think(why, wanted.some((p) => p.kind === 'groupFailed'));
+      await this.think(why, solo);
     }
   }
 

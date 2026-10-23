@@ -208,6 +208,141 @@ rules:
     unit: usi
     category: economy
     text: "Ogni volta che un attrezzo viene usato perde questa durata; a zero si rompe."
+  - code: trade_trust_esteem
+    value: 1
+    unit: x
+    category: society
+    text: "Una proposta di scambio di chi è molto stimato resta valida più a lungo, di chi è poco stimato meno: la sua durata cresce o cala in proporzione a questo fattore."
+  - code: age_child_days
+    value: 4
+    unit: giorni
+    category: time
+    text: "Chi nasce è bambino fino a questa età in giorni; poi è adulto."
+  - code: age_elder_days
+    value: 40
+    unit: giorni
+    category: time
+    text: "Da questa età in giorni si è anziani."
+  - code: founder_age_days
+    value: 18
+    unit: giorni
+    category: time
+    text: "Chi arriva nel mondo senza esservi nato ha questa età in giorni; chi ha il ruolo di anziano arriva già anziano."
+  - code: child_work_factor
+    value: 0.5
+    unit: x
+    category: society
+    text: "Un bambino lavora a questa rapidità rispetto a un adulto."
+  - code: child_move_factor
+    value: 0.8
+    unit: x
+    category: society
+    text: "Un bambino cammina a questa velocità rispetto a un adulto."
+  - code: child_max_recipe_inputs
+    value: 2
+    unit: cose
+    category: economy
+    text: "Un bambino sa seguire solo ricette senza attrezzi né stazioni e con al massimo questo numero di cose da consumare."
+  - code: elder_work_factor
+    value: 0.8
+    unit: x
+    category: society
+    text: "Un anziano lavora a questa rapidità rispetto a un adulto."
+  - code: elder_move_factor
+    value: 0.8
+    unit: x
+    category: society
+    text: "Un anziano cammina a questa velocità rispetto a un adulto."
+  - code: elder_esteem_weight
+    value: 1.5
+    unit: x
+    category: society
+    text: "Il giudizio di un anziano su un'altra persona pesa questo numero di volte quello di un adulto."
+  - code: skill_gain_per_practice
+    value: 0.1
+    unit: x
+    category: economy
+    text: "Ogni volta che una persona segue una ricetta ci prende la mano: il tempo di quella ricetta si divide per uno più questa quota per ogni volta (fino al massimo della pratica)."
+  - code: skill_max_level
+    value: 10
+    unit: volte
+    category: economy
+    text: "La pratica in una ricetta smette di accorciarne il tempo dopo questo numero di volte."
+  - code: esteem_prior
+    value: 0.5
+    unit: quota
+    category: society
+    text: "La stima di chi arriva nel mondo, prima che qualcuno lo giudichi."
+  - code: esteem_prior_weight
+    value: 2
+    unit: giudizi
+    category: society
+    text: "La prima impressione su una persona vale questo numero di giudizi."
+  - code: opinion_half_life_days
+    value: 3
+    unit: giorni
+    category: society
+    text: "Il peso di un giudizio su una persona si dimezza dopo questi giorni."
+  - code: esteem_judge_weight
+    value: 1
+    unit: x
+    category: society
+    text: "Il giudizio di chi è stimato pesa di più: il peso cresce con la stima di chi giudica, in proporzione a questo fattore."
+  - code: reputation_inheritance
+    value: 0.3
+    unit: quota
+    category: society
+    text: "Chi nasce comincia con una stima pari a questa quota della stima media dei genitori."
+  - code: fame_gift
+    value: 1
+    unit: fama
+    category: society
+    text: "Fama che si guadagna a ogni dono fatto a un'altra persona."
+  - code: fame_recipe_supply
+    value: 2
+    unit: fama
+    category: society
+    text: "Fama che si guadagna dando a una persona di un altro ruolo una cosa che le sue ricette consumano."
+  - code: fame_insight_accepted
+    value: 3
+    unit: fama
+    category: society
+    text: "Fama che si guadagna quando un'idea condivisa entra nella coscienza del ruolo."
+  - code: fame_discovery
+    value: 5
+    unit: fama
+    category: society
+    text: "Fama che si guadagna scoprendo una tecnologia."
+  - code: fame_law_enacted
+    value: 4
+    unit: fama
+    category: society
+    text: "Fama che si guadagna quando una legge che si è proposta entra nel libro delle leggi."
+  - code: fame_half_life_days
+    value: 10
+    unit: giorni
+    category: society
+    text: "La fama di un'azione si dimezza dopo questi giorni."
+  - code: esteem_vote_weight
+    value: 1
+    unit: x
+    category: society
+    text: "Nei voti e nella scelta di chi guida un gruppo pesa la stima: il peso del voto cresce con la stima in proporzione a questo fattore."
+  - code: insight_review_esteem_factor
+    value: 2
+    unit: x
+    category: society
+    text: "Il giudizio su un'idea condivisa pesa la stima di chi la giudica per questo fattore; un'idea entra nella coscienza del ruolo quando le approvazioni pesano almeno uno."
+  - code: insight_solo_approve_esteem
+    value: 0.8
+    unit: quota
+    category: society
+    text: "Chi ha almeno questa stima approva da solo un'idea condivisa del suo ruolo."
+  - code: law_proposal_min_esteem
+    value: 0.7
+    unit: quota
+    category: society
+    text: "Chi ha almeno questa stima può proporre una legge; la proposta entra nel libro delle leggi solo se viene approvata."
 
 roles:
   - code: gatherer

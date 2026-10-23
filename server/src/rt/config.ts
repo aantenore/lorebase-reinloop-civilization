@@ -75,13 +75,38 @@ export interface InsightConfig {
   maxPendingPerRole: number;
   textMaxChars: number;
   listMax: number;
+  /** At startup: `reload` open insight Proposals into the review queue (closing those older than maxAgeHours), or `close` them all. */
+  reconcile: { mode: 'reload' | 'close'; maxAgeHours: number };
+}
+
+export interface BarterConfig {
+  enabled: boolean;
+  /** How often pending offers are checked for expiry (real ms). */
+  checkMs: number;
+  textMaxChars: number;
+}
+
+export interface SocietyConfig {
+  enabled: boolean;
+  /** `reputation` broadcast period (real ms); esteem, fame and ranks are recomputed then. */
+  broadcastMs: number;
+  maxOpinions: number;
+  reasonMaxChars: number;
+  /** What people hear about each other (bands of esteem and fame, never numbers). */
+  hearsay: { perPerson: number; maxKept: number; lowBelow: number; highAbove: number; famousAbove: number };
+  /** Laws proposed by agents: a branch + Proposal in Lorebase, never merged by the world. */
+  lawProposals: { branchPrefix: string; textMaxChars: number; pollMs: number; maxOpen: number; defaultValue: number };
+  /** Family records (Kind) written in batches like the Chronicle. */
+  families: { kind: string; flushMs: number };
 }
 
 export type ReplanTrigger = 'planExhausted' | 'stepFailed' | 'spokenTo' | 'critical' | 'nightfall' | 'dawn' | 'seasonChange' | 'rulesChanged' | 'offer' | 'offerAnswered';
 
 export interface GameConfig {
   ws: { path: string; maxPayloadBytes: number };
-  loop: { tickHz: number; stateHz: number; timeBroadcastMs: number; deadLingerMs: number; statusLogMs: number; tileFlushMs: number; timeScale: number };
+  /** `tiles` messages: changed tiles are coalesced and flushed at most every tileFlushMs. */
+  net: { tileFlushMs: number };
+  loop: { tickHz: number; stateHz: number; timeBroadcastMs: number; deadLingerMs: number; statusLogMs: number; timeScale: number };
   map: MapConfig;
   movement: MovementConfig;
   decisions: {
@@ -116,9 +141,11 @@ export interface GameConfig {
   };
   crowd: { count: number; tier: Tier; groupName: string; names: string[]; roles: string[]; personality: string };
   chronicle: { enabled: boolean; kind: string; operation: string; flushMs: number; maxBatch: number; maxQueue: number; retryBaseMs: number; retryMaxMs: number };
-  mock: { thinkDelayMs: number; replyDelayMs: number; wanderRadius: number; planSteps: number; experimentChance: number };
+  mock: { thinkDelayMs: number; replyDelayMs: number; wanderRadius: number; planSteps: number; experimentChance: number; offerChance: number; judgeChance: number; lawChance: number };
   brain: BrainConfig;
   insights: InsightConfig;
+  barter: BarterConfig;
+  society: SocietyConfig;
   economy: EconomyConfig & { insightOnDiscovery: boolean; chronicleEvent: string };
   memory: MemoryConfig;
   services: ServicesConfig;

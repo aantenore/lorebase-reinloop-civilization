@@ -49,6 +49,26 @@ export interface DecideHost {
   consulted(e: RtEntity, ev: ConsultEvent): void;
   /** What the person's private memory brings back for `query` (formatted lines; empty when none or unavailable). */
   recall(e: RtEntity, query: string): Promise<string[]>;
+  /** Barter: propose an exchange, answer one addressed to you. */
+  offer(e: RtEntity, to: string, give: unknown, want: unknown): ToolOutcome;
+  answerOffer(e: RtEntity, id: string, accept: boolean): ToolOutcome;
+  /** An opinion about someone (kept in the judge's private memory and in the society). */
+  judge(e: RtEntity, who: string, score: number, reason: string): ToolOutcome;
+  /** A law proposal (a Lorebase Proposal reviewed by humans). */
+  proposeLaw(e: RtEntity, input: { key?: unknown; text?: unknown; category?: unknown; value?: unknown }): Promise<ToolOutcome>;
+  /** Weight of a person's vote and claim to lead a group (from esteem). */
+  voteWeight(id: string): number;
+  /** Society in perception: what is said about a person, offers, hearsay (factual lines, no numbers). */
+  perceived: PerceivedSociety;
+}
+
+export interface PerceivedSociety {
+  /** What `e` has heard of `b` (empty when nothing). */
+  about(e: RtEntity, b: RtEntity): string;
+  /** Extra observation blocks for `e` (age, offers, hearsay). */
+  blocks(e: RtEntity): string[];
+  /** Pending offers addressed to `e` (ids), for the mock. */
+  offersFor(e: RtEntity): Array<{ id: string; want: Record<string, number> }>;
 }
 
 /** Why a decision produced nothing (logged and counted by the caller). */
@@ -104,6 +124,8 @@ export function planSchema(t: Translate, textMax: number, withWho = false, maxSt
       item: { type: 'string', description: t('rt.tools.stepItem') },
       items: { type: 'array', items: { type: 'string' }, description: t('rt.tools.stepItems') },
       recipe: { type: 'string', description: t('rt.tools.stepRecipe') },
+      give: { type: 'object', additionalProperties: { type: 'integer' }, description: t('rt.tools.offerGive') },
+      want: { type: 'object', additionalProperties: { type: 'integer' }, description: t('rt.tools.offerWant') },
       amount: { type: 'integer' },
       text: { type: 'string', maxLength: textMax },
       minutes: { type: 'number' },
@@ -152,6 +174,32 @@ function socialTools(host: DecideHost, e: RtEntity): Tool[] {
       const out = await host.shareInsight(e, String(text ?? ''), Number(confidence), String(evidence ?? ''));
       return { content: out.text, isError: !out.ok };
     }),
+    tool<{ to: string; give: unknown; want: unknown }>('scambia', t('rt.tools.offer'), {
+      to: `string: ${t('rt.tools.offerTo')}`,
+      give: { type: 'object', additionalProperties: { type: 'integer', minimum: 1 }, description: t('rt.tools.offerGive') },
+      want: { type: 'object', additionalProperties: { type: 'integer', minimum: 1 }, description: t('rt.tools.offerWant') },
+    }, ({ to, give, want }) => {
+      const out = host.offer(e, String(to ?? ''), give, want);
+      return { content: out.text, isError: !out.ok };
+    }),
+    tool<{ offer: string; accept: boolean }>('rispondi_scambio', t('rt.tools.answerOffer'), {
+      offer: `string: ${t('rt.tools.offerId')}`, accept: `boolean: ${t('rt.tools.offerAccept')}`,
+    }, ({ offer, accept }) => {
+      const out = host.answerOffer(e, String(offer ?? ''), accept === true || String(accept) === 'true');
+      return { content: out.text, isError: !out.ok };
+    }),
+    tool<{ chi: string; voto: number; motivo: string }>('giudica', t('rt.tools.judge'), {
+      chi: `string: ${t('rt.tools.judgeWho')}`, voto: `number: ${t('rt.tools.judgeScore')}`, motivo: `string: ${t('rt.tools.judgeReason')}`,
+    }, ({ chi, voto, motivo }) => {
+      const out = host.judge(e, String(chi ?? ''), Number(voto), String(motivo ?? ''));
+      return { content: out.text, isError: !out.ok };
+    }),
+    tool<{ key?: string; text: string; category: string; value?: number }>('proponi_legge', t('rt.tools.proposeLaw'), {
+      key: `string?: ${t('rt.tools.lawKey')}`, text: `string: ${t('rt.tools.lawText')}`, category: ['survival', 'economy', 'climate', 'society', 'time'], value: `number?: ${t('rt.tools.lawValue')}`,
+    }, async (args) => {
+      const out = await host.proposeLaw(e, args ?? {});
+      return { content: out.text, isError: !out.ok };
+    }),
     tool('review_insights', t('rt.tools.reviewInsights'), {}, () => host.reviewInsights(e), { risk: 'read' }),
     tool<{ code: string; verdict: 'approve' | 'reject'; reason: string }>('judge_insight', t('rt.tools.judgeInsight'), {
       code: `string: ${t('rt.tools.insightCode')}`, verdict: ['approve', 'reject'], reason: `string: ${t('rt.tools.insightReason')}`,
@@ -189,6 +237,31 @@ function mockPlanTurn(host: DecideHost, e: RtEntity, tc: TierDecision): MockTurn
       calls.push({ name: 'say', args: { to: partner.name, text: t('rt.mock.say.invite', { group: name }) } });
       calls.push({ name: 'form_group', args: { name, pattern: AGENT_PATTERNS[hash % AGENT_PATTERNS.length] } });
     }
+  }
+  // Barter, opinions and laws (a stand-in for a model: deterministic chances from config).
+  const roll = (salt: string) => ([...`${salt}${e.id}${w.day}${w.minute}`].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 11) % 1000) / 1000;
+  const m = host.cfg.mock;
+  for (const o of host.perceived.offersFor(e)) {
+    const can = Object.entries(o.want).every(([k, n]) => (e.inventory[k] ?? 0) >= n);
+    calls.push({ name: 'rispondi_scambio', args: { offer: o.id, accept: can } });
+  }
+  const near = w.living().filter((b) => b.id !== e.id && b.kind !== 'player' && Math.hypot(b.x - e.x, b.y - e.y) <= w.r('speech_radius'));
+  if (e.kind === 'agent' && near.length && roll('offer') < m.offerChance) {
+    const b = near[Math.floor(roll('who') * near.length)]!;
+    const mine = Object.keys(e.inventory).filter((k) => (e.inventory[k] ?? 0) >= 1);
+    const theirs = Object.keys(b.inventory).filter((k) => (b.inventory[k] ?? 0) >= 1 && !mine.includes(k));
+    const give = mine.find((k) => k !== 'food') ?? mine[0];
+    const want = theirs[0] ?? Object.keys(b.inventory).find((k) => k !== give && (b.inventory[k] ?? 0) >= 1);
+    if (give && want) calls.push({ name: 'scambia', args: { to: b.name, give: { [give]: 1 }, want: { [want]: 1 } } });
+  }
+  if (e.kind === 'agent' && near.length && roll('judge') < m.judgeChance) {
+    const b = near[Math.floor(roll('whom') * near.length)]!;
+    const pair = [...`${e.id}>${b.id}`].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 5) % 5;
+    const score = [-0.6, 0.2, 0.5, 0.8, 1][pair]!;
+    calls.push({ name: 'giudica', args: { chi: b.name, voto: score, motivo: t(`rt.mock.opinion.${score > 0 ? 'good' : 'bad'}`, { name: b.name }) } });
+  }
+  if (e.kind === 'agent' && roll('law') < m.lawChance) {
+    calls.push({ name: 'proponi_legge', args: { text: t('rt.mock.law', { name: e.name }), category: 'society' } });
   }
   // Shared consciousness: judge a peer's pending idea, or now and then share one.
   const pendingCode = /^- (\S+):/m.exec(host.reviewInsights(e))?.[1];
@@ -230,7 +303,7 @@ export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: 
     budget: { maxTurns: tc.maxTurns, maxToolCalls: tc.maxConsults + tc.maxTurns * 4 },
     toolSettings: { concurrency: 1 },
   });
-  const prompt = rtObservation(t, w, e, why, host.groups(), host.roleTitle, limitsOf(cfg), host.changedLaws(e));
+  const prompt = rtObservation(t, w, e, why, host.groups(), host.roleTitle, limitsOf(cfg), host.changedLaws(e), host.perceived);
   const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(cfg.decisions.timeoutMs), ...(stop ? [stop] : [])]);
   const res = await runner.run(prompt, { signal });
   host.ranModel(e, res);
@@ -290,7 +363,8 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
     groupLine(t, w, e, host.groups()),
     doingLine(t, e),
     t('rt.observation.why', { why: t('rt.why.spokenTo', { name: speaker.name }) }),
-    t('rt.observation.perceive', { look: look(t, w, e, host.groups(), host.roleTitle, limitsOf(cfg)) }),
+    t('rt.observation.perceive', { look: look(t, w, e, host.groups(), host.roleTitle, limitsOf(cfg), (b) => host.perceived.about(e, b)) }),
+    ...host.perceived.blocks(e),
     memoryBlock(t, e),
     recalledBlock(t, recalled),
     inboxBlock(t, e),

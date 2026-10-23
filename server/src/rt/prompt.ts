@@ -85,7 +85,8 @@ export function selfLine(t: Translate, w: RtWorld, e: RtEntity): string {
   });
 }
 
-export function look(t: Translate, w: RtWorld, e: RtEntity, groups: GroupView[], roleTitle: (code: string) => string, limits: PromptLimits): string {
+/** `about(b)`: what the person has heard of `b` (hearsay, appended to the person's line). */
+export function look(t: Translate, w: RtWorld, e: RtEntity, groups: GroupView[], roleTitle: (code: string) => string, limits: PromptLimits, about?: (b: RtEntity) => string): string {
   const here = tileOf(e);
   const ht = w.tile(here.x, here.y)!;
   const r = Math.max(0, Math.floor(w.r('vision_radius')));
@@ -106,7 +107,7 @@ export function look(t: Translate, w: RtWorld, e: RtEntity, groups: GroupView[],
       return t('rt.look.person', {
         name: b.name, role: roleTitle(b.role), group: g ? t('rt.look.personGroup', { group: g }) : '', x: bp.x, y: bp.y,
         hp: round1(b.hp), hunger: round1(b.hunger), food: b.inventory.food, busy: b.kind === 'player' ? t('rt.look.personPlayer') : '',
-      });
+      }) + (about?.(b) ?? '');
     });
   const shelters = w.tiles.filter((x) => x.shelter > 0).sort((a, b) => dist(a) - dist(b));
   const nearest = shelters[0] ? t('rt.look.shelterAt', { x: shelters[0].x, y: shelters[0].y, level: shelters[0].shelter, steps: dist(shelters[0]) }) : t('rt.look.noShelter');
@@ -162,6 +163,7 @@ export function groupLine(t: Translate, w: RtWorld, e: RtEntity, groups: GroupVi
 export function rtObservation(
   t: Translate, w: RtWorld, e: RtEntity, why: string, groups: GroupView[], roleTitle: (code: string) => string, limits: PromptLimits,
   changed: RuleChange[],
+  society?: { about(e: RtEntity, b: RtEntity): string; blocks(e: RtEntity): string[] },
 ): string {
   return [
     timeLine(t, w),
@@ -169,7 +171,8 @@ export function rtObservation(
     groupLine(t, w, e, groups),
     doingLine(t, e),
     t('rt.observation.why', { why }),
-    t('rt.observation.perceive', { look: look(t, w, e, groups, roleTitle, limits) }),
+    t('rt.observation.perceive', { look: look(t, w, e, groups, roleTitle, limits, society ? (b) => society.about(e, b) : undefined) }),
+    ...(society?.blocks(e) ?? []),
     inboxBlock(t, e),
     memoryBlock(t, e),
     changedBlock(t, changed),
