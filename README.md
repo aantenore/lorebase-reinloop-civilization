@@ -1,6 +1,6 @@
 # Lorebase × reinloop: a tiny civilization
 
-[![CI](https://github.com/aantenore/lorebase-reinloop-civilization/actions/workflows/ci.yml/badge.svg)](https://github.com/aantenore/lorebase-reinloop-civilization/actions/workflows/ci.yml)
+[![CI (manual)](https://github.com/aantenore/lorebase-reinloop-civilization/actions/workflows/ci.yml/badge.svg)](https://github.com/aantenore/lorebase-reinloop-civilization/actions/workflows/ci.yml)
 
 A handful of LLM agents must survive on a grid world: hunger, winters, shelters, births and
 deaths. The **laws of the world** (every gameplay number and its wording) and the **social roles**
