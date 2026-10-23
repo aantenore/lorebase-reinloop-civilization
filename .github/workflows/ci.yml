@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Unit tests only: anything that needs Lorebase, Herald, mnemo or a model runs when LIVE_TESTS=1.
+      LIVE_TESTS: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            game/package-lock.json
+            web/package-lock.json
+      - name: Install (reinloop is vendored in vendor/)
+        run: npm ci
+      - name: Unit tests (server and mnemo)
+        run: npm test
+      - name: Build the game client
+        working-directory: game
+        run: |
+          npm ci
+          npm run build
+      - name: Build the web dashboard
+        working-directory: web
+        run: |
+          npm ci
+          npm run build

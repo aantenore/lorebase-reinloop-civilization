@@ -21,10 +21,12 @@
     "herald:up": "bash scripts/herald-up.sh up",
     "herald:down": "bash scripts/herald-up.sh down",
     "game:server": "node server/src/game-main.ts",
-    "mnemo": "node services/mnemo/src/main.ts"
+    "mnemo": "node services/mnemo/src/main.ts",
+    "reinloop:pin": "bash scripts/reinloop-pin.sh",
+    "world:reset": "node scripts/world-reset.ts"
   },
   "dependencies": {
-    "reinloop": "file:../reinloop",
+    "reinloop": "file:vendor/reinloop-abdabae9.tgz",
     "ws": "^8.22.0"
   }
 }
