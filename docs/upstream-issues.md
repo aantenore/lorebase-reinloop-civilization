@@ -59,7 +59,7 @@ Friction found in the projects this demo builds on, worked around here without p
   already accepts `headers`.
 - **Workaround:** with `ANTHROPIC_WORKSPACE_ID` set, `server/src/agents/registry.ts` builds the
   provider itself: `withRetry(anthropic({ ..., headers: { 'anthropic-workspace-id': id } }))`.
-- **Status:** Resolved upstream in reinloop `51a2643` (pinned `0b8b688`). The preset sends `anthropic-workspace-id` from `ANTHROPIC_WORKSPACE_ID`; the hand-built provider (`realModel`) is removed and agents get the `"anthropic/<model>"` string.
+- **Status:** Resolved upstream in reinloop `51a2643` (pinned 0.2.0, `62a7a96`). The preset sends `anthropic-workspace-id` from `ANTHROPIC_WORKSPACE_ID`; the hand-built provider (`realModel`) is removed and agents get the `"anthropic/<model>"` string.
 
 ## 5. reinloop: the Anthropic provider ignores structured output (`responseSchema`)
 
@@ -208,4 +208,4 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Actual:** `TS2305: Module '"reinloop"' has no exported member 'McpToolInfo'` (it is declared in
   `src/mcp/client.ts:178` but not re-exported by `src/index.ts`).
 - **Workaround:** none needed at runtime (type-only import, erased by Node's type stripping).
-- **Status:** Resolved upstream in reinloop `0b8b688` (pinned): `McpToolInfo` is exported; `brain.ts` imports it as before.
+- **Status:** Resolved upstream in reinloop `0b8b688` (in 0.2.0, pinned): `McpToolInfo` is exported; `brain.ts` imports it as before.

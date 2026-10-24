@@ -26,7 +26,7 @@
     "world:reset": "node scripts/world-reset.ts"
   },
   "dependencies": {
-    "reinloop": "file:vendor/reinloop-0b8b6883.tgz",
+    "reinloop": "file:vendor/reinloop-62a7a966.tgz",
     "ws": "^8.22.0"
   }
 }
