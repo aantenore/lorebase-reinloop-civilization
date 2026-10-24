@@ -127,6 +127,8 @@ export interface SocietySnapshot {
   clock: number;
   people: Array<{ name: string; prior: number; esteem: number; fame: number; fameAt: number; skills: Record<string, number> }>;
   opinions: Array<{ from: string; to: string; score: number; reason: string; at: number }>;
+  /** Families of the people above, members and founder by name (absent in snapshots of older versions). */
+  families?: Array<{ id: string; name: string; founder: string; members: string[]; foundedDay: number; color?: string }>;
 }
 
 /** One witness's account: `who` kept (or broke) the social law `law`. */
@@ -245,13 +247,21 @@ export class Society {
       const to = name(o.to);
       return from && to ? [{ from, to, score: o.score, reason: o.reason, at: o.at }] : [];
     });
-    return { clock, people, opinions };
+    const families = [...this.families.values()].flatMap((f) => {
+      const members = f.members.flatMap((id) => {
+        const p = this.people.get(id);
+        return p?.alive && p.kind !== 'player' ? [p.name] : [];
+      });
+      return members.length ? [{ id: f.id, name: f.name, founder: name(f.founder) ?? f.founder, members, foundedDay: f.foundedDay, ...(f.color ? { color: f.color } : {}) }] : [];
+    });
+    return { clock, people, opinions, families };
   }
 
   /**
    * Brings back a saved society into the people present now (matched by name). Clocks are shifted
    * so that ages of opinions and fame are kept across restarts (the game clock restarts at dawn).
-   * Opinions whose judge or subject is not here stay in the store but are not loaded.
+   * Opinions whose judge or subject is not here stay in the store but are not loaded; families come
+   * back with the members present.
    * Returns the skills to give back to each person id. Pure apart from this society's state.
    */
   restore(saved: SocietySnapshot, clock: number): Map<string, Record<string, number>> {
@@ -270,6 +280,17 @@ export class Society {
       const from = byName.get(o.from);
       const to = byName.get(o.to);
       if (from && to) this.opinion({ from: from.id, to: to.id, score: o.score, reason: o.reason, at: Math.min(clock, o.at + shift) });
+    }
+    for (const sf of saved.families ?? []) {
+      const present = sf.members.flatMap((n) => {
+        const p = byName.get(n);
+        return p && !p.family ? [p] : [];
+      });
+      if (!present.length || this.families.has(sf.id)) continue;
+      const family: Family = { id: sf.id, name: sf.name, founder: byName.get(sf.founder)?.id ?? sf.founder, members: [], foundedDay: sf.foundedDay, ...(sf.color ? { color: sf.color } : {}) };
+      this.families.set(family.id, family);
+      for (const p of present) this.join(family, p.id);
+      this.familySeq++; // keeps the palette order of families founded later
     }
     return skills;
   }

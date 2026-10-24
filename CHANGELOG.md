@@ -10,7 +10,8 @@ First release. Requires Lorebase 0.2.3 or later (checkout next to this one) and 
   when a rule changes.
 - Groups (council, assembly, company, crowd) deciding through reinloop patterns, with per-member cost booking.
 - Economy from Lorebase: regional materials, recipes, technologies, crafting, gifts, asks and barter offers.
-- Society kept across restarts in mnemo: esteem, judgements, testimonies, families and dynasties.
+- Society kept across restarts in mnemo: esteem, opinions, fame, skills and families (by name).
+- Run log of every decision, reply and group decision kept in mnemo (`memory.runStore`, `GET /runs`).
 - Factual perception: wild zones, what others carry, causes of damage, missing recipe ingredients.
 - Law proposals and insights as Lorebase Proposals with links to their review page; `npm run world:reset`
   restores the seed with a single bulk delete.

@@ -133,4 +133,8 @@ test('society: saved per world, opinions capped, a dead judge forgotten but opin
   assert.deepEqual(after.people.map((x) => x.name), ['Ilse']);
   assert.deepEqual(after.opinions.map((o) => [o.from, o.to]), [['Ilse', 'Mara']]);
   assert.equal(store.societyLoad('other')!.people.length, 1);
+  assert.deepEqual(after.families, []);
+  const fam = { id: 's1-f1', name: 'Casata di Ilse', founder: 'Ilse', members: ['Ilse'], foundedDay: 2 };
+  store.societySave('w/main', { clock: 990, people: [], opinions: [], families: [fam] }, 10, 5);
+  assert.deepEqual(store.societyLoad('w/main')!.families, [fam]);
 });

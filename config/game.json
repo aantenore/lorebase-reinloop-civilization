@@ -344,8 +344,11 @@
     "pollMs": 1500,
     "recallLimit": 6,
     "textMaxChars": 400,
-    "worldIndex": true,
     "runStore": true,
+    "runSkipEvents": [
+      "text_delta",
+      "thinking_delta"
+    ],
     "runFlushMs": 1000,
     "ingest": {
       "planned": {

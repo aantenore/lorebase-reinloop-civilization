@@ -174,8 +174,11 @@ async function main(): Promise<void> {
         const person = (p: unknown) => isObj(p) && typeof p.name === 'string' && p.name !== '' && fin(p.prior) && fin(p.esteem) && fin(p.fame) && fin(p.fameAt)
           && isObj(p.skills) && Object.values(p.skills).every(fin);
         const opinion = (o: unknown) => isObj(o) && typeof o.from === 'string' && typeof o.to === 'string' && fin(o.score) && typeof o.reason === 'string' && fin(o.at);
-        if (!isObj(b) || !fin(b.clock) || !Array.isArray(b.people) || !b.people.every(person) || !Array.isArray(b.opinions) || !b.opinions.every(opinion) || !fin(b.maxOpinions)) {
-          throw new HttpError(400, 'body must be {clock, people:[{name, prior, esteem, fame, fameAt, skills}], opinions:[{from, to, score, reason, at}], maxOpinions}');
+        const family = (f: unknown) => isObj(f) && typeof f.id === 'string' && typeof f.name === 'string' && typeof f.founder === 'string' && fin(f.foundedDay)
+          && Array.isArray(f.members) && f.members.every((m) => typeof m === 'string') && (f.color === undefined || typeof f.color === 'string');
+        if (!isObj(b) || !fin(b.clock) || !Array.isArray(b.people) || !b.people.every(person) || !Array.isArray(b.opinions) || !b.opinions.every(opinion) || !fin(b.maxOpinions)
+          || (b.families !== undefined && !(Array.isArray(b.families) && b.families.every(family)))) {
+          throw new HttpError(400, 'body must be {clock, people:[{name, prior, esteem, fame, fameAt, skills}], opinions:[{from, to, score, reason, at}], families?:[{id, name, founder, members, foundedDay, color?}], maxOpinions}');
         }
         store.societySave(world, b as never, Number(b.maxOpinions), Date.now());
         return send(res, 200, { ok: true });

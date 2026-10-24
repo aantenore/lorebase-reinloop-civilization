@@ -256,6 +256,7 @@ export class Game {
         const err = await this.insights.judge(code, { name: e.name, role: e.role }, verdict, reason);
         return err ? { ok: false, text: this.t('rt.act.insightJudgeFailed', { reason: this.insightReason(err) }) } : { ok: true, text: this.t('rt.act.insightJudged') };
       },
+      runSinks: () => this.mnemo.runSinks(),
       ranModel: (who, res) => this.usage.track(who, res),
       deliberated: (g, memberId, role, text) => {
         const name = this.world.entities.get(memberId)?.name ?? memberId;

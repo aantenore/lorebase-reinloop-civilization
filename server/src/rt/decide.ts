@@ -2,7 +2,7 @@
 // join_group, leave_group; the run ends as soon as a plan is committed) and a quick REPLY call
 // when spoken to (streamed text, optional `rethink`). Each person uses its own model; the mock
 // provider is only an offline fallback.
-import { agent, type MockTurn, mockProvider, type ModelRef, type ModelRequest, type Tool, tool } from 'reinloop';
+import { agent, type MockTurn, mockProvider, type ModelRef, type ModelRequest, type Sink, type Tool, tool } from 'reinloop';
 import type { SimConfig } from '../config.ts';
 import type { Translate } from '../i18n.ts';
 import type { Role, RuleChange } from '../lorebase/rules.ts';
@@ -42,6 +42,8 @@ export interface DecideHost {
   judgeInsight(e: RtEntity, code: string, verdict: 'approve' | 'reject', reason: string): Promise<ToolOutcome>;
   /** A group member said something while the group deliberated (reinloop pattern trace). */
   deliberated(g: { id: string; pattern: string }, memberId: string, role: string, text: string): void;
+  /** Sinks every model run reports to (run logs kept in mnemo). */
+  runSinks(): Sink[];
   /** A model run ended (usage and cost per agent, for the Observatory). */
   ranModel(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number }): void;
   /** A person consulted Lorebase (shown to clients). */
@@ -350,7 +352,7 @@ export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: 
   // What the body went through is counted again from this thought on.
   w.resetBody(e);
   const signal = AbortSignal.any([AbortSignal.timeout(decisionTimeoutMs(cfg, w)), ...(stop ? [stop] : [])]);
-  const handle = runner.stream(prompt, { signal });
+  const handle = runner.stream(prompt, { signal, sinks: host.runSinks() });
   let thought = '';
   for await (const ev of handle) if (ev.type === 'thinking_delta') thought += (ev.data as { text: string }).text;
   const res = await handle.result;
@@ -418,7 +420,7 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
   ].filter(Boolean).join('\n\n');
   let text = '';
   const signal = AbortSignal.any([AbortSignal.timeout(cfg.conversation.replyTimeoutMs), ...(stop ? [stop] : [])]);
-  const handle = runner.stream(prompt, { signal });
+  const handle = runner.stream(prompt, { signal, sinks: host.runSinks() });
   for await (const ev of handle) {
     // Speech before and after a consultation is one answer; nothing is said after rethink.
     if (rethink) continue;

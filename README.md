@@ -177,21 +177,22 @@ but people can read it like every law, so it works as a social law they may foll
 
 ## Known limits
 
-- Rules apply from the tick after the change is seen; a tick in flight finishes on the old laws.
-- Agents act concurrently on one shared world: two people may race for the same food.
-- Model cost grows with the roster: each tick sends every living person the full law book.
-- The colony is kept in memory; a server restart starts a new world (the roster is kept in `data/`).
+- Turn-based simulation (`npm run dev`): rules apply from the tick after the change is seen (a tick in
+  flight finishes on the old laws); agents act concurrently on one shared world, so two people may race
+  for the same food; each tick sends every living person the full law book, so model cost grows with the
+  roster; the colony is kept in memory, so a restart starts a new world (the roster is kept in `data/`).
 - Real-time world: the step count is a suggestion in the `commit_plan` schema; `maxSteps` per tier only
   caps what is kept. People do not collide. Pending insights are tracked in memory: after a restart
   at startup the open `role/` Proposals are reloaded into the review queue (older than
   `insights.reconcile.maxAgeHours`, or with mode `close`, they are closed) and leaked `role/` and `law/`
   branches are deleted. Without Herald the agents run with no Lorebase tools (and so without knowing the laws).
 - Economy: catalog edits made in Lorebase while the world runs are read at the next start only.
-  Discoveries persist in `main` across worlds (`npm run world:reset` hides them again). Births still count
-  years in body turns (`turn_minutes`).
+  Discoveries persist in `main` across worlds (`npm run world:reset` hides them again).
+- Births: a couple may have a child once every `winter_every_ticks` body turns (`turn_minutes`), not once per seasonal year
+  (`season_turn_minutes`), so that births happen in runs of a few game days.
 - Society: obeying a social law counts only through witnesses' accounts (`testimonia`), never checked by
-  the world. Families live in the server's memory (a restart founds new ones); Family records and lineage
-  (Chronicle births) are kept in Lorebase.
+  the world. A restart brings back the founders of the roster (by name) with their standing and families;
+  people born during a run are in the Chronicle and in `Family` records, but do not come back.
 - Herald pins agents to `main` (server-side argument override plus `LOREBASE_BRANCH` on Herald); a
   `lorebase_diff` between two revision ids of the hidden branch is not blocked, but those ids are
   never shown to agents.
@@ -347,10 +348,10 @@ with `rispondi_scambio`: accepted, the items move as a gift (`gave`: memories, f
   `fame_law_respected`/`fame_law_breached`, those nearby hear the reason as hearsay, one account per witness,
   person and law within `society.testimony.windowMinutes`; a breach told by
   `society.testimony.chronicleMinWitnesses` distinct witnesses enters the Chronicle (`law_breach`).
-- **Persistence.** Opinions, esteem (and prior), fame and skills are saved in mnemo's SQLite
+- **Persistence.** Opinions, esteem (and prior), fame, skills and families (members and founder by name) are saved in mnemo's SQLite
   (`society_*` tables, per world id `society.persist.world`, default `<domain>/<branch>`) every
   `society.persist.flushMs` and at shutdown, and brought back by name at start (game clocks shifted so ages
-  are kept). A death deletes that person's standing and the opinions it held; others' opinions about it
+  are kept; a family comes back with the members present). A death deletes that person's standing and the opinions it held; others' opinions about it
   stay (memories of others). `npm run world:reset` wipes them with the rest of mnemo unless `--keep-memory`.
 - **Ages.** `child` until `age_child_days`, `elder` from `age_elder_days` (game days); founders arrive at
   `founder_age_days` (the elder role already elder). Children work at `child_work_factor`, walk at
@@ -390,8 +391,11 @@ compaction (cost-capped Haiku calls, heuristic offline) rewrites faded memories 
 them, merges similar faded ones into a gist and forgets the faintest; caps on memories per agent and
 DB size. The backend is the only client: agents' `remember`/`recall` tools, plus what each agent lives
 (plans, crafts, gifts, discoveries, failures, speech heard; importance/emotion per kind in
-`memory.ingest`). Also stores reinloop run logs (`/runs`, retention) — not wired yet (TODO), nor the
-indexing of insights/Chronicle for a world search (TODO).
+`memory.ingest`). It also keeps the reinloop run log of every decision, reply and group decision
+(`memory.runStore`; `GET /runs`, `GET /runs/:id/events`; streamed deltas left out, `memory.runSkipEvents`;
+retention `runs.maxRuns`/`runs.maxAgeHours` in `config/mnemo.json`); a death deletes that person's runs.
+The world's shared knowledge (laws, Chronicle, accepted insights) is not copied there: agents search it
+in Lorebase (`lorebase_search`, `lorebase_query`).
 
 ### Protocol (WebSocket `/ws`, JSON)
 

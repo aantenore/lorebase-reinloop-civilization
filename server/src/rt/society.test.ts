@@ -156,6 +156,25 @@ test('society: snapshot and restore by name, with clocks shifted and the dead le
   assert.equal(s.familyDto(fam.family).color, '#111');
 });
 
+test('society: families survive a restart with the members present, founder by name', () => {
+  const s = new Society(r, { maxOpinions: 10, hearsayKept: 2, familyColors: ['#111', '#222'] });
+  for (const [id, name] of [['a', 'Ada'], ['b', 'Bruno'], ['c', 'Cira']]) s.add({ id, name, role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });
+  s.esteem.set('a', 0.9);
+  const { family } = s.familyForBirth('c', 'a', 'b', 2, (n) => `Casata di ${n}`, 's1');
+  s.died('b', 10);
+  const snap = s.snapshot(100, () => ({}));
+  assert.deepEqual(snap.families, [{ id: family.id, name: 'Casata di Ada', founder: 'Ada', members: ['Ada', 'Cira'], foundedDay: 2, color: '#111' }]);
+  const t = new Society(r, { maxOpinions: 10, hearsayKept: 2, familyColors: ['#111', '#222'] });
+  t.add({ id: 'x', name: 'Ada', role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });
+  t.add({ id: 'y', name: 'Dino', role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });
+  t.add({ id: 'z', name: 'Eva', role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });
+  t.restore(snap, 0);
+  const back = t.families.get(family.id)!;
+  assert.deepEqual([back.founder, back.members, t.people.get('x')!.family], ['x', ['x'], family.id]);
+  const next = t.familyForBirth('n', 'y', 'z', 3, (n) => n, 's2');
+  assert.equal(t.familyDto(next.family).color, '#222');
+});
+
 test('testimonies: one per witness, fame both ways, a breach chronicled once at enough witnesses', () => {
   const s = new Society(r, { maxOpinions: 100, hearsayKept: 5 });
   s.add({ id: 'a', name: 'A', role: 'gatherer', tier: 'haiku', kind: 'agent', bornAt: 0, parents: null });

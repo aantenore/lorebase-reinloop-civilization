@@ -98,6 +98,17 @@ export interface SocietyState {
   clock: number;
   people: Array<{ name: string; prior: number; esteem: number; fame: number; fameAt: number; skills: Record<string, number> }>;
   opinions: Array<{ from: string; to: string; score: number; reason: string; at: number }>;
+  /** Families with their members' names (replaced at every save). */
+  families?: SavedFamily[];
+}
+
+export interface SavedFamily {
+  id: string;
+  name: string;
+  founder: string;
+  members: string[];
+  foundedDay: number;
+  color?: string;
 }
 
 /** One line of speech, thought or group deliberation (`from`/`to` are names; `to` may be 'all'). */
@@ -141,6 +152,9 @@ export class Store {
     this.db = new DatabaseSync(cfg.db.path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
     this.db.exec(SCHEMA);
+    // Added after the first release: databases created before keep working.
+    const cols = (this.db.prepare('PRAGMA table_info(society_worlds)').all() as Raw[]).map((c) => c.name);
+    if (!cols.includes('families')) this.db.exec("ALTER TABLE society_worlds ADD COLUMN families TEXT NOT NULL DEFAULT '[]'");
   }
 
   close(): void {
@@ -346,7 +360,7 @@ export class Store {
   // --- society (opinions, esteem, fame, skills per world) ---------------------------------
 
   societyLoad(world: string): SocietyState | undefined {
-    const meta = this.db.prepare('SELECT clock FROM society_worlds WHERE world = ?').get(world) as { clock: number } | undefined;
+    const meta = this.db.prepare('SELECT clock, families FROM society_worlds WHERE world = ?').get(world) as { clock: number; families: string } | undefined;
     if (!meta) return undefined;
     const people = (this.db.prepare('SELECT * FROM society_people WHERE world = ? ORDER BY name').all(world) as Raw[]).map((r) => ({
       name: String(r.name), prior: Number(r.prior), esteem: Number(r.esteem), fame: Number(r.fame), fameAt: Number(r.fame_at), skills: JSON.parse(String(r.skills)) as Record<string, number>,
@@ -354,13 +368,14 @@ export class Store {
     const opinions = (this.db.prepare('SELECT * FROM society_opinions WHERE world = ? ORDER BY seq').all(world) as Raw[]).map((r) => ({
       from: String(r.judge), to: String(r.target), score: Number(r.score), reason: String(r.reason), at: Number(r.at),
     }));
-    return { clock: Number(meta.clock), people, opinions };
+    return { clock: Number(meta.clock), people, opinions, families: JSON.parse(meta.families) as SavedFamily[] };
   }
 
   /** Upserts people, appends new opinions (keeping the latest `maxOpinions` of the world), records the clock. */
   societySave(world: string, s: SocietyState, maxOpinions: number, nowMs: number): void {
     this.tx(() => {
-      this.db.prepare('INSERT INTO society_worlds (world, clock, updated_ms) VALUES (?, ?, ?) ON CONFLICT(world) DO UPDATE SET clock = excluded.clock, updated_ms = excluded.updated_ms').run(world, s.clock, nowMs);
+      this.db.prepare('INSERT INTO society_worlds (world, clock, updated_ms, families) VALUES (?, ?, ?, ?) ON CONFLICT(world) DO UPDATE SET clock = excluded.clock, updated_ms = excluded.updated_ms, families = excluded.families')
+        .run(world, s.clock, nowMs, JSON.stringify(s.families ?? []));
       const person = this.db.prepare(`INSERT INTO society_people (world, name, prior, esteem, fame, fame_at, skills) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(world, name) DO UPDATE SET prior = excluded.prior, esteem = excluded.esteem, fame = excluded.fame, fame_at = excluded.fame_at, skills = excluded.skills`);
       for (const p of s.people) person.run(world, p.name, p.prior, p.esteem, p.fame, p.fameAt, JSON.stringify(p.skills ?? {}));

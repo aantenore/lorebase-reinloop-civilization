@@ -1,6 +1,7 @@
 // Client of mnemo, the private memory service (services/mnemo). Agents never reach it
 // directly: their remember/recall tools and the world's own memories of what they lived go
 // through here. Failures never stop the world: a memory that cannot be stored is lost.
+import type { RunEvent, Sink } from 'reinloop';
 import type { MemoryConfig } from './config.ts';
 import type { SocietySnapshot } from './society.ts';
 
@@ -158,6 +159,29 @@ export class Mnemo {
 
   private lines: ConversationLine[] = [];
   private lineTimer: NodeJS.Timeout | undefined;
+  private runEvents: RunEvent[] = [];
+  private runTimer: NodeJS.Timeout | undefined;
+
+  /** Sink keeping reinloop run logs in mnemo (`runStore`), minus the event types in `runSkipEvents`. */
+  runSinks(): Sink[] {
+    if (!this.enabled || !this.cfg.runStore) return [];
+    const skip = new Set(this.cfg.runSkipEvents);
+    return [{
+      name: 'mnemo-runs',
+      onEvent: (ev) => {
+        if (skip.has(ev.type)) return;
+        this.runEvents.push(ev);
+        this.runTimer ??= setTimeout(() => void this.flushRuns(), this.cfg.runFlushMs);
+      },
+    }];
+  }
+
+  private async flushRuns(): Promise<void> {
+    this.runTimer = undefined;
+    const events = this.runEvents.splice(0);
+    if (!events.length) return;
+    await this.req('POST', '/runs/events', { events }).catch((err) => this.fail(err));
+  }
 
   /** Queues a line of speech/thought/deliberation; flushed in batches. */
   converse(line: ConversationLine): void {
@@ -204,6 +228,7 @@ export class Mnemo {
 
   stop(): void {
     void this.flushLines();
+    void this.flushRuns();
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
   }

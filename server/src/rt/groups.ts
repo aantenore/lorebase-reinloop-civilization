@@ -634,7 +634,7 @@ export class GroupManager {
     };
     const { runner } = this.build(g, members);
     const task = this.situation(g, members, why, g.pattern === 'crowd');
-    const res = await runner.run(task, { sinks: [sink], signal: AbortSignal.timeout(decisionTimeoutMs(this.cfg, this.host.world())) });
+    const res = await runner.run(task, { sinks: [sink, ...this.host.runSinks()], signal: AbortSignal.timeout(decisionTimeoutMs(this.cfg, this.host.world())) });
     const lead = members[0]!;
     book({ id: g.id, name: g.name, model: this.models.get(`${g.id}${SEP}leader`) ?? lead.model, tier: `group:${g.pattern}` }, nested.remainder(res));
     console.log(`[group ${g.name}] ${g.pattern} decision: ${res.status}, ${Math.max(calls, 1)} model run(s), estimated cost $${costUsd.toFixed(4)}`);

@@ -50,10 +50,11 @@ export interface MemoryConfig {
   pollMs: number;
   recallLimit: number;
   textMaxChars: number;
-  /** Index accepted insights and Chronicle entries for `ricorda_mondo`. */
-  worldIndex: boolean;
   /** Keep reinloop run logs in mnemo (best effort). */
   runStore: boolean;
+  /** Run event types not kept (streamed deltas: many and redundant with the final messages). */
+  runSkipEvents: string[];
+  /** Batching delay of conversation lines and run events sent to mnemo. */
   runFlushMs: number;
   /** Retries of a request that found nothing listening, with exponential backoff from retryBaseMs. */
   retries: number;
