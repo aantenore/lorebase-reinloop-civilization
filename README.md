@@ -93,8 +93,9 @@ deterministic heuristic instead of a model, so the demo runs offline; status rep
 
 ## Run
 
-Requirements: Node ≥ 22.18, Docker and the `lorebase` checkout next to this one (Keeper is built
-from it). reinloop is pinned: `vendor/reinloop-<sha>.tgz`, a packed build of one reinloop commit, is
+Requirements: Node ≥ 22.18, Docker and the `lorebase` checkout (0.2.3 or later: `world:reset` uses its
+`delete_records`) next to this one (Keeper is built from it). reinloop is pinned (0.2.0):
+`vendor/reinloop-<sha>.tgz`, a packed build of one reinloop commit, is
 the dependency, so `npm ci` works anywhere (CI included).
 
 To move to a newer reinloop: `npm run reinloop:pin` (snapshot of `../reinloop` HEAD) or
