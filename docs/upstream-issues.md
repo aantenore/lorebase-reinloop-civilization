@@ -59,7 +59,7 @@ Friction found in the projects this demo builds on, worked around here without p
   already accepts `headers`.
 - **Workaround:** with `ANTHROPIC_WORKSPACE_ID` set, `server/src/agents/registry.ts` builds the
   provider itself: `withRetry(anthropic({ ..., headers: { 'anthropic-workspace-id': id } }))`.
-- **Status:** Resolved upstream in reinloop `51a2643` (pinned 0.2.0, `62a7a96`). The preset sends `anthropic-workspace-id` from `ANTHROPIC_WORKSPACE_ID`; the hand-built provider (`realModel`) is removed and agents get the `"anthropic/<model>"` string.
+- **Status:** Resolved upstream in reinloop `51a2643` (pinned 0.2.0, `512adcb`). The preset sends `anthropic-workspace-id` from `ANTHROPIC_WORKSPACE_ID`; the hand-built provider (`realModel`) is removed and agents get the `"anthropic/<model>"` string.
 
 ## 5. reinloop: the Anthropic provider ignores structured output (`responseSchema`)
 

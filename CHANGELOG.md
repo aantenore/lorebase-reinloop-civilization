@@ -3,7 +3,7 @@
 ## 0.1.0 - 2026-10-24
 
 First release. Requires Lorebase 0.2.3 or later (checkout next to this one) and pins reinloop 0.2.0
-(`vendor/reinloop-62a7a966.tgz`).
+(`vendor/reinloop-512adcbe.tgz`).
 
 - Real-time world: people with bodies (hunger, health, age), a mind per person (one reinloop agent each) and
   reflexes that act while minds think; laws and social roles read from Lorebase at every turn and applied live
