@@ -1,0 +1,6 @@
+2026-10-26T08:47:40.781Z run4 started: GAME_PROFILE=economy GAME_BUDGET_USD=10 GAME_TIME_SCALE=6 (stops: budget, 35 real minutes, 10 game days)
+2026-10-26T08:56:10.942Z run4 real 10.1m | day 3 18:07 (2.5 game days) | decisions 185+16g replies 66 failures 0 | cost $0.864 cache hit 78.5% saved $0.590 | pop 5 births 0 deaths 3 | crafts 16 discoveries 0 trades 16 | judgements 0 testimonies 0 insights 0 law proposals 0
+2026-10-26T09:06:11.057Z run4 real 20.2m | day 6 06:07 (5 game days) | decisions 452+16g replies 119 failures 2 | cost $1.795 cache hit 78.5% saved $1.527 | pop 11 births 6 deaths 3 | crafts 19 discoveries 0 trades 38 | judgements 0 testimonies 0 insights 0 law proposals 0
+2026-10-26T09:16:11.085Z run4 real 30.2m | day 8 18:08 (7.5 game days) | decisions 830+16g replies 164 failures 2 | cost $2.831 cache hit 78.9% saved $2.552 | pop 14 births 12 deaths 6 | crafts 20 discoveries 0 trades 64 | judgements 0 testimonies 0 insights 0 law proposals 0
+2026-10-26T09:21:11.096Z run4 real 35.2m | day 10 00:08 (8.8 game days) | decisions 1002+16g replies 187 failures 2 | cost $3.313 cache hit 79.0% saved $3.007 | pop 14 births 16 deaths 10 | crafts 21 discoveries 0 trades 71 | judgements 0 testimonies 0 insights 0 law proposals 0
+2026-10-26T09:21:11.096Z run4 stopping: 35 real minutes

@@ -1,0 +1,201 @@
+{
+ "lorebase": {
+  "url": "http://127.0.0.1:8180",
+  "domain": "world",
+  "branch": "main",
+  "revision": "3f99465ed84618630bc02faac961a729d41681c016c12781da79704ad7af51ca",
+  "counts": {
+   "Rule": 70,
+   "Role": 6,
+   "Chronicle": 38,
+   "Recipe": 10,
+   "Resource": 20
+  }
+ },
+ "mnemo": {
+  "connected": true,
+  "memories": 3450,
+  "perAgent": [
+   {
+    "agentId": "a1",
+    "name": "Ilse",
+    "count": 391,
+    "avgFidelity": 0.955,
+    "gists": 0
+   },
+   {
+    "agentId": "a2",
+    "name": "Tomas",
+    "count": 350,
+    "avgFidelity": 0.949,
+    "gists": 0
+   },
+   {
+    "agentId": "a5",
+    "name": "Vera",
+    "count": 358,
+    "avgFidelity": 0.947,
+    "gists": 0
+   },
+   {
+    "agentId": "a7",
+    "name": "Rudi",
+    "count": 350,
+    "avgFidelity": 0.943,
+    "gists": 0
+   },
+   {
+    "agentId": "a8",
+    "name": "Nia",
+    "count": 385,
+    "avgFidelity": 0.944,
+    "gists": 0
+   },
+   {
+    "agentId": "a10",
+    "name": "Gia",
+    "count": 392,
+    "avgFidelity": 0.952,
+    "gists": 0
+   },
+   {
+    "agentId": "a12",
+    "name": "Quin",
+    "count": 375,
+    "avgFidelity": 0.954,
+    "gists": 0
+   },
+   {
+    "agentId": "a14",
+    "name": "Kit",
+    "count": 293,
+    "avgFidelity": 0.957,
+    "gists": 0
+   },
+   {
+    "agentId": "a15",
+    "name": "Cato",
+    "count": 269,
+    "avgFidelity": 0.962,
+    "gists": 0
+   },
+   {
+    "agentId": "a17",
+    "name": "Ari",
+    "count": 234,
+    "avgFidelity": 0.97,
+    "gists": 0
+   },
+   {
+    "agentId": "a21",
+    "name": "Fen",
+    "count": 43,
+    "avgFidelity": 0.995,
+    "gists": 0
+   },
+   {
+    "agentId": "a22",
+    "name": "Oz",
+    "count": 5,
+    "avgFidelity": 0.999,
+    "gists": 0
+   },
+   {
+    "agentId": "a23",
+    "name": "Bex",
+    "count": 5,
+    "avgFidelity": 0.999,
+    "gists": 0
+   }
+  ],
+  "dbBytes": 17076224,
+  "lastCompaction": null,
+  "embedder": {
+   "name": "transformers:Xenova/multilingual-e5-small:q8",
+   "dim": 384,
+   "fallback": false
+  }
+ },
+ "reinloop": {
+  "decisions": 990,
+  "groupDecisions": 16,
+  "replies": 185,
+  "failures": 2,
+  "thoughts": 984,
+  "running": 4,
+  "budgetMaxUsd": 10,
+  "budgetPaused": 0,
+  "runs": 1257,
+  "tokens": {
+   "input": 20612901,
+   "output": 1298238
+  },
+  "costUsd": {
+   "total": 3.280609,
+   "byModel": {
+    "anthropic/claude-haiku-5-5": 1.25083,
+    "anthropic/claude-sonnet-5-5": 2.029782
+   },
+   "byTier": {
+    "haiku": 1.209175,
+    "group:council": 0.353004,
+    "group:assembly": 0.024558,
+    "sonnet": 1.693875
+   }
+  },
+  "cache": {
+   "readTokens": 16287527,
+   "writeTokens": 4311372,
+   "write1hTokens": 0,
+   "hitRatio": 0.7902,
+   "savedUsd": 2.976311,
+   "byModel": {
+    "anthropic/claude-haiku-5-5": {
+     "readTokens": 15217447,
+     "writeTokens": 3865859,
+     "write1hTokens": 0,
+     "hitRatio": 0.7969,
+     "savedUsd": 1.272924
+    },
+    "anthropic/claude-sonnet-5-5": {
+     "readTokens": 1070080,
+     "writeTokens": 445513,
+     "write1hTokens": 0,
+     "hitRatio": 0.7048,
+     "savedUsd": 1.703388
+    }
+   },
+   "byTier": {
+    "haiku": {
+     "readTokens": 14940670,
+     "writeTokens": 3771692,
+     "write1hTokens": 0,
+     "hitRatio": 0.7982,
+     "savedUsd": 1.250368
+    },
+    "group:council": {
+     "readTokens": 229748,
+     "writeTokens": 103249,
+     "write1hTokens": 0,
+     "hitRatio": 0.6854,
+     "savedUsd": 0.137417
+    },
+    "group:assembly": {
+     "readTokens": 134937,
+     "writeTokens": 56185,
+     "write1hTokens": 0,
+     "hitRatio": 0.685,
+     "savedUsd": 0.01074
+    },
+    "sonnet": {
+     "readTokens": 982172,
+     "writeTokens": 380246,
+     "write1hTokens": 0,
+     "hitRatio": 0.7206,
+     "savedUsd": 1.577787
+    }
+   }
+  }
+ },
+ "_note": "Last snapshot of GET /api/observatory/summary, taken less than 45 s before the run stopped (35 real minutes). Totals at stop: see docs/run-report.md (Run 4)."
+}

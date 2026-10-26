@@ -149,3 +149,79 @@ two invalid `dai` steps from assembly proposals and kept the rest), no proposer 
 
 Screenshots: `game-world.png` replaced with this run (day 3, a village of 8 shelters and the council's
 decision); the society, economy, consciousness and god-mode captures from run 1 still show more and are kept.
+
+## Run 4 (economy profile + prompt caching) — 2026-10-26
+
+Fresh world (`npm run world:reset`, empty mnemo), reinloop `96601b2` (Anthropic prompt caching on, `promptCache.ttl`
+`5m`). `GAME_PROFILE=economy` (Ilse on sonnet, the other 7 agents on haiku, no crowd, council and assembly seeded,
+group members on haiku, horizons x4 and cooldowns x6 in game time, a group decides at most every 240 game minutes,
+replies capped at 500 tokens), `GAME_BUDGET_USD=10`, `GAME_TIME_SCALE=6`. Seed laws, unchanged. Stopped by the
+35-real-minute limit at day 10, 00:08: 8.8 game days from 06:00 of day 1. The budget was never near. Progress
+lines: `docs/run-progress.log`; raw evidence: `docs/evidence/run4/`.
+
+| Measure | Run 1 (mixed, 1x) | Run 2 (haiku, 4x) | Run 4 (economy, 6x) |
+|---|---|---|---|
+| Game days covered | 0.5 | 2.2 | **8.8** |
+| Decisions (individual + group) | 166 + 106 | 302 + 37 | 1002 + 16 |
+| Spoken replies | 170 | 89 | 187 |
+| Failures | 3 | 2 | 2 (1 decision over `maxTurns`, 1 decision timeout); 0 group failures |
+| Crafted items / discoveries | 8 / 0 | 0 / 0 | 21 / 0 |
+| Births / deaths | 3 / 0 | 0 / 2 | 16 / 10 (cold 6, hunger 4); 14 alive at the end |
+| Gifts / barters | 44 / 0 | 21 / 0 | 69 / 2 accepted (76 offers and asks: 4 rejected, 70 expired) |
+| Judgements / testimonies / insights / law proposals | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| Lorebase consultations (MCP calls) | n/a | n/a | 8 |
+| Cost | $3.11 | $0.53 | **$3.31** (sonnet 2.03, haiku 1.25) |
+| Cost per game day | about $6.2 | about $0.24 | **about $0.38** |
+| Prompt cache | none | none | 79% of input tokens read from cache (16.3M read, 4.3M written); saved $3.0 |
+
+Cost by tier (snapshot 45 s before the stop, $3.28): Ilse's own decisions and replies (sonnet) $1.69, the seven haiku
+agents and the newborns $1.21, council $0.35, assembly $0.02. One sonnet mind cost more than all the haiku minds together.
+
+**Prompt caching.** Hit ratio 79% overall: haiku 80%, sonnet 72%, council and assembly 69%. Without the cache the same
+calls would have cost about $6.3, so it halved the bill. Caching works because each call puts its stable part first
+(tool catalog, then the person's instructions) and the perception last, as the message. reinloop also writes the latest
+message to the cache, so every new perception is written once at 1.25x. That is most of the 4.3M written tokens, and
+it pays off only when a decision takes more than one turn (consultation, retry). **TTL:** a person's cache entry is
+read again at its next call. At 6x that came every 15-40 real seconds, and a group decided at most every 240 game
+minutes (40 real seconds), so everything stayed far inside 5 minutes. `1h` writes cost 2x instead of 1.25x and would
+have bought no extra hits: about $1 more on this run. `5m` stays the default. `1h` only pays when the same person's
+calls are more than 5 real minutes apart, e.g. at 1x with cooldowns over 300 game minutes.
+
+### Notable moments (transcripts in `docs/evidence/run4/conversations.md`)
+
+1. **Flint for rope, settled by counting.** Tomas borrowed Vera's axe against 2 flint for 2 ropes. Then Rudi's ropes,
+   a gift from Vera, got mixed up with the payment. Vera: «io ti ho consegnato due corde per le tue selci, e tu dici
+   di averne tre in tasca?» Tomas: «Contiamole una per una adesso, davanti a Rudi e Nia». They settled it by talking
+   and counting in front of witnesses, without `giudica` or `testimonia`.
+2. **A price is refused.** Vera offered 8 wood for 2 flint. Tomas: «8 legna per 2 selci non mi servono: ne ho già 10 e
+   non le voglio sprecare. Se mi dai corde o erbe, quelle sì». Then he turned down her rope offer: he needed the flint himself.
+3. **The elder as critic.** Ilse (sonnet) rejected five of the council's six joint plans with specific fixes: «Il
+   piano ripete l'errore appena fallito… Cambia l'ordine». On day 2 she noted «nelle terre selvagge perde salute».
+   The council stayed north anyway, and Mara died of cold about 15 game minutes later.
+4. **The assembly walks north again.** Okon and Pell voted for the rich grass at (20-23,3), «6 a casella», and died
+   of cold on day 2, exactly as in run 2.
+5. **A generation that knows the wild.** The newborns' thoughts name the cost: «sono nelle terre selvagge, che mi
+   costano salute». Their plans still return to the shelter at (17,2), which is itself past `wild_distance`.
+
+### Analysis
+
+- **Cheap and long, as intended.** 8.8 game days for $3.31: 17 times more game time than run 1 for about the same money.
+  It cost more per day than run 2 (all haiku) because of one sonnet mind, and the cache took half of the input cost off.
+- **The groups died early, then the society thinned out.** Both seeded groups went to the rich grass in the north and
+  lost members to the cold on day 2. From then on there were no group decisions (16 in total), and nobody used
+  `form_group`. The birth law then made Ilse, who was always at the shelter, a parent of 11 of the 16 newborns. One
+  dynasty, the Casata di Ilse, holds almost everyone.
+- **Perceiving a cost is not avoiding it.** The wild is now in the perception and in the agents' words, yet the
+  survivors settled at (17,2) next to the food. Six of the ten deaths were from cold. The food-versus-wild trade-off is
+  real in the seed laws: food is richer in the north. Haiku plans keep choosing food. The no-advice rule leaves this to
+  the agents, and so far they resolve it badly.
+- **Social layer: still zero.** No judgement, testimony, insight or law proposal in 1,018 decisions, even with a real
+  dispute (moment 1). The agents settle conflicts in speech. The tools stay unused because nothing in their perception
+  ties a dispute to `giudica` or `testimonia`, and adding that would be advice. Lorebase was consulted 8 times in
+  the whole run: with one consultation allowed per haiku decision, the agents nearly never use it.
+- **Economy: crafts but no discoveries.** 21 crafts and 2 barters, all in the builders/crafter triangle (flint, rope,
+  axe, hearth, storehouse). Nobody combined materials with `sperimenta`, so the technology tree stayed hidden.
+- **Language.** Speech stayed Italian. Some reasoning summaries came back in English, and they are visible in god mode.
+
+Screenshots: `society.png` replaced with this run (day 6: 12 people, one sonnet mind, the Casata di Ilse). game-world,
+economy, consciousness and god-mode from runs 1-2 still show more (village, crafted economy, insights) and are kept.

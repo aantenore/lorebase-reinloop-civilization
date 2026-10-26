@@ -27,6 +27,20 @@ Latest live run (budget-capped, real models): [docs/run-report.md](docs/run-repo
 ![Agent memory](docs/screenshots/memory.png)
 *La memoria privata di un agente / An agent's private memory*
 
+## Evidence
+
+Raw material from a recorded live run (run 4: economy profile, prompt caching, 8.8 game days, $3.31), in
+[`docs/evidence/run4/`](docs/evidence/run4/):
+[`summary.json`](docs/evidence/run4/summary.json) (`/api/observatory/summary`: decisions, failures, cost by model and
+tier, prompt-cache reads, writes, hit ratio and savings),
+[`conversations.md`](docs/evidence/run4/conversations.md) (selected exchanges: a flint-for-rope dispute, the council's
+critiques, the assembly's votes, the agents' thoughts),
+[`chronicle.md`](docs/evidence/run4/chronicle.md) (the run's Chronicle records on Lorebase `main`),
+[`lorebase-log.md`](docs/evidence/run4/lorebase-log.md) (every revision on `main` during the run),
+[`society.json`](docs/evidence/run4/society.json) (`/api/society` at the end: people, esteem, fame, families).
+Progress lines written during the run: [`docs/run-progress.log`](docs/run-progress.log). Numbers and analysis:
+[`docs/run-report.md`](docs/run-report.md). Screenshot of the same run: [`docs/screenshots/society.png`](docs/screenshots/society.png).
+
 ## Architecture
 
 ```mermaid
