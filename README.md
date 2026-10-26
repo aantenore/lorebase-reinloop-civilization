@@ -58,13 +58,77 @@ flowchart LR
   C["clients: game/ (isometric), web/ (dashboard)"]
   A1 -- "commit_plan, scambia, giudica, proponi_legge" --> W
   W -- "perceptions (mailbox)" --> A1
-  A1 -- "lorebase_* tools" --> HE --> LB
+  A1 -- "conoscenza_* consultations" --> HE --> LB
   W -- "change feed (SSE)" --> LB
   W -- "Operations, Proposals (Chronicle, insights, discoveries, law proposals)" --> LB
   A1 -- "remember / recall" --> MN
   W -- "lived memories, conversations" --> MN
   H <--> C
 ```
+
+### Ports and adapters
+
+The game depends on two domain concepts, never on the tools that keep them today
+(`server/src/ports/`):
+
+- **`Knowledge`** (`ports/knowledge.ts`): the shared, governed knowledge of the world (laws, roles,
+  Chronicle, insights, resources/recipes/technologies and the hidden catalog, families). Reading:
+  `readAll(kind, {scope?})`, `read`, `hasScope`, `history`, `overview`, `watch` (change feed of the live
+  world). Writing: `write(changes)` directly, or `propose({draft, title, changes})` → `review` →
+  `accept` / `reject`; `proposal`, `proposals(status)`, `drafts(prefix)`, `discardDraft`, `removeMany(kind, keys)`,
+  `snapshot(scope)`, `ensureSchema`. `consult.tools()` are the read-only consultations offered to the people
+  (`conoscenza_cerca`, `conoscenza_leggi`, `conoscenza_interroga`, `conoscenza_storia`, `conoscenza_differenze`,
+  `conoscenza_cambiamenti`, `conoscenza_schema`, `conoscenza_quadro`), always pinned to the live world.
+- **`Memory`** (`ports/memory.ts`): each person's private mind. `remember`, `recall` (by relevance),
+  `list`, `deleteOwner` (a death), `stats`, `watch` (fading, merging, forgetting); the spoken lines
+  (`converse`, `conversations`), decision run logs (`runSinks`) and the saved society of a world
+  (`loadSociety`, `saveSociety`, `forgetPerson`). Fading and compaction happen inside the adapter.
+
+```mermaid
+flowchart LR
+  subgraph game["game (server/src/rt, laws/, sim/, http/)"]
+    G["world, minds, insights, laws,<br/>economy book, Chronicle, observatory"]
+  end
+  K{{"port Knowledge"}}
+  M{{"port Memory"}}
+  G --> K
+  G --> M
+  subgraph ka["adapters/knowledge"]
+    KL["lorebase/: Keeper REST (Operations, Proposals,<br/>branches), SSE change feed, Herald MCP consultations"]
+    KM["memory/: in-process records, drafts,<br/>proposals, change feed, consultations"]
+  end
+  subgraph ma["adapters/memory"]
+    MM["mnemo/: memory service :4410"]
+    MI["inmem/: in-process, word-overlap recall, fading"]
+  end
+  K --> KL --> LB[("Lorebase Keeper + Herald")]
+  K --> KM
+  M --> MM --> MN[("mnemo")]
+  M --> MI
+  C["composition.ts<br/>(config + env)"] -. picks .-> KL & KM & MM & MI
+```
+
+`server/src/composition.ts` is the only place that picks them: `knowledge.adapter` in `config/sim.json`
+(`lorebase` | `memory`, env `KNOWLEDGE_ADAPTER`) and `memory.adapter` in `config/game.json` (`mnemo` | `inmem`,
+env `MEMORY_ADAPTER`). Each adapter keeps its own settings under its name (`knowledge.lorebase` with the Keeper
+address, the Operations per kind and the Herald tool names; `memory.mnemo`, `memory.inmem`). The Lorebase adapter
+maps a change to an Operation (laws on the live branch through `set_rule`/`amend_rule`/`enact_rule`/`repeal_rule`,
+anything else through the built-ins and imports), a draft to a branch, a proposal to a Proposal, and keeps the
+branch pinning and the hidden-catalog boundary of the consultations. The in-process adapters keep nothing across
+restarts.
+
+**Running fully offline** (no Docker, no Lorebase, no mnemo, no API key):
+
+```bash
+KNOWLEDGE_ADAPTER=memory MEMORY_ADAPTER=inmem npm run game:mock
+KNOWLEDGE_ADAPTER=memory MEMORY_ADAPTER=inmem node server/src/game-main.ts --mock --seconds 30
+```
+
+The knowledge starts from the seed files (`knowledge.seed`: `lorebase/rules.seed.yaml`,
+`lorebase/economy.seed.yaml`) at every boot, the hidden catalog included; laws can be changed through
+the HTTP API and god mode as usual, and the world sees them through the in-process change feed. The admin
+scripts (`rule`, `scenario`, `lorebase:seed`, `world:reset`) need a knowledge that outlives the game process and
+refuse the `memory` adapter.
 
 The diagram below is the v1 tick dashboard:
 
@@ -87,7 +151,9 @@ The diagram below is the v1 tick dashboard:
   shelters, seasons, hunger, cold, births. It never holds a number of its own: every value is read
   from the rules snapshot. `beginTick`/`endTick` are plain step functions on state, reusable by a
   real-time client.
-- `server/src/lorebase/` REST client, rule/role loader, change watcher, writer (direct or Proposal).
+- `server/src/ports/` the `Knowledge` and `Memory` ports; `server/src/adapters/` their adapters (Lorebase, in-process;
+  mnemo, in-process); `server/src/composition.ts` picks them.
+- `server/src/laws/` law/role loader, law watcher (change feed), law writer (direct or proposal), scenarios.
 - `server/src/agents/` one reinloop agent per person (session kept across ticks, small budget,
   window compaction, personal notebook), tools `look move gather eat build_shelter give say rest`.
   Prompts contain only identity, role, the laws verbatim and what the person perceives: see
@@ -141,13 +207,13 @@ after pulling: it adds the economy Kinds, Records and the hidden branch.
 workspace). Server flags: `--mock`, `--start`, `--ticks N` (run N ticks and exit), `--verbose`.
 Env overrides: `PORT`, `SIM_TICK_MS`, `SIM_SEED`, `SIM_LANGUAGE`, `SIM_MAX_TURNS`,
 `SIM_MODEL_OVERRIDE` (a tier or a model id for every agent, for cheap runs), `SIM_MODEL_OPUS|SONNET|HAIKU`,
-`LOREBASE_URL`, `LOREBASE_DOMAIN`, `LOREBASE_BRANCH`, `SIM_ROSTER_FILE`, `SIM_HOST`, `SIM_API_TOKEN`.
+`KNOWLEDGE_ADAPTER` (`lorebase`|`memory`), `LOREBASE_URL`, `LOREBASE_DOMAIN`, `LOREBASE_BRANCH`, `SIM_ROSTER_FILE`, `SIM_HOST`, `SIM_API_TOKEN`.
 Real-time world: `GAME_CONFIG` (default `config/game.json`), `GAME_PROFILE` (cost profile, `config/profiles/<name>.json`), `GAME_CROWD` (extras), `GAME_GROUPS=0`
-(no seeded groups), `GAME_CHRONICLE=0`, `HERALD_URL` (empty: no Lorebase tools), `HERALD_API_KEY` (sent as bearer
+(no seeded groups), `GAME_CHRONICLE=0`, `HERALD_URL` (empty: no consultations of the shared knowledge), `HERALD_API_KEY` (sent as bearer
 when set; locally Herald forwards credential-less calls);
 `--seconds N` stops the server after N seconds; `GAME_TIME_SCALE` (game time multiplier, config
 `loop.timeScale`), `GAME_BUDGET_USD` (config `budget.maxUsd`: when the model cost of the run reaches it every
-mind is paused, the world keeps turning; 0 = no cap), `GAME_FLOWS_MS`, `MNEMO_URL` (empty: no private memory), `MNEMO_PORT`, `MNEMO_DB`,
+mind is paused, the world keeps turning; 0 = no cap), `GAME_FLOWS_MS`, `MEMORY_ADAPTER` (`mnemo`|`inmem`), `MNEMO_URL` (empty: no private memory), `MNEMO_PORT`, `MNEMO_DB`,
 `MNEMO_CONFIG`, `MNEMO_COMPACT_MS`, `MNEMO_EMBEDDER`, `MNEMO_LLM` (`anthropic`|`heuristic`).
 The web UI (in `web/`) is served from `web/dist` when built; in development it runs on :5173.
 
@@ -208,8 +274,8 @@ but people can read it like every law, so it works as a social law they may foll
   the world. A restart brings back the founders of the roster (by name) with their standing and families;
   people born during a run are in the Chronicle and in `Family` records, but do not come back.
 - Herald pins agents to `main` (server-side argument override plus `LOREBASE_BRANCH` on Herald); a
-  `lorebase_diff` between two revision ids of the hidden branch is not blocked, but those ids are
-  never shown to agents.
+  `conoscenza_differenze` (Herald `lorebase_diff`) between two revision ids of the hidden branch is not blocked,
+  but those ids are never shown to agents.
 
 See [docs/upstream-issues.md](docs/upstream-issues.md) for friction found in Lorebase and reinloop.
 
@@ -221,12 +287,12 @@ See [docs/upstream-issues.md](docs/upstream-issues.md) for friction found in Lor
 ```
  Lorebase Keeper ──SSE──▶ watcher ─▶ laws (values = physics)        Herald (MCP, read tools)
         ▲  Chronicle, Insight, new laws (Operations, Proposals)         ▲
-        │                                                              │ lorebase_* tools
+        │                                                              │ conoscenza_* consultations
  server/src/rt/  world.ts  physics + event bus (20 Hz), A* (path.ts), plan executor (plan.ts)
                  mind.ts   one loop PER AGENT and PER GROUP: perceptions in, plans out
                  decide.ts reinloop calls: plan (commit_plan) and spoken reply (streamed)
                  groups.ts reinloop patterns per group type, decision trace
-                 brain.ts  Lorebase MCP faculties (cached, pinned to main) + private memory (mnemo)
+                 brain.ts  consultations of the shared knowledge (cached; the adapter pins them) + private memory
                  economy.ts / economy-book.ts  items, recipes, discovery, decay; catalog in Lorebase
                  insights.ts shared role consciousness (peer-reviewed Proposals)
                  barter.ts offers with acceptance · society.ts esteem, fame, ranks, families
@@ -270,7 +336,7 @@ See [docs/upstream-issues.md](docs/upstream-issues.md) for friction found in Lor
   `game` is merged into `config/game.json`, `sim` into `config/sim.json`, `rosterTiers` sets roster tiers
   by name (`"*"` for the rest). `economy`: every agent on haiku except the elder Ilse on sonnet (no opus, so
   the council decides on sonnet at most; proposers and voters on haiku), no crowd extras, the same 8 agents
-  and 2 seeded groups, plan horizons x4 and replan cooldowns x6 in game time (sonnet x6 and x9), one Lorebase
+  and 2 seeded groups, plan horizons x4 and replan cooldowns x6 in game time (sonnet x6 and x9), one
   consultation per haiku decision, a group decides at most every 240 game minutes, replies capped at 500
   tokens, newborns on haiku. Example: `GAME_PROFILE=economy GAME_BUDGET_USD=10 GAME_TIME_SCALE=6 npm run game`.
 - **Plans, not per-second calls.** One call returns a plan of steps (`move_to`, `approach`, `gather`,
@@ -280,10 +346,11 @@ See [docs/upstream-issues.md](docs/upstream-issues.md) for friction found in Lor
   Lorebase rules (`base_move_speed`, `base_work_speed`, `gather_minutes`, `build_minutes`,
   `game_minutes_per_real_second`, `turn_minutes`, ...) times the Role's `move_factor`/`work_factor` and health.
 - **Prompts are minimal** ([docs/prompts.md](docs/prompts.md)): identity, role, the statement that the
-  mind is connected to Lorebase (laws, the role's shared consciousness, the chronicle) and has a
-  private memory; then factual perception. The laws are not in the prompt: agents consult them with
-  the `lorebase_*` MCP read tools (Herald), at most `maxConsults` per decision; calls are cached and
-  coalesced (`brain.cacheMs`) and pinned to the `world` Domain.
+  mind is connected to the shared knowledge of the world (laws, the role's shared consciousness, the
+  chronicle) and has a private memory; then factual perception. The laws are not in the prompt: agents
+  consult them with the `conoscenza_*` read-only consultations, at most `maxConsults` per decision; calls
+  are cached and coalesced (`brain.cacheMs`); the Lorebase adapter maps them to Herald tools pinned to the
+  `world` Domain and the live branch.
 - **Shared role consciousness.** `share_insight` writes an `Insight` on `role/<role>/<slug>` and opens
   a Proposal; `review_insights` / `judge_insight` let a peer (same role, not the author; checked by
   the server since all agents share one Keeper principal) accept it (merged, reviewer recorded) or
@@ -401,7 +468,7 @@ with `rispondi_scambio`: accepted, the items move as a gift (`gave`: memories, f
 
 `npm run world:reset` returns Lorebase `main` to the seed state with the governed flow only (Operations on
 a `reset/<stamp>` branch, one Proposal, approved and merged; records leave `main` through the bulk
-`delete_records` Operation, one call per Kind and batch of `lorebase.maxBulkDeleteKeys` keys): laws not in `lorebase/rules.seed.yaml` are
+`delete_records` Operation, one call per Kind and batch of `knowledge.lorebase.maxBulkDeleteKeys` keys): laws not in `lorebase/rules.seed.yaml` are
 repealed, seed laws and roles get their seed values back, discovered technologies and their recipes
 leave `main` (the seed then rebuilds `nature/hidden`), Chronicle, Insight and Family records are kept on
 `archive/<stamp>` and removed from `main`, and stale `role/`, `law/`, `tech/`, `seed/`, `reset/` branches
@@ -422,10 +489,11 @@ them, merges similar faded ones into a gist and forgets the faintest; caps on me
 DB size. The backend is the only client: agents' `remember`/`recall` tools, plus what each agent lives
 (plans, crafts, gifts, discoveries, failures, speech heard; importance/emotion per kind in
 `memory.ingest`). It also keeps the reinloop run log of every decision, reply and group decision
-(`memory.runStore`; `GET /runs`, `GET /runs/:id/events`; streamed deltas left out, `memory.runSkipEvents`;
+(`memory.mnemo.runStore`; `GET /runs`, `GET /runs/:id/events`; streamed deltas left out, `memory.mnemo.runSkipEvents`;
 retention `runs.maxRuns`/`runs.maxAgeHours` in `config/mnemo.json`); a death deletes that person's runs.
 The world's shared knowledge (laws, Chronicle, accepted insights) is not copied there: agents search it
-in Lorebase (`lorebase_search`, `lorebase_query`).
+through their consultations (`conoscenza_cerca`, `conoscenza_interroga`). mnemo is the `mnemo` adapter of the
+`Memory` port; `memory.adapter=inmem` replaces it with an in-process store (see "Ports and adapters").
 
 ### Protocol (WebSocket `/ws`, JSON)
 
@@ -434,13 +502,14 @@ Server → client: `hello` (on connect with `you: null`, again after `join`), `s
 entities only), `entity_added`, `entity_removed`, `thinking`, `plan` (entity or group scope; group
 steps carry `args.who`), `plan_progress`, `say` (speech or thought; a player's own speech is not
 echoed), `say_delta` (streamed reply, `done: true` closes it), `group`, `group_removed`, `tile`,
-`time`, `world_event`, `rules_changed`, `lorebase`, and:
+`time`, `world_event`, `rules_changed`, `knowledge {connected, adapter, branch, revision}` (also sent as the
+deprecated `lorebase` message, kept for one version), and:
 
 - `tiles {items: [{x, y, food, wood, shelter, structures?}]}`: changed tiles coalesced and flushed at most
   every `net.tileFlushMs` (only tiles whose state changed since last sent); clients still accept `tile`.
 
 - `insight {insight: {code, role, text, confidence, author, reviewer?, day, evidence?, status}, action: 'proposed'|'accepted'|'rejected'|'retired', reviewer?}`
-- `consult {agentId, tool, query}`: an agent consulted Lorebase (e.g. `lorebase_search`, "leggi inverno").
+- `consult {agentId, tool, query}`: an agent consulted the shared knowledge (e.g. `conoscenza_cerca`, "leggi inverno").
 
 Economy and memory (phase 2):
 
@@ -461,10 +530,11 @@ Economy and memory (phase 2):
   (mnemo keeps a signed -1..1 valence). Merged sources are folded silently (no `mergedFrom` yet).
 - `act` (players) also accepts `gather {item?}`, `craft {recipe}`, `experiment {items}`, `use {item}`, `give {to, item, amount}`.
 - REST: `GET /api/economy` (economy + last `flows`), `GET /api/agents/:id/memories` (bare `Memory[]`).
-- Observatory (read-only proxies, cached `observatory.cacheMs`): `GET /api/observatory/summary` (Lorebase counts per Kind
-  and revision; mnemo totals and per-agent count/avg fidelity/gists; reinloop runs, decisions, failures, tokens `{input, output}`,
+- Observatory (read-only proxies, cached `observatory.cacheMs`): `GET /api/observatory/summary` (`knowledge`: adapter, counts per
+  Kind and revision; `memory`: adapter, totals and per-agent count/avg fidelity/gists; `lorebase`/`mnemo` are deprecated
+  aliases kept for one version; reinloop runs, decisions, failures, tokens `{input, output}`,
   `costUsd {total, byModel, byTier}`, prompt `cache {readTokens, writeTokens, write1hTokens, hitRatio, savedUsd, byModel, byTier}`, `budgetMaxUsd`, `budgetPaused`; a group's run is booked per member under that
-  member's model, the team's remainder under the group; per-agent usage is in `/api/agents/:id/mind`), `/log?limit=` (main's revisions), `/proposals?status=`,
+  member's model, the team's remainder under the group; per-agent usage is in `/api/agents/:id/mind`), `/log?limit=` (revisions of the live world: `[{revision, message, time, author, kinds}]`), `/proposals?status=` (`[{id, title, branch, status}]`),
   `/records/:kind?limit=` (Kinds in `observatory.kinds`), `/memories?offset=&limit=` (all agents, paged).
 
 Barter and society (phase 3):
@@ -483,7 +553,8 @@ Barter and society (phase 3):
   `GET /api/law-proposals`; `POST /api/law-proposals/:id/approve|reject` `{message?}` (a mutation: token
   and JSON content type as usual).
 
-The typed client copy is `game/src/net/protocol.ts`. REST (both modes): `GET /api/status`,
+The typed client copy is `game/src/net/protocol.ts`; `hello.knowledge` (and `GET /api/status` `knowledge`) replace
+`lorebase`, which stays as a deprecated alias for one version. REST (both modes): `GET /api/status`,
 `GET|POST /api/rules`, `GET /api/scenarios`, `POST /api/scenarios/:name/apply`, `GET|PUT /api/roster`,
 `POST /api/agents`, `DELETE /api/agents/:id`, `GET /api/stream` (SSE mirror of the WebSocket in
 real-time mode); real-time only: `GET /api/insights?role=` (pending and stored) and
@@ -528,7 +599,8 @@ The server spends paid model credits, so even locally:
   `config/sim.json`; clients can never pick a provider or base URL.
 - Roster size (`agents.minRoster..maxRoster`), player speech (`player.speechMaxChars`, per-minute and
   minimum-interval limits) and WebSocket frames (`ws.maxPayloadBytes`) are capped.
-- Agents get Lorebase READ tools only (Herald tools annotated read-only, pinned to the `world` Domain);
+- Agents get READ-only consultations of the shared knowledge only (Lorebase adapter: Herald tools annotated
+  read-only, pinned to the `world` Domain and the live branch);
   writes (Chronicle, insights, laws) are made by the server.
 
 ## In italiano
@@ -539,3 +611,5 @@ italiano, e non ricevono obiettivi oltre a restare in vita. Avvio: `npm run lore
 `npm run lorebase:seed`, poi `npm run dev` (o `npm run sim:mock` senza chiave API). Per cambiare
 una legge mentre la simulazione gira: `npm run rule -- winter_length_ticks 8 --mode proposal`
 oppure `npm run scenario -- long-winter`. La lingua si cambia con `language` in `config/sim.json`.
+Senza Docker né servizi esterni: `KNOWLEDGE_ADAPTER=memory MEMORY_ADAPTER=inmem npm run game:mock`
+(conoscenza condivisa e memoria privata in memoria, ripartono dal seed a ogni avvio).

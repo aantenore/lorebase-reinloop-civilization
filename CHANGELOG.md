@@ -6,6 +6,13 @@
 - Prompt caching configured by `promptCache` (`ttl`, `groupTtl`); cache reads, writes, hit ratio and savings in
   `/api/observatory/summary` (`reinloop.cache`).
 - Cost profiles (`GAME_PROFILE`, `config/profiles/<name>.json`) and the `economy` profile.
+- The game depends on two ports, `Knowledge` and `Memory` (`server/src/ports/`); Lorebase and mnemo are adapters,
+  in-process adapters run the world fully offline (`KNOWLEDGE_ADAPTER=memory`, `MEMORY_ADAPTER=inmem`). Config:
+  `lorebase` in `config/sim.json` moved to `knowledge.lorebase` (Herald settings from `brain` to
+  `knowledge.lorebase.herald`), mnemo settings to `memory.mnemo` in `config/game.json`.
+- Agents' consultations have neutral names (`conoscenza_cerca`, `conoscenza_leggi`, ...); prompts no longer name Lorebase.
+- Protocol: `hello.knowledge`, the `knowledge` message and `/api/status` `knowledge`; `lorebase` (and `mnemo` in the
+  observatory summary) are deprecated aliases kept for one version. `/api/observatory/log` and `/proposals` return arrays.
 
 ## 0.1.0 - 2026-10-24
 
