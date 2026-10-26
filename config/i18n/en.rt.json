@@ -236,7 +236,7 @@
     "groupFull": "the group {name} is full",
     "badGroup": "the group cannot be founded: {reason}",
     "rethink": "you will think about it again",
-    "noMoreConsults": "you have consulted Lorebase enough for now",
+    "noMoreConsults": "you have consulted the shared knowledge enough for now",
     "insightShared": "idea shared ({code}): it waits for the judgement of another person of your role",
     "insightFailed": "the idea could not be shared: {reason}",
     "insightNone": "no idea of your role waits for a judgement",
@@ -274,7 +274,7 @@
     "members": "MEMBERS:\n{members}",
     "you": "You are {name} (id {id}).",
     "format": "You fix the common plan, with the commit_plan tool: reason is the common plan in one sentence, in English; each step has who (member id). Usually no more than {maxSteps} steps per member. Actions: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
-    "faculties": "Your mind is connected to Lorebase (tools lorebase_*): there you can consult the laws of the world, the shared consciousness of your role and the chronicle. You also have a private memory (remember/recall).",
+    "faculties": "Your mind is connected to the shared knowledge of the world (tools conoscenza_*): there you can consult the laws of the world, the shared consciousness of your role and the chronicle. You also have a private memory (remember/recall).",
     "proposeFormat": "In a few sentences, in English, say what you propose each of you does: whoever decides for the group fixes the common plan. Possible actions: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
     "worker": "You are {name} (id {id}), a member of the group {group}. {task}\n\nIn a few sentences, say what you propose to do yourself, in English.",
     "workerTool": "Ask {name} [{role}] what they propose to do",
@@ -443,15 +443,15 @@
     "disabled": "not available",
     "already": "you already approved this idea"
   },
-  "mcp": {
-    "lorebase_get": "Read a Lorebase Record by reference Kind/key (for example Rule/max_hp, Role/healer).",
-    "lorebase_query": "Query Lorebase with the query language (JSON) to list and filter Records.",
-    "lorebase_search": "Search Lorebase by words (laws, roles, shared ideas, chronicle).",
-    "lorebase_history": "History of the changes of a Lorebase Record.",
-    "lorebase_diff": "Differences between two Lorebase revisions.",
-    "lorebase_changes": "The latest Lorebase revisions, newest first.",
-    "lorebase_schema": "Which kinds of Records (Kind) exist in Lorebase and their attributes.",
-    "lorebase_context": "An overview from Lorebase around some Records or a question."
+  "knowledge": {
+    "conoscenza_cerca": "Search the shared knowledge by words (laws, roles, shared ideas, chronicle, recipes).",
+    "conoscenza_leggi": "Read an entry of the shared knowledge by reference Kind/key (for example Rule/max_hp, Role/healer).",
+    "conoscenza_interroga": "Query the shared knowledge to list and filter entries of one kind.",
+    "conoscenza_storia": "History of the changes of an entry of the shared knowledge.",
+    "conoscenza_differenze": "Differences between two moments of the shared knowledge.",
+    "conoscenza_cambiamenti": "The latest changes of the shared knowledge, newest first.",
+    "conoscenza_schema": "Which kinds of entries exist in the shared knowledge and their attributes.",
+    "conoscenza_quadro": "An overview from the shared knowledge around some entries or a question."
   },
   "proclamation": {
     "herald": "Herald",

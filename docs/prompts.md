@@ -9,11 +9,11 @@ The prompt is minimal: no laws, no tasks, no goals, no strategy, no advice on wh
 
 | Part | Source |
 |------|--------|
-| Instructions (system) | `config/i18n/<lang>.rt.json` → `instructions`: name, personality, role code and title (Lorebase `Role`), the faculties (a mind connected to Lorebase through the `lorebase_*` tools: laws, the role's shared consciousness, the chronicle; a private memory `remember`/`recall`) and the plan interface (`commit_plan`, step counts and horizon of the tier) |
+| Instructions (system) | `config/i18n/<lang>.rt.json` → `instructions`: name, personality, role code and title (the `Role` record of the shared knowledge), the faculties (a mind connected to the shared knowledge of the world through the `conoscenza_*` tools: laws, the role's shared consciousness, the chronicle; a private memory `remember`/`recall`). The prompt never names the backend that keeps the knowledge or the memory and the plan interface (`commit_plan`, step counts and horizon of the tier) |
 | Observation (user message, at each decision) | `rt.observation.*`, `rt.look.*`: time and season, the person's body, what it carries (item names and codes, tools with wear) and position, group, current step, why it is thinking again (a fact: plan finished, step failed, spoken to, ...), what it perceives within `vision_radius`, what was said to it, what it lived (last `memoryItems`), and which law keys changed since it last thought |
-| Tools | `commit_plan`, `say`, `form_group`, `join_group`, `leave_group`, `scambia`, `chiedi`, `rispondi_scambio`, `giudica`, `testimonia`, `proponi_legge`, `share_insight`, `review_insights`, `judge_insight` (`rt.tools.*`); Lorebase read tools from Herald (`lorebase_get`, `lorebase_query`, `lorebase_search`, `lorebase_history`, `lorebase_diff`, `lorebase_changes`, `lorebase_schema`, `lorebase_context`; descriptions `rt.mcp.*`); private memory `remember(text, importance?)`/`recall(query)` (mnemo: semantic recall, memories fade and blur; results say whether a memory is vivid or faded) |
+| Tools | `commit_plan`, `say`, `form_group`, `join_group`, `leave_group`, `scambia`, `chiedi`, `rispondi_scambio`, `giudica`, `testimonia`, `proponi_legge`, `share_insight`, `review_insights`, `judge_insight` (`rt.tools.*`); read-only consultations of the shared knowledge, pinned to the live world (`conoscenza_cerca`, `conoscenza_leggi`, `conoscenza_interroga`, `conoscenza_storia`, `conoscenza_differenze`, `conoscenza_cambiamenti`, `conoscenza_schema`, `conoscenza_quadro`; descriptions `rt.knowledge.*`; the Lorebase adapter maps them to the Herald tools in `knowledge.lorebase.herald.tools`, the in-process adapter answers the first six itself); private memory `remember(text, importance?)`/`recall(query)` (mnemo adapter: semantic recall; in-process adapter: word overlap; memories fade and blur; results say whether a memory is vivid or faded) |
 | Spoken reply | same instructions + `rt.replyInstructions`; short observation without laws; optional `rethink` tool |
-| Group members | `rt.memberInstructions` + the group situation (`rt.group.*`: members, perception of the leader, what was said, group memory); per role: plan writers get `commit_plan` and `rt.group.format`, prose proposers and workers get `rt.group.proposeFormat` (no `commit_plan`), both get the faculties line `rt.group.faculties` and the Lorebase/memory tools; judges, voters and routers get neither tools nor the faculties line (verdicts, ballots and routes are structured outputs); pattern texts `rt.group.tpl.*` replace reinloop's English harness templates |
+| Group members | `rt.memberInstructions` + the group situation (`rt.group.*`: members, perception of the leader, what was said, group memory); per role: plan writers get `commit_plan` and `rt.group.format`, prose proposers and workers get `rt.group.proposeFormat` (no `commit_plan`), both get the faculties line `rt.group.faculties` and the knowledge/memory tools; judges, voters and routers get neither tools nor the faculties line (verdicts, ballots and routes are structured outputs); pattern texts `rt.group.tpl.*` replace reinloop's English harness templates |
 
 Society in the observation (`rt.observation.age|offers|hearsay`, `rt.look.repute*`), facts only and never a
 number of esteem or fame: the person's age and life stage; the exchange offers made to it and by it (codes
@@ -29,7 +29,8 @@ non ha ancora abbastanza peso".
 
 The plan interface lists the economy actions (`crea(recipe)`, `sperimenta(items)`, `usa(item)`,
 `dai(to, item, amount)`, `scambia(to, give, want)`, `gather(resource)` by item code) as a tool description only; the
-catalog itself is in Lorebase (`Recipe`, `Resource`, `Technology`), and undiscovered recipes are not readable at all.
+catalog itself is in the shared knowledge (`Recipe`, `Resource`, `Technology`), and undiscovered recipes are not readable at all
+(they live in the hidden catalog, a scope the consultations never reach).
 Perception adds the structures on tiles (hearth, storehouse) and whether the person stands in the wilds.
 
 Factual perception lines (`rt.body.*`, `rt.recipes.*`, `rt.look.gather|doing|wildFelt`), each capped by
@@ -57,7 +58,7 @@ Rendered example (Ilse, opus, at the start of a mock world; v1 of the self line,
 ```text
 Sei Ilse. Il tuo carattere: Calma, lungimirante; parla poco ma con chiarezza.
 Il tuo ruolo nella società: Anziano (elder).
-La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).
+La tua mente è collegata alla conoscenza condivisa del mondo (strumenti conoscenza_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).
 Il tempo scorre senza pause. Quando ti fermi a pensare fissi con commit_plan ciò che farai per circa 60 minuti; mentre pensi continui a fare ciò che stavi facendo.
 Pensi e parli in italiano.
 ```
@@ -88,8 +89,9 @@ CIÒ CHE RICORDI:
 - niente
 ```
 
-In a live check the agents consulted Lorebase on their own, e.g. `lorebase_search "rifugio inverno legna costruire"`,
-`lorebase_query {"kind":"Rule"}`, `lorebase_context "leggi del mondo, ruolo Esploratore, rifugio, inverno"`.
+In a live check the agents consulted the shared knowledge on their own, e.g. a search for "rifugio inverno legna costruire",
+a query `{"kind":"Rule"}` and an overview "leggi del mondo, ruolo Esploratore, rifugio, inverno" (then named
+`lorebase_search`, `lorebase_query`, `lorebase_context`; today `conoscenza_cerca`, `conoscenza_interroga`, `conoscenza_quadro`).
 
 ## Legacy tick dashboard (v1)
 
@@ -97,12 +99,12 @@ Everything a person reads comes from three places, and nothing else:
 
 | Part | Source |
 |------|--------|
-| Instructions (system prompt) | `config/i18n/<language>.json` → `instructions`, filled with the roster entry (name, personality) and the person's `Role` Record from Lorebase (title, description) |
-| Observation (user message, every tick) | `observation.*` and `look.*` templates, filled with the person's own perception, the inbox, and every `Rule` Record of the Lorebase branch verbatim (key, value, unit, text) |
+| Instructions (system prompt) | `config/i18n/<language>.json` → `instructions`, filled with the roster entry (name, personality) and the person's `Role` record from the shared knowledge (title, description) |
+| Observation (user message, every tick) | `observation.*` and `look.*` templates, filled with the person's own perception, the inbox, and every `Rule` record of the live world verbatim (key, value, unit, text) |
 | Tool descriptions | `tools.*` templates; results of actions use `act.*` |
 
 There are no goals beyond staying alive, no strategy, no hints and no rule values in code or
-templates: values and wording of the laws live only in Lorebase. When the laws change, the next
+templates: values and wording of the laws live only in the shared knowledge. When the laws change, the next
 observation carries the new laws and a factual list of what changed; when a Role changes, the
 instructions are rebuilt. Each person also has a private notebook (reinloop `remember` /
 `recall`, one namespace per person) and its own reinloop session, so what it learns is its own.

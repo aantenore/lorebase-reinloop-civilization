@@ -236,7 +236,7 @@
     "groupFull": "il gruppo {name} è al completo",
     "badGroup": "il gruppo non può essere fondato: {reason}",
     "rethink": "ci ripenserai",
-    "noMoreConsults": "per ora hai consultato abbastanza Lorebase",
+    "noMoreConsults": "per ora hai consultato abbastanza la conoscenza condivisa",
     "insightShared": "idea condivisa ({code}): aspetta il giudizio di un'altra persona del tuo ruolo",
     "insightFailed": "non è stato possibile condividere l'idea: {reason}",
     "insightNone": "nessuna idea del tuo ruolo aspetta un giudizio",
@@ -274,7 +274,7 @@
     "members": "MEMBRI:\n{members}",
     "you": "Tu sei {name} (id {id}).",
     "format": "Sei tu a fissare il piano comune, con lo strumento commit_plan: reason è il piano comune in una frase, in italiano; ogni passo ha who (id del membro). Di solito non più di {maxSteps} passi per membro. Azioni: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
-    "faculties": "La tua mente è collegata a Lorebase (strumenti lorebase_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).",
+    "faculties": "La tua mente è collegata alla conoscenza condivisa del mondo (strumenti conoscenza_*): lì puoi consultare le leggi del mondo, la coscienza condivisa del tuo ruolo e la cronaca. Hai anche una memoria privata (remember/recall).",
     "proposeFormat": "Di' in poche frasi, in italiano, cosa proponi che faccia ciascuno: il piano comune lo fissa chi decide per il gruppo. Azioni possibili: move_to(x,y), approach(to), gather(resource), eat(amount?), build, dai(to, item, amount), crea(recipe), sperimenta(items), usa(item), say(to, text), rest(minutes), sleep(minutes), wait(minutes).",
     "worker": "Sei {name} (id {id}), membro del gruppo {group}. {task}\n\nDi' in poche frasi cosa proponi di fare tu, in italiano.",
     "workerTool": "Chiedi a {name} [{role}] cosa propone di fare",
@@ -443,15 +443,15 @@
     "disabled": "non disponibile",
     "already": "hai già approvato questa idea"
   },
-  "mcp": {
-    "lorebase_get": "Leggi un Record di Lorebase per riferimento Kind/chiave (per esempio Rule/max_hp, Role/healer).",
-    "lorebase_query": "Interroga Lorebase con il linguaggio di query (JSON) per elencare e filtrare Record.",
-    "lorebase_search": "Cerca in Lorebase per parole (leggi, ruoli, idee condivise, cronaca).",
-    "lorebase_history": "Storia dei cambiamenti di un Record di Lorebase.",
-    "lorebase_diff": "Differenze fra due revisioni di Lorebase.",
-    "lorebase_changes": "Le ultime revisioni di Lorebase, dalla più recente.",
-    "lorebase_schema": "Quali tipi di Record (Kind) esistono in Lorebase e con quali attributi.",
-    "lorebase_context": "Un quadro d'insieme da Lorebase intorno a dei Record o a una domanda."
+  "knowledge": {
+    "conoscenza_cerca": "Cerca nella conoscenza condivisa per parole (leggi, ruoli, idee condivise, cronaca, ricette).",
+    "conoscenza_leggi": "Leggi una voce della conoscenza condivisa per riferimento Tipo/chiave (per esempio Rule/max_hp, Role/healer).",
+    "conoscenza_interroga": "Interroga la conoscenza condivisa per elencare e filtrare voci di un tipo.",
+    "conoscenza_storia": "Storia dei cambiamenti di una voce della conoscenza condivisa.",
+    "conoscenza_differenze": "Differenze fra due momenti della conoscenza condivisa.",
+    "conoscenza_cambiamenti": "Gli ultimi cambiamenti della conoscenza condivisa, dal più recente.",
+    "conoscenza_schema": "Quali tipi di voci esistono nella conoscenza condivisa e con quali attributi.",
+    "conoscenza_quadro": "Un quadro d'insieme dalla conoscenza condivisa intorno a delle voci o a una domanda."
   },
   "proclamation": {
     "herald": "Banditore",
