@@ -1,11 +1,13 @@
 // Real-time world settings: config/game.json (GAME_CONFIG overrides the path). Gameplay numbers
-// are Lorebase Rules; this file holds engine, decision, player and group knobs.
+// are laws (Rule records) of the shared knowledge; this file holds engine, decision, player and group knobs.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ModelParams } from 'reinloop';
 import { ROOT } from '../config.ts';
 import { deepMerge, loadProfile } from '../profile.ts';
 import type { Tier } from '../world/types.ts';
+import type { InMemConfig } from '../adapters/memory/inmem/index.ts';
+import type { MnemoConfig } from '../adapters/memory/mnemo/mnemo.ts';
 import type { EconomyConfig } from './economy-book.ts';
 import type { MapConfig, MovementConfig } from './world.ts';
 
@@ -15,27 +17,20 @@ export const AGENT_PATTERNS: GroupPattern[] = ['orchestrator', 'council', 'route
 export interface TierDecision {
   /** Upper bound of the steps kept from one plan (cost control); the schema only suggests it. */
   maxSteps: number;
-  /** Multiplies the Lorebase rule plan_horizon_minutes. */
+  /** Multiplies the law plan_horizon_minutes. */
   horizonFactor: number;
-  /** Multiplies the Lorebase rule replan_cooldown_minutes. */
+  /** Multiplies the law replan_cooldown_minutes. */
   cooldownFactor: number;
   maxTurns: number;
   maxOutputTokens: number;
-  /** Lorebase consultations (MCP read tools) allowed per decision. */
+  /** Consultations of the shared knowledge allowed per decision. */
   maxConsults: number;
 }
 
+/** Consultations of the shared knowledge: answers cached (all people share one identity) and truncated. */
 export interface BrainConfig {
-  /** Herald (Lorebase MCP server) endpoint; HERALD_URL overrides; empty disables. */
-  mcpUrl: string;
-  domain: string;
-  tools: string[];
   cacheMs: number;
-  callTimeoutMs: number;
   outputMaxChars: number;
-  connectRetryMs: number;
-  /** Tool arguments that would leave the pinned branch; removed from schemas and forced server-side. */
-  branchArgs: string[];
 }
 
 export interface MemoryIngest {
@@ -43,24 +38,15 @@ export interface MemoryIngest {
   emotion: number;
 }
 
+/** Private memory: which adapter keeps it (MEMORY_ADAPTER overrides) and its settings; disabled: no private memory. */
 export interface MemoryConfig {
-  /** mnemo, the private memory service; MNEMO_URL overrides; disabled: no private memory. */
+  adapter: 'mnemo' | 'inmem';
   enabled: boolean;
-  url: string;
-  timeoutMs: number;
-  pollMs: number;
   recallLimit: number;
   textMaxChars: number;
-  /** Keep reinloop run logs in mnemo (best effort). */
-  runStore: boolean;
-  /** Run event types not kept (streamed deltas: many and redundant with the final messages). */
-  runSkipEvents: string[];
-  /** Batching delay of conversation lines and run events sent to mnemo. */
-  runFlushMs: number;
-  /** Retries of a request that found nothing listening, with exponential backoff from retryBaseMs. */
-  retries: number;
-  retryBaseMs: number;
   ingest: Record<string, MemoryIngest>;
+  mnemo: MnemoConfig;
+  inmem: InMemConfig;
 }
 
 export interface ServicesConfig {
@@ -71,8 +57,6 @@ export interface ServicesConfig {
 export interface InsightConfig {
   enabled: boolean;
   kind: string;
-  operation: string;
-  updateOperation: string;
   branchPrefix: string;
   autoAcceptMinutes: number;
   maxPendingPerRole: number;
@@ -97,7 +81,7 @@ export interface SocietyConfig {
   reasonMaxChars: number;
   /** What people hear about each other (bands of esteem and fame, never numbers). */
   hearsay: { perPerson: number; maxKept: number; lowBelow: number; highAbove: number; famousAbove: number };
-  /** Laws proposed by agents: a branch + Proposal in Lorebase, never merged by the world. */
+  /** Laws proposed by agents: a draft + proposal in the shared knowledge, never accepted by the world. */
   lawProposals: { branchPrefix: string; textMaxChars: number; pollMs: number; maxOpen: number; defaultValue: number };
   /** Family records (Kind) written in batches like the Chronicle; `colors` is the palette (by founding order). */
   families: { kind: string; flushMs: number; colors: string[] };
@@ -107,8 +91,8 @@ export interface SocietyConfig {
    */
   testimony: { windowMinutes: number; chronicleMinWitnesses: number; maxKept: number; reasonMaxChars: number };
   /**
-   * Opinions, esteem, fame and skills kept in mnemo across restarts, per world id (empty: `<domain>/<branch>`
-   * of Lorebase), flushed every `flushMs`.
+   * Opinions, esteem, fame and skills kept in the private memory store across restarts, per world id (empty:
+   * `<space>/<live>` of the shared knowledge), flushed every `flushMs`.
    */
   persist: { enabled: boolean; world: string; flushMs: number };
 }
@@ -170,7 +154,7 @@ export interface GameConfig {
     seeded: Array<{ name: string; pattern: GroupPattern; members: string[]; leader: string | null }>;
   };
   crowd: { count: number; tier: Tier; groupName: string; names: string[]; roles: string[]; personality: string };
-  chronicle: { enabled: boolean; kind: string; operation: string; flushMs: number; maxBatch: number; maxQueue: number; retryBaseMs: number; retryMaxMs: number };
+  chronicle: { enabled: boolean; kind: string; flushMs: number; maxBatch: number; maxQueue: number; retryBaseMs: number; retryMaxMs: number };
   mock: { thinkDelayMs: number; replyDelayMs: number; wanderRadius: number; planSteps: number; experimentChance: number; eatAtHunger: number; offerChance: number; askChance: number; judgeChance: number; lawChance: number };
   brain: BrainConfig;
   insights: InsightConfig;
@@ -212,10 +196,11 @@ export function loadGameConfig(env: NodeJS.ProcessEnv = process.env): GameConfig
   if (env.GAME_CROWD !== undefined && Number.isInteger(n) && n >= 0) cfg.crowd.count = n;
   if (env.GAME_GROUPS === '0') cfg.groups.seeded = [];
   if (env.GAME_CHRONICLE === '0') cfg.chronicle.enabled = false;
-  if (env.HERALD_URL !== undefined) cfg.brain.mcpUrl = env.HERALD_URL;
-  cfg.brain.domain = env.LOREBASE_DOMAIN ?? cfg.brain.domain;
-  if (env.MNEMO_URL !== undefined) cfg.memory.url = env.MNEMO_URL;
-  if (env.MNEMO_URL === '') cfg.memory.enabled = false;
+  const adapter = env.MEMORY_ADAPTER;
+  if (adapter === 'mnemo' || adapter === 'inmem') cfg.memory.adapter = adapter;
+  else if (adapter) console.warn(`MEMORY_ADAPTER: expected mnemo or inmem, got "${adapter}"`);
+  if (env.MNEMO_URL !== undefined) cfg.memory.mnemo.url = env.MNEMO_URL;
+  if (env.MNEMO_URL === '' && cfg.memory.adapter === 'mnemo') cfg.memory.enabled = false;
   const scale = Number(env.GAME_TIME_SCALE);
   if (env.GAME_TIME_SCALE !== undefined && Number.isFinite(scale) && scale > 0) cfg.loop.timeScale = scale;
   const maxUsd = Number(env.GAME_BUDGET_USD);

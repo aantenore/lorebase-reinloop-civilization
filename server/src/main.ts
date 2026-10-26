@@ -1,4 +1,5 @@
 // Entry point: `node server/src/main.ts [--mock] [--start] [--ticks N] [--verbose]`.
+import { createKnowledge } from './composition.ts';
 import { loadConfig } from './config.ts';
 import { createHttpServer } from './http/server.ts';
 import { Simulation } from './sim/sim.ts';
@@ -13,7 +14,7 @@ const maxTicks = Number(flag('--ticks') ?? 0);
 const verbose = argv.includes('--verbose');
 if (maxTicks > 0) cfg.autoStart = true;
 
-const sim = new Simulation(cfg);
+const sim = new Simulation(cfg, createKnowledge(cfg));
 sim.subscribe((ev) => {
   switch (ev.type) {
     case 'tick': {

@@ -1,5 +1,6 @@
 // Real-time world server: `node server/src/game-main.ts [--mock] [--seconds N]`.
 // REST endpoints (rules, scenarios, roster, status, SSE mirror) and the WebSocket `/ws`.
+import { createAdapters } from './composition.ts';
 import { loadConfig } from './config.ts';
 import { createHttpServer } from './http/server.ts';
 import { attachWebSocket } from './http/ws.ts';
@@ -15,7 +16,7 @@ const cfg = loadConfig(argv);
 const gameCfg = loadGameConfig();
 const seconds = Number(flag('--seconds') ?? 0);
 
-const game = new Game(cfg, gameCfg);
+const game = new Game(cfg, gameCfg, createAdapters(cfg, gameCfg));
 const server = createHttpServer(game);
 const wss = attachWebSocket(server, { path: gameCfg.ws.path, maxPayloadBytes: gameCfg.ws.maxPayloadBytes, port: cfg.http.port, corsOrigins: cfg.http.corsOrigins, apiToken: cfg.apiToken, allowedHosts: cfg.http.allowedHosts }, {
   open: (c) => game.onOpen(c),

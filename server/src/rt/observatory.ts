@@ -1,14 +1,14 @@
-// Read-only overview of the three systems behind the world (Lorebase, mnemo, reinloop), for the
-// Observatory view. Server-side proxies only, each answer cached for `cacheMs` so a busy view
-// never multiplies calls to Keeper or mnemo.
+// Read-only overview of the three systems behind the world (shared knowledge, private memory,
+// reinloop), for the Observatory view. Server-side proxies only, each answer cached for `cacheMs`
+// so a busy view never multiplies calls to the backends.
 import { pricingFor } from 'reinloop';
-import type { LorebaseClient } from '../lorebase/client.ts';
-import type { Mnemo } from './mnemo.ts';
+import type { Knowledge } from '../ports/knowledge.ts';
+import type { Memory } from '../ports/memory.ts';
 
 export interface ObservatoryConfig {
   cacheMs: number;
   maxLimit: number;
-  /** Kinds whose Records may be listed through the proxy. */
+  /** Kinds whose records may be listed through the proxy. */
   kinds: string[];
 }
 
@@ -166,9 +166,8 @@ export class NestedUsage {
 }
 
 export interface ObservatoryHost {
-  client: LorebaseClient;
-  mnemo: Mnemo;
-  branch: string;
+  knowledge: Knowledge;
+  memory: Memory;
   revision(): string;
   agents(): Array<{ id: string; name: string; key: string }>;
   stats(): Record<string, number>;
@@ -201,10 +200,6 @@ export class Observatory {
     return Math.max(1, Math.min(this.cfg.maxLimit, Number.isFinite(n) && n > 0 ? n : fallback));
   }
 
-  private get base(): string {
-    return `${this.host.client.url}/api/v1/domains/${encodeURIComponent(this.host.client.domain)}`;
-  }
-
   /** Routes GET /api/observatory/*; undefined when the path is not one of ours. */
   async handle(path: string, q: URLSearchParams): Promise<{ status: number; body: unknown } | undefined> {
     const sub = path.replace(/^\/api\/observatory\/?/, '');
@@ -216,14 +211,19 @@ export class Observatory {
       }
       if (sub === 'proposals') {
         const status = q.get('status') ?? 'open';
-        return { status: 200, body: await this.cached(`proposals:${status}`, () => this.host.client.request('GET', `${this.base}/proposals?${new URLSearchParams({ status, limit: String(this.cfg.maxLimit) })}`)) };
+        if (!['open', 'accepted', 'rejected', 'merged', 'closed'].includes(status)) return { status: 400, body: { ok: false, error: 'status must be open, accepted or rejected' } };
+        const st = status === 'merged' ? 'accepted' : status === 'closed' ? 'rejected' : (status as 'open' | 'accepted' | 'rejected');
+        return {
+          status: 200,
+          body: await this.cached(`proposals:${st}`, async () => (await this.host.knowledge.proposals(st)).slice(-this.cfg.maxLimit).map((p) => ({ id: p.id, title: p.title, branch: p.draft, status: p.status, ...(p.author ? { author: p.author } : {}) }))),
+        };
       }
       const rec = /^records\/([A-Za-z]+)$/.exec(sub);
       if (rec) {
         const kind = rec[1]!;
         if (!this.cfg.kinds.includes(kind)) return { status: 404, body: { ok: false, error: 'kind not exposed' } };
         const limit = this.limit(q.get('limit'), 100);
-        return { status: 200, body: await this.cached(`records:${kind}:${limit}`, async () => (await this.host.client.listRecords(kind, this.host.branch)).items.slice(-limit).map((r) => r.values)) };
+        return { status: 200, body: await this.cached(`records:${kind}:${limit}`, async () => (await this.host.knowledge.readAll(kind)).items.slice(-limit).map((r) => r.values)) };
       }
       if (sub === 'memories') {
         const limit = this.limit(q.get('limit'), 50);
@@ -231,7 +231,7 @@ export class Observatory {
         const agents = this.host.agents().slice(offset, offset + limit);
         const body = await this.cached(`memories:${offset}:${limit}`, async () => ({
           offset, total: this.host.agents().length,
-          agents: await Promise.all(agents.map(async (a) => ({ agentId: a.id, name: a.name, memories: await this.host.mnemo.list(a.key).catch(() => []) }))),
+          agents: await Promise.all(agents.map(async (a) => ({ agentId: a.id, name: a.name, memories: await this.host.memory.list(a.key).catch(() => []) }))),
         }));
         return { status: 200, body };
       }
@@ -241,27 +241,33 @@ export class Observatory {
     }
   }
 
-  private async log(limit: number): Promise<unknown> {
-    const page = await this.host.client.request<{ items: Array<Record<string, unknown>> }>('GET', `${this.base}/branches/${encodeURIComponent(this.host.branch)}/log?limit=${limit}`);
-    return page.items.map((r) => ({ revision: r.id, message: r.message, time: r.created_at, author: r.author, origin: (r.origin as { type?: string } | undefined)?.type ?? null, changes: (r.stats as { changes?: number } | undefined)?.changes ?? null }));
+  private log(limit: number): Promise<unknown> {
+    return this.host.knowledge.history(limit);
   }
 
   private async summary(): Promise<unknown> {
-    const branch = await this.host.client.getBranch(this.host.branch);
-    const counts: Record<string, number> = {};
-    const c = await this.host.client.request<{ partitions: Array<{ element: string; name: string; count: number }> }>('GET', `${this.base}/revisions/${branch.head}/counts`).catch(() => ({ partitions: [] }));
-    for (const p of c.partitions) if (p.element === 'kind' && this.cfg.kinds.includes(p.name)) counts[p.name] = p.count;
-    const health = await this.host.mnemo.health().catch(() => undefined);
+    const k = this.host.knowledge;
+    const { revision, counts } = await k.overview(this.cfg.kinds);
+    const health = await this.host.memory.stats().catch(() => undefined);
     const perAgent = await Promise.all(this.host.agents().map(async (a) => {
-      const list = await this.host.mnemo.list(a.key).catch(() => []);
+      const list = await this.host.memory.list(a.key).catch(() => []);
       const avg = list.length ? list.reduce((s, m) => s + m.fidelity, 0) / list.length : 0;
       return { agentId: a.id, name: a.name, count: list.length, avgFidelity: Math.round(avg * 1000) / 1000, gists: list.filter((m) => m.kind === 'gist').length };
     }));
     const u = this.host.usage;
     const rows = [...u.rows.values()];
+    const knowledge = { adapter: k.info.adapter, url: k.info.location, domain: k.info.space, branch: k.info.live, revision, counts };
+    const memory = {
+      adapter: this.host.memory.info.adapter, connected: !!health, memories: health?.memories ?? null, perAgent,
+      dbBytes: health?.dbBytes ?? null, lastCompaction: health?.lastCompaction ?? null, embedder: health?.embedder ?? null,
+    };
     return {
-      lorebase: { url: this.host.client.url, domain: this.host.client.domain, branch: this.host.branch, revision: branch.head, counts },
-      mnemo: { connected: !!health, memories: health?.memories ?? null, perAgent, dbBytes: health?.dbBytes ?? null, lastCompaction: health?.lastCompaction ?? null, embedder: health?.embedder ?? null },
+      knowledge,
+      memory,
+      /** @deprecated alias of `knowledge`, kept for one version. */
+      lorebase: knowledge,
+      /** @deprecated alias of `memory`, kept for one version. */
+      mnemo: memory,
       reinloop: {
         ...this.host.stats(),
         runs: rows.reduce((s, r) => s + r.runs, 0),

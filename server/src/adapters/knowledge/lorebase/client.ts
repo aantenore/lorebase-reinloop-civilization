@@ -1,14 +1,19 @@
 // Minimal Keeper REST client (only the endpoints this project uses; see Lorebase docs/openapi.json).
 import { randomUUID } from 'node:crypto';
+import { KnowledgeError } from '../../../ports/knowledge.ts';
 
-export class LorebaseError extends Error {
-  readonly status: number;
+/** A Keeper error: 429/5xx may succeed later (Retry-After honoured), any other 4xx will not. */
+export class LorebaseError extends KnowledgeError {
   readonly code: string | undefined;
   readonly body: unknown;
   constructor(status: number, body: unknown, what: string) {
     const p = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
-    super(`${what}: ${status} ${String(p.code ?? p.title ?? '')} ${String(p.detail ?? '')}`.trim());
-    this.status = status;
+    const retryAfter = Number(p.retry_after_s);
+    super(`${what}: ${status} ${String(p.code ?? p.title ?? '')} ${String(p.detail ?? '')}`.trim(), {
+      status,
+      permanent: status >= 400 && status < 500 && status !== 429,
+      retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined,
+    });
     this.code = typeof p.code === 'string' ? p.code : undefined;
     this.body = body;
   }
@@ -195,6 +200,18 @@ export class LorebaseClient {
       cursor = page.next_cursor ?? undefined;
     } while (cursor);
     return out;
+  }
+
+  getRecord(kind: string, key: string, branch: string): Promise<{ record?: RecordItem }> {
+    return this.request('GET', `${this.base}/kinds/${encodeURIComponent(kind)}/records/${encodeURIComponent(key)}?${new URLSearchParams({ branch })}`);
+  }
+
+  log(branch: string, limit: number): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request('GET', `${this.base}/branches/${encodeURIComponent(branch)}/log?limit=${limit}`);
+  }
+
+  counts(revision: string): Promise<{ partitions: Array<{ element: string; name: string; count: number }> }> {
+    return this.request('GET', `${this.base}/revisions/${encodeURIComponent(revision)}/counts`);
   }
 
   changes(branch: string, since: string, kinds: string[]): Promise<ChangesPage> {

@@ -1,8 +1,7 @@
-// Appends notable events to the `Chronicle` Kind in Lorebase, so the knowledge graph holds the
-// civilization's history. Entries are queued and written in batches through an Operation
-// (built-in `import_records`: one Revision per batch); 429/5xx back off (Retry-After honoured).
-import { randomUUID } from 'node:crypto';
-import { type LorebaseClient, LorebaseError } from '../lorebase/client.ts';
+// Appends notable events to the `Chronicle` kind of the shared knowledge, so it holds the
+// civilization's history. Entries are queued and written in batches (one revision per batch);
+// failures back off (a retry delay asked by the backend is honoured), permanent ones drop the batch.
+import { type Knowledge, KnowledgeError } from '../ports/knowledge.ts';
 
 export type ChronicleEvent = 'birth' | 'death' | 'arrival' | 'departure' | 'group_formed' | 'group_dissolved' | 'laws_changed' | 'discovery' | 'family_founded' | 'law_proposed' | 'law_breach';
 
@@ -17,7 +16,6 @@ export interface ChronicleEntry {
 export interface ChronicleConfig {
   enabled: boolean;
   kind: string;
-  operation: string;
   flushMs: number;
   maxBatch: number;
   maxQueue: number;
@@ -30,9 +28,8 @@ export class Chronicle {
   written = 0;
   failed = 0;
   lastError: string | undefined;
-  private readonly client: LorebaseClient;
+  private readonly knowledge: Knowledge;
   private readonly cfg: ChronicleConfig;
-  private readonly branch: string;
   private queue: Array<Record<string, unknown>> = [];
   private seq = 0;
   private timer: NodeJS.Timeout | undefined;
@@ -40,9 +37,8 @@ export class Chronicle {
   private backoffMs = 0;
   private notBefore = 0;
 
-  constructor(client: LorebaseClient, branch: string, cfg: ChronicleConfig, session = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)) {
-    this.client = client;
-    this.branch = branch;
+  constructor(knowledge: Knowledge, cfg: ChronicleConfig, session = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)) {
+    this.knowledge = knowledge;
     this.cfg = cfg;
     this.session = session;
   }
@@ -88,9 +84,7 @@ export class Chronicle {
     while (this.queue.length && Date.now() >= this.notBefore) {
       const batch = this.queue.slice(0, this.cfg.maxBatch);
       try {
-        await this.client.execute(this.cfg.operation, { kind: this.cfg.kind, rows: batch }, {
-          branch: this.branch, message: `Chronicle: ${batch.length} event(s)`, idempotencyKey: randomUUID(),
-        });
+        await this.knowledge.write(batch.map((row) => ({ action: 'upsert', kind: this.cfg.kind, key: String(row.code), values: row })), { message: `Chronicle: ${batch.length} event(s)` });
         this.queue.splice(0, batch.length);
         this.written += batch.length;
         this.backoffMs = 0;
@@ -98,13 +92,11 @@ export class Chronicle {
       } catch (err) {
         this.failed++;
         this.lastError = err instanceof Error ? err.message : String(err);
-        const retryAfter = err instanceof LorebaseError ? Number((err.body as Record<string, unknown> | undefined)?.retry_after_s) : NaN;
-        this.backoffMs = Number.isFinite(retryAfter) && retryAfter > 0
-          ? retryAfter * 1000
-          : Math.min(this.cfg.retryMaxMs, this.backoffMs ? this.backoffMs * 2 : this.cfg.retryBaseMs);
+        const retryAfter = err instanceof KnowledgeError ? err.retryAfterMs : undefined;
+        this.backoffMs = retryAfter ?? Math.min(this.cfg.retryMaxMs, this.backoffMs ? this.backoffMs * 2 : this.cfg.retryBaseMs);
         this.notBefore = Date.now() + this.backoffMs;
-        // A 4xx other than 429 will not succeed by retrying: drop the batch.
-        if (err instanceof LorebaseError && err.status >= 400 && err.status < 500 && err.status !== 429) {
+        // A permanent refusal will not succeed by retrying: drop the batch.
+        if (err instanceof KnowledgeError && err.permanent) {
           console.warn(`[chronicle] dropping ${batch.length} entr(ies): ${this.lastError}`);
           this.queue.splice(0, batch.length);
         } else console.warn(`[chronicle] write failed, retrying in ${this.backoffMs} ms: ${this.lastError}`);

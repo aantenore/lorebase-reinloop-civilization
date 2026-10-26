@@ -3,6 +3,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { applyRosterTiers, deepMerge, loadProfile } from './profile.ts';
+import type { LorebaseConfig } from './adapters/knowledge/lorebase/index.ts';
+import type { MemoryKnowledgeConfig } from './adapters/knowledge/memory/index.ts';
+import type { SeedFiles } from './seed.ts';
 import type { Tier, WorldGenConfig } from './world/types.ts';
 
 export const ROOT = resolve(import.meta.dirname, '../..');
@@ -14,6 +17,20 @@ export interface RosterEntry {
   tier: Tier;
   model?: string;
   personality?: string;
+}
+
+/** The shared knowledge of the world: which adapter keeps it (KNOWLEDGE_ADAPTER overrides) and its settings. */
+export interface KnowledgeConfig {
+  adapter: 'lorebase' | 'memory';
+  ruleKind: string;
+  roleKind: string;
+  /** Prefix of the drafts holding law changes proposed from the console. */
+  proposalPrefix: string;
+  /** Retry delay while the laws cannot be loaded, and polling period of the change feed fallback. */
+  pollMs: number;
+  seed: SeedFiles;
+  lorebase: LorebaseConfig;
+  memory: MemoryKnowledgeConfig;
 }
 
 export interface SimConfig {
@@ -28,26 +45,7 @@ export interface SimConfig {
    * ([from, to], inclusive: dev servers that moved to the next free port); SIM_DEV_ORIGIN_PORTS="from-to" (or one port) overrides it.
    */
   http: { host: string; port: number; corsOrigins: string[]; devOriginPorts?: [number, number]; staticDir: string; maxBodyBytes: number; allowedHosts?: string[] };
-  lorebase: {
-    url: string;
-    domain: string;
-    branch: string;
-    ruleKind: string;
-    roleKind: string;
-    directOperation: string;
-    updateOperation: string;
-    enactOperation: string;
-    createOperation: string;
-    repealOperation: string;
-    amendOperation: string;
-    deleteOperation: string;
-    /** Built-in bulk delete (one Revision per call) and the Keeper's per-call key cap (keeper.operations.max_bulk_delete_keys). */
-    bulkDeleteOperation: string;
-    maxBulkDeleteKeys: number;
-    proposalBranchPrefix: string;
-    pollMs: number;
-    reconnectMs: number;
-  };
+  knowledge: KnowledgeConfig;
   models: Record<Tier, string>;
   /** Extra model ids a roster entry may name besides the tier models (no other id is accepted). */
   allowedModels?: string[];
@@ -127,9 +125,14 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env: NodeJS.P
   else if (env.SIM_DEV_ORIGIN_PORTS) console.warn(`SIM_DEV_ORIGIN_PORTS: expected a port or a range "from-to", got "${env.SIM_DEV_ORIGIN_PORTS}"`);
   cfg.http.corsOrigins = [...new Set([...(cfg.http.corsOrigins ?? []), ...devOrigins(cfg.http.devOriginPorts)])];
   cfg.apiToken = env.SIM_API_TOKEN || undefined;
-  cfg.lorebase.url = env.LOREBASE_URL ?? cfg.lorebase.url;
-  cfg.lorebase.domain = env.LOREBASE_DOMAIN ?? cfg.lorebase.domain;
-  cfg.lorebase.branch = env.LOREBASE_BRANCH ?? cfg.lorebase.branch;
+  const adapter = env.KNOWLEDGE_ADAPTER;
+  if (adapter === 'lorebase' || adapter === 'memory') cfg.knowledge.adapter = adapter;
+  else if (adapter) console.warn(`KNOWLEDGE_ADAPTER: expected lorebase or memory, got "${adapter}"`);
+  const lb = cfg.knowledge.lorebase;
+  lb.url = env.LOREBASE_URL ?? lb.url;
+  lb.domain = env.LOREBASE_DOMAIN ?? lb.domain;
+  lb.branch = env.LOREBASE_BRANCH ?? lb.branch;
+  if (env.HERALD_URL !== undefined) lb.herald.url = env.HERALD_URL;
   cfg.agents.maxTurns = num(env.SIM_MAX_TURNS) ?? cfg.agents.maxTurns;
   for (const t of ['opus', 'sonnet', 'haiku'] as const) {
     const v = env[`SIM_MODEL_${t.toUpperCase()}`];

@@ -1,5 +1,6 @@
-// Rule Records <-> the rule shape used by the simulation and the HTTP API.
-import type { LorebaseClient, RecordItem } from './client.ts';
+// Law (Rule) and role (Role) records of the shared knowledge <-> the shapes used by the
+// simulation and the HTTP API.
+import type { Knowledge, KnowledgeRecord } from '../ports/knowledge.ts';
 
 export interface Rule {
   key: string;
@@ -31,7 +32,7 @@ export interface RoleChange {
   description: string | null;
 }
 
-/** Laws (Rule) and social roles (Role) of one Revision of the branch. */
+/** Laws (Rule) and social roles (Role) of one revision of the live world. */
 export interface RuleSnapshot {
   revision: string;
   rules: Rule[];
@@ -43,7 +44,7 @@ export interface LawKinds {
   roleKind: string;
 }
 
-export function ruleFromRecord(r: RecordItem): Rule {
+export function ruleFromRecord(r: KnowledgeRecord): Rule {
   const v = r.values;
   return {
     key: String(v.code ?? r.key),
@@ -54,7 +55,7 @@ export function ruleFromRecord(r: RecordItem): Rule {
   };
 }
 
-export function roleFromRecord(r: RecordItem): Role {
+export function roleFromRecord(r: KnowledgeRecord): Role {
   const v = r.values;
   const factor = (x: unknown) => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x)) ? undefined : Number(x));
   return {
@@ -66,9 +67,9 @@ export function roleFromRecord(r: RecordItem): Role {
   };
 }
 
-export async function loadRules(client: LorebaseClient, kinds: LawKinds, branch: string): Promise<RuleSnapshot> {
-  const rules = await client.listRecords(kinds.ruleKind, branch);
-  const roles = await client.listRecords(kinds.roleKind, branch).catch(() => ({ revision: rules.revision, items: [] as RecordItem[] }));
+export async function loadRules(knowledge: Knowledge, kinds: LawKinds): Promise<RuleSnapshot> {
+  const rules = await knowledge.readAll(kinds.ruleKind);
+  const roles = await knowledge.readAll(kinds.roleKind).catch(() => ({ revision: rules.revision, items: [] as KnowledgeRecord[] }));
   return {
     revision: rules.revision,
     rules: rules.items.map(ruleFromRecord).sort((a, b) => a.category.localeCompare(b.category) || a.key.localeCompare(b.key)),

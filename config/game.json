@@ -258,7 +258,6 @@
   "chronicle": {
     "enabled": true,
     "kind": "Chronicle",
-    "operation": "import_records",
     "flushMs": 10000,
     "maxBatch": 50,
     "maxQueue": 1000,
@@ -278,31 +277,12 @@
     "askChance": 0.35
   },
   "brain": {
-    "mcpUrl": "http://127.0.0.1:8190/mcp",
-    "domain": "world",
-    "tools": [
-      "lorebase_get",
-      "lorebase_query",
-      "lorebase_search",
-      "lorebase_history",
-      "lorebase_diff",
-      "lorebase_changes",
-      "lorebase_schema",
-      "lorebase_context"
-    ],
     "cacheMs": 30000,
-    "callTimeoutMs": 15000,
-    "outputMaxChars": 3000,
-    "connectRetryMs": 10000,
-    "branchArgs": [
-      "branch"
-    ]
+    "outputMaxChars": 3000
   },
   "insights": {
     "enabled": true,
     "kind": "Insight",
-    "operation": "share_insight",
-    "updateOperation": "update_insight",
     "branchPrefix": "role/",
     "autoAcceptMinutes": 120,
     "maxPendingPerRole": 10,
@@ -329,7 +309,6 @@
       "produces": "produces",
       "requires": "requires"
     },
-    "importOperation": "import_batch",
     "minExperimentItems": 2,
     "maxTradeKinds": 4,
     "flowsMs": 30000,
@@ -338,18 +317,10 @@
     "chronicleEvent": "discovery"
   },
   "memory": {
+    "adapter": "mnemo",
     "enabled": true,
-    "url": "http://127.0.0.1:4410",
-    "timeoutMs": 4000,
-    "pollMs": 1500,
     "recallLimit": 6,
     "textMaxChars": 400,
-    "runStore": true,
-    "runSkipEvents": [
-      "text_delta",
-      "thinking_delta"
-    ],
-    "runFlushMs": 1000,
     "ingest": {
       "planned": {
         "importance": 0.2,
@@ -416,8 +387,26 @@
         "emotion": 0.2
       }
     },
-    "retries": 4,
-    "retryBaseMs": 500
+    "mnemo": {
+      "url": "http://127.0.0.1:4410",
+      "timeoutMs": 4000,
+      "pollMs": 1500,
+      "runStore": true,
+      "runSkipEvents": [
+        "text_delta",
+        "thinking_delta"
+      ],
+      "runFlushMs": 1000,
+      "retries": 4,
+      "retryBaseMs": 500
+    },
+    "inmem": {
+      "pollMs": 1500,
+      "fadePerHour": 0.02,
+      "forgetBelow": 0.05,
+      "maxPerOwner": 500,
+      "maxConversations": 5000
+    }
   },
   "services": {
     "herald": {

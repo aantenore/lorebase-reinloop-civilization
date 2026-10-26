@@ -1,10 +1,10 @@
 // What a person of the real-time world reads: identity, personality, role (code and title from
-// the Lorebase Role Record) and a factual statement of its faculties (a mind connected to
-// Lorebase, a private memory); then short factual perception, what was said to them and what
-// they lived. The laws are NOT in the prompt: they are in Lorebase, to be consulted through
+// the Role record of the shared knowledge) and a factual statement of its faculties (a mind connected to
+// the shared knowledge, a private memory); then short factual perception, what was said to them and what
+// they lived. The laws are NOT in the prompt: they are in the shared knowledge, to be consulted through
 // the MCP tools. No tasks, goals or strategy. Texts come from config/i18n.
 import type { Translate } from '../i18n.ts';
-import type { Role, RuleChange } from '../lorebase/rules.ts';
+import type { Role, RuleChange } from '../laws/laws.ts';
 import { knownRecipes } from './economy.ts';
 import { tileOf } from './plan.ts';
 import { type BodyCause, DAY_MINUTES, type RtEntity, type RtWorld } from './world.ts';
@@ -68,7 +68,7 @@ export function bodyBlock(t: Translate, w: RtWorld, e: RtEntity, limits: Pick<Pr
 }
 
 /**
- * The recipes this person knows (Lorebase recipes of its role or of anyone, whose technology is known), with what
+ * The recipes this person knows (recipes of its role or of anyone, whose technology is known), with what
  * each needs and what the person lacks right now. Hidden (undiscovered) recipes never appear.
  */
 export function recipesBlock(t: Translate, w: RtWorld, e: RtEntity, limits: Pick<PromptLimits, 'recipesMax'>): string {
@@ -120,7 +120,7 @@ export function changedBlock(t: Translate, changed: RuleChange[]): string {
   return t('rt.observation.changed', { changes: changed.map((c) => t('rt.observation.changeLine', { key: c.key, old: c.old ?? none, new: c.new ?? none })).join('\n') });
 }
 
-/** How a law change is proclaimed to every person: the full text of the law from Lorebase, and its value. */
+/** How a law change is proclaimed to every person: the full text of the law from the shared knowledge, and its value. */
 export function proclamation(t: Translate, c: RuleChange): string {
   if (c.new === null) return t('rt.proclamation.removed', { text: c.text, key: c.key });
   if (c.old === null) return t('rt.proclamation.new', { text: c.text, key: c.key, value: c.new });

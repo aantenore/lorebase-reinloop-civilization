@@ -1,9 +1,9 @@
 // What a person is told. Instructions: identity, personality, role in society (a Role Record
-// from Lorebase) and the fact that the world has laws. Each tick: the laws verbatim from
-// Lorebase and what the person perceives. No goals beyond staying alive, no advice, no tasks.
+// from the shared knowledge) and the fact that the world has laws. Each tick: the laws verbatim from
+// the shared knowledge and what the person perceives. No goals beyond staying alive, no advice, no tasks.
 // Every text comes from the language templates (config/i18n).
 import type { Translate } from '../i18n.ts';
-import type { Role, Rule, RuleChange } from '../lorebase/rules.ts';
+import type { Role, Rule, RuleChange } from '../laws/laws.ts';
 import { seasonOf, ticksUntilWinter, type World } from '../world/engine.ts';
 import type { AgentState, Rules } from '../world/types.ts';
 

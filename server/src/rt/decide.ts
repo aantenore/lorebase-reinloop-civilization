@@ -5,7 +5,8 @@
 import { agent, type MockTurn, mockProvider, type ModelRef, type ModelRequest, type Sink, type Tool, tool } from 'reinloop';
 import type { SimConfig } from '../config.ts';
 import type { Translate } from '../i18n.ts';
-import type { Role, RuleChange } from '../lorebase/rules.ts';
+import type { Role, RuleChange } from '../laws/laws.ts';
+import { CONSULT_SEARCH } from '../ports/knowledge.ts';
 import type { Brain, ConsultEvent } from './brain.ts';
 import type { Tier } from '../world/types.ts';
 import { AGENT_PATTERNS, cacheParams, type GameConfig, type TierDecision } from './config.ts';
@@ -47,7 +48,7 @@ export interface DecideHost {
   runSinks(): Sink[];
   /** A model run ended (usage and cost per agent, for the Observatory). */
   ranModel(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: TokenUsage; costUsd?: number }): void;
-  /** A person consulted Lorebase (shown to clients). */
+  /** A person consulted the shared knowledge (shown to clients). */
   consulted(e: RtEntity, ev: ConsultEvent): void;
   /** The model's reasoning summary behind a decision (privileged clients only). */
   reasoned(e: RtEntity, text: string): void;
@@ -62,7 +63,7 @@ export interface DecideHost {
   testify(e: RtEntity, input: { chi?: unknown; legge?: unknown; rispettata?: unknown; motivo?: unknown }): ToolOutcome;
   /** An opinion about someone (kept in the judge's private memory and in the society). */
   judge(e: RtEntity, who: string, score: number, reason: string): ToolOutcome;
-  /** A law proposal (a Lorebase Proposal reviewed by humans). */
+  /** A law proposal (a proposal in the shared knowledge, reviewed by humans). */
   proposeLaw(e: RtEntity, input: { key?: unknown; text?: unknown; category?: unknown; value?: unknown }): Promise<ToolOutcome>;
   /** Weight of a person's vote and claim to lead a group (from esteem). */
   voteWeight(id: string): number;
@@ -86,10 +87,10 @@ export interface Failure {
 
 export const isFailure = (v: unknown): v is Failure => !!v && typeof v === 'object' && typeof (v as Failure).error === 'string';
 
-/** Lorebase read tools (bounded per decision) and the private memory of one person. */
+/** Consultations of the shared knowledge (bounded per decision) and the private memory of one person. */
 export function faculties(host: DecideHost, e: RtEntity, maxConsults: number): Tool[] {
   return [
-    ...host.brain.lorebaseTools({ left: maxConsults, onConsult: (ev) => host.consulted(e, ev) }),
+    ...host.brain.knowledgeTools({ left: maxConsults, onConsult: (ev) => host.consulted(e, ev) }),
     ...host.brain.memoryTools(e.name, () => ({ day: host.world().day, minute: host.world().minute }), host.cfg.memory.ingest.remember ?? { importance: 0.5, emotion: 0 }),
   ];
 }
@@ -251,12 +252,12 @@ function socialTools(host: DecideHost, e: RtEntity): Tool[] {
   ];
 }
 
-/** Mock decision: sometimes a Lorebase consultation first, then social moves and a plan. */
+/** Mock decision: sometimes a consultation of the shared knowledge first, then social moves and a plan. */
 function mockDecision(host: DecideHost, e: RtEntity, tc: TierDecision, req: ModelRequest): MockTurn {
   const consulted = req.messages.some((m) => m.role === 'tool');
   const seed = [...`${e.id}${host.world().minute}`].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
   if (!consulted && host.brain.connected && tc.maxConsults > 0 && seed % 3 === 0) {
-    return { toolCalls: [{ name: 'lorebase_search', args: { query: host.t('rt.mock.consult'), kinds: ['Rule'], limit: 3 } }] };
+    return { toolCalls: [{ name: CONSULT_SEARCH, args: { query: host.t('rt.mock.consult'), kinds: ['Rule'], limit: 3 } }] };
   }
   return mockPlanTurn(host, e, tc);
 }
@@ -376,7 +377,7 @@ export function lastHeard(e: Pick<RtEntity, 'inbox'>, speaker: Pick<RtEntity, 'i
 }
 
 /**
- * Quick spoken reply, streamed through `onDelta`. The person may consult Lorebase (bounded by
+ * Quick spoken reply, streamed through `onDelta`. The person may consult the shared knowledge (bounded by
  * `conversation.replyMaxConsults`) before answering; memories related to what was said are recalled first.
  */
 export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, onDelta: (delta: string) => void, stop?: AbortSignal): Promise<Reply> {
@@ -395,13 +396,13 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
     return { text: t(`rt.mock.reply.${(n + w.minute) % 3}`, { name: speaker.name, me: e.name, role: host.roleTitle(e.role), state }) };
   };
   const consults = Math.max(0, cfg.conversation.replyMaxConsults);
-  const lorebase = consults > 0 ? host.brain.lorebaseTools({ left: consults, onConsult: (ev) => host.consulted(e, ev) }) : [];
+  const knowledge = consults > 0 ? host.brain.knowledgeTools({ left: consults, onConsult: (ev) => host.consulted(e, ev) }) : [];
   const runner = agent({
     name: e.id,
     model: modelRef(host, e.model, mockReply, cfg.mock.replyDelayMs),
     params: { ...cfg.decisions.modelParams.reply, ...cacheParams(cfg), maxTokens: cfg.conversation.replyMaxOutputTokens },
     instructions: `${rtInstructions(t, e, host.roleOf(e.role), { horizon: w.r('plan_horizon_minutes') * tc.horizonFactor })}\n${t('rt.replyInstructions')}`,
-    tools: [rethinkTool, ...lorebase],
+    tools: [rethinkTool, ...knowledge],
     // Consultations, plus rethink and one refused extra call, then the answer.
     budget: { maxTurns: cfg.conversation.replyMaxTurns, maxToolCalls: consults + 2 },
     toolSettings: { concurrency: 1 },

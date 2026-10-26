@@ -1,13 +1,13 @@
-// The simulation: reads the rules snapshot kept by the Lorebase watcher, runs every living
+// The simulation: reads the rules snapshot kept by the law watcher, runs every living
 // person's reinloop agent concurrently each tick, resolves the world and publishes events.
 import { ROOT, type RosterEntry, type SimConfig } from '../config.ts';
 import { cleanEntry, loadRosterFile, saveRosterFile, validateEntry, validateRoster } from '../roster.ts';
 import { loadTemplates, type Translate, translator } from '../i18n.ts';
 import { AgentRegistry, type RegisteredAgent } from '../agents/registry.ts';
 import { observation } from '../agents/prompt.ts';
-import { LorebaseClient } from '../lorebase/client.ts';
-import { diffRules, type Role, type RoleChange, type Rule, type RuleChange, ruleValues } from '../lorebase/rules.ts';
-import { RuleWatcher } from '../lorebase/watcher.ts';
+import { diffRules, type Role, type RoleChange, type Rule, type RuleChange, ruleValues } from '../laws/laws.ts';
+import { LawWatcher } from '../laws/watcher.ts';
+import type { Knowledge } from '../ports/knowledge.ts';
 import { missingRules, seasonOf, World } from '../world/engine.ts';
 import { type ActionResult, type AgentState, type Rules, type Stats, type Tile, type WorldEvent } from '../world/types.ts';
 
@@ -17,7 +17,18 @@ export interface SimStatus {
   tickMs: number;
   provider: 'anthropic' | 'mock';
   model: string;
-  lorebase: { connected: boolean; url: string; domain: string; branch: string; revision: string };
+  knowledge: KnowledgeStatus;
+  /** @deprecated alias of `knowledge`, kept for one version. */
+  lorebase: KnowledgeStatus;
+}
+
+export interface KnowledgeStatus {
+  connected: boolean;
+  adapter: string;
+  url: string;
+  domain: string;
+  branch: string;
+  revision: string;
 }
 
 export type SimEvent = { type: string; [key: string]: unknown };
@@ -30,13 +41,13 @@ const short = (v: unknown) => {
 
 export class Simulation {
   readonly cfg: SimConfig;
-  readonly client: LorebaseClient;
+  readonly knowledge: Knowledge;
   world: World;
   roster: RosterEntry[];
   history: Stats[] = [];
   running = false;
   private readonly registry: AgentRegistry;
-  private readonly watcher: RuleWatcher;
+  private readonly watcher: LawWatcher;
   private readonly listeners = new Set<Listener>();
   readonly t: Translate;
   private laws: Rule[] = [];
@@ -49,10 +60,10 @@ export class Simulation {
   private wake: (() => void) | undefined;
   private loopRunning = false;
 
-  constructor(cfg: SimConfig) {
+  constructor(cfg: SimConfig, knowledge: Knowledge) {
     this.cfg = cfg;
     this.t = translator(loadTemplates(ROOT, cfg.language));
-    this.client = new LorebaseClient(cfg.lorebase.url, cfg.lorebase.domain);
+    this.knowledge = knowledge;
     this.world = this.newWorld();
     this.roster = this.cfg.roster;
     const host = { world: () => this.world, rules: () => this.tickValues, t: this.t };
@@ -63,11 +74,10 @@ export class Simulation {
       { ...host, lookMaxTiles: cfg.agents.lookMaxTiles, messageMaxChars: cfg.agents.messageMaxChars, onAction: (id, tool, args, res) => this.onAction(id, tool, args, res) },
       { ...host, reserveFoodTicks: cfg.mock.reserveFoodTicks },
     );
-    const lb = cfg.lorebase;
-    this.watcher = new RuleWatcher(this.client, { ruleKind: lb.ruleKind, roleKind: lb.roleKind, branch: lb.branch, pollMs: lb.pollMs, reconnectMs: lb.reconnectMs }, {
-      onChange: (snapshot, changes, roleChanges, event) => this.applyRules(snapshot.rules, snapshot.roles, snapshot.revision, changes, roleChanges, event?.message),
+    this.watcher = new LawWatcher(knowledge, { ruleKind: cfg.knowledge.ruleKind, roleKind: cfg.knowledge.roleKind }, {
+      onChange: (snapshot, changes, roleChanges, rev) => this.applyRules(snapshot.rules, snapshot.roles, snapshot.revision, changes, roleChanges, rev?.message),
       onStatus: (connected, detail) => {
-        console.log(`[lorebase] ${connected ? 'connected' : 'disconnected'}: ${detail}`);
+        console.log(`[knowledge] ${connected ? 'connected' : 'disconnected'}: ${detail}`);
         this.emit({ type: 'status', status: this.status() });
       },
     });
@@ -92,17 +102,18 @@ export class Simulation {
 
   // ---- lifecycle --------------------------------------------------------------
 
-  /** Connects to Lorebase (retrying until the first snapshot loads) and spawns the roster. */
+  /** Connects to the shared knowledge (retrying until the first snapshot loads) and spawns the roster. */
   async init(): Promise<void> {
     for (;;) {
       try {
         const snap = await this.watcher.start();
         this.applyRules(snap.rules, snap.roles, snap.revision, [], [], undefined, true);
-        console.log(`[lorebase] ${snap.rules.length} rules and ${snap.roles.length} roles loaded from ${this.cfg.lorebase.url} ${this.cfg.lorebase.domain}/${this.cfg.lorebase.branch} @ ${snap.revision.slice(0, 12)}`);
+        const k = this.knowledge.info;
+        console.log(`[knowledge] ${snap.rules.length} rules and ${snap.roles.length} roles loaded from ${k.adapter} ${k.location} ${k.space}/${k.live} @ ${snap.revision.slice(0, 12)}`);
         break;
       } catch (err) {
-        console.error(`[lorebase] cannot load rules (${err instanceof Error ? err.message : err}); retrying in ${this.cfg.lorebase.pollMs} ms`);
-        await new Promise((r) => setTimeout(r, this.cfg.lorebase.pollMs));
+        console.error(`[knowledge] cannot load rules (${err instanceof Error ? err.message : err}); retrying in ${this.cfg.knowledge.pollMs} ms`);
+        await new Promise((r) => setTimeout(r, this.cfg.knowledge.pollMs));
       }
     }
     this.roster = this.loadRoster();
@@ -184,15 +195,15 @@ export class Simulation {
   private applyRules(rules: Rule[], roles: Role[], revision: string, changes: RuleChange[], roleChanges: RoleChange[], message?: string, initial = false): void {
     const values = ruleValues(rules);
     const missing = missingRules(values);
-    if (missing.length) console.warn(`[lorebase] rules missing in revision ${revision.slice(0, 12)}: ${missing.join(', ')}; keeping previous values`);
+    if (missing.length) console.warn(`[knowledge] rules missing in revision ${revision.slice(0, 12)}: ${missing.join(', ')}; keeping previous values`);
     this.values = { ...this.values, ...values };
     this.laws = rules;
     this.roles = roles;
     this.revision = revision;
     if (initial) return;
     if (roleChanges.length) this.registry.refreshInstructions((id) => this.world.get(id));
-    console.log(`[lorebase] rules_changed @ ${revision.slice(0, 12)}${message ? ` "${message}"` : ''}: ${changes.map((c) => `${c.key} ${c.old} -> ${c.new}`).join(', ') || 'no rule value change'}${roleChanges.length ? `; roles: ${roleChanges.map((r) => r.key).join(', ')}` : ''}`);
-    this.emit({ type: 'rules_changed', revision, source: 'lorebase', changes, ...(roleChanges.length ? { roleChanges } : {}) });
+    console.log(`[knowledge] rules_changed @ ${revision.slice(0, 12)}${message ? ` "${message}"` : ''}: ${changes.map((c) => `${c.key} ${c.old} -> ${c.new}`).join(', ') || 'no rule value change'}${roleChanges.length ? `; roles: ${roleChanges.map((r) => r.key).join(', ')}` : ''}`);
+    this.emit({ type: 'rules_changed', revision, source: 'knowledge', changes, ...(roleChanges.length ? { roleChanges } : {}) });
     if (changes.length) {
       const list = changes.map((c) => `${c.key} ${c.old ?? '-'} → ${c.new ?? '-'}`).join(', ');
       this.emit({ type: 'world_event', tick: this.world.tick, kind: 'rules', text: this.t('events.rules', { changes: list }) });
@@ -360,6 +371,11 @@ export class Simulation {
     return this.laws;
   }
 
+  private knowledgeStatus(): KnowledgeStatus {
+    const k = this.knowledge.info;
+    return { connected: this.watcher.connected, adapter: k.adapter, url: k.location, domain: k.space, branch: k.live, revision: this.revision };
+  }
+
   status(): SimStatus {
     const models = [...new Set(this.registry.all().map((r: RegisteredAgent) => r.model))];
     return {
@@ -368,7 +384,8 @@ export class Simulation {
       tickMs: this.cfg.tickMs,
       provider: this.registry.provider,
       model: this.cfg.modelOverride ?? (models.join(', ') || this.cfg.models.haiku),
-      lorebase: { connected: this.watcher.connected, url: this.cfg.lorebase.url, domain: this.cfg.lorebase.domain, branch: this.cfg.lorebase.branch, revision: this.revision },
+      knowledge: this.knowledgeStatus(),
+      lorebase: this.knowledgeStatus(),
     };
   }
 

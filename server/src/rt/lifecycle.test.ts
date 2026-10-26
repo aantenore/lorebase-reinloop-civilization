@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createAdapters } from '../composition.ts';
 import { loadConfig } from '../config.ts';
 import { loadTemplates, translator } from '../i18n.ts';
 import { ROOT } from '../config.ts';
@@ -53,15 +54,15 @@ test('lastHeard finds what the speaker last said to this person', () => {
 });
 
 test('a death frees the mind, the group and the private memory', async () => {
-  const sim = loadConfig(['--mock'], {});
-  const g = new Game(sim, { ...game, death: { forgetMemories: true, epitaph: false } });
+  const sim = loadConfig(['--mock'], { KNOWLEDGE_ADAPTER: 'memory' });
+  const cfg = { ...game, death: { forgetMemories: true, epitaph: false }, memory: { ...game.memory, adapter: 'inmem' as const } };
+  const g = new Game(sim, cfg, createAdapters(sim, cfg));
   const forgot: Array<[string, unknown]> = [];
-  const mnemo = g.mnemo as unknown as { forget: (a: string, o: unknown) => Promise<unknown>; list: () => Promise<unknown[]> };
-  mnemo.forget = async (a, o) => {
+  const memory = g.memory as unknown as { deleteOwner: (a: string, o: unknown) => Promise<unknown> };
+  memory.deleteOwner = async (a, o) => {
     forgot.push([a, o]);
     return { memories: 3, conversations: 1, runs: 0 };
   };
-  mnemo.list = async () => [];
   g.world.rules = new Proxy({}, { get: () => 1 }) as typeof g.world.rules;
   const e = g.world.spawn({ name: 'Mara Bianca', role: 'elder', tier: 'haiku', model: 'mock', kind: 'agent' });
   const internals = g as unknown as { awaken(e: unknown): void; minds: Map<string, { stop(): void }> };

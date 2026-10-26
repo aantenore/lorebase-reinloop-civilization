@@ -1,11 +1,10 @@
-// The economy's catalog in Lorebase. `main` holds what the civilization knows: every Resource,
-// the recipes known from the start, and each discovered Technology with its recipes. The
-// hidden branch (config `economy.hiddenBranch`) holds the whole catalog, undiscovered
-// technologies included; agents never read it (their Lorebase tools are pinned to `main`).
-// A discovery is merged into `main` through a branch -> Proposal -> merge, so the knowledge
-// graph records who found what and when.
-import { randomUUID } from 'node:crypto';
-import type { LorebaseClient, RecordItem } from '../lorebase/client.ts';
+// The economy's catalog in the shared knowledge. The live world holds what the civilization
+// knows: every Resource, the recipes known from the start, and each discovered Technology with
+// its recipes. The hidden scope (config `economy.hiddenBranch`) holds the whole catalog,
+// undiscovered technologies included; people never read it (their consultations only reach the
+// live world). A discovery reaches the live world through a draft -> proposal -> accept, so the
+// knowledge records who found what and when.
+import type { Change, Knowledge } from '../ports/knowledge.ts';
 import { type Catalog, type Discovery, type RecipeDef, recipeFrom, resourceFrom, type TechDef, techFrom } from './economy.ts';
 
 export interface EconomyConfig {
@@ -14,7 +13,6 @@ export interface EconomyConfig {
   discoveryBranchPrefix: string;
   kinds: { resource: string; recipe: string; technology: string };
   relations: { unlockedBy: string; knownBy: string; consumes: string; produces: string; requires: string };
-  importOperation: string;
   minExperimentItems: number;
   maxTradeKinds: number;
   flowsMs: number;
@@ -29,29 +27,26 @@ export interface LoadedEconomy {
 const byCode = <T extends { code: string }>(items: T[]) => new Map(items.map((i) => [i.code, i]));
 
 export class EconomyBook {
-  private readonly client: LorebaseClient;
+  private readonly knowledge: Knowledge;
   private readonly cfg: EconomyConfig;
-  private readonly main: string;
   private queue: Array<{ tech: TechDef; recipes: RecipeDef[]; d: Discovery; session: string }> = [];
   private busy = false;
   written = 0;
   lastError: string | undefined;
 
-  constructor(client: LorebaseClient, main: string, cfg: EconomyConfig) {
-    this.client = client;
-    this.main = main;
+  constructor(knowledge: Knowledge, cfg: EconomyConfig) {
+    this.knowledge = knowledge;
     this.cfg = cfg;
   }
 
-  /** Full catalog (hidden branch, falling back to main) and the technologies already discovered on main. */
+  /** Full catalog (hidden scope, falling back to the live world) and the technologies already discovered. */
   async load(): Promise<LoadedEconomy> {
     const k = this.cfg.kinds;
-    const read = async (kind: string, branch: string) => (await this.client.listRecords(kind, branch)).items.map((r: RecordItem) => r.values);
-    const hidden = await this.client.getBranch(this.cfg.hiddenBranch).then(() => this.cfg.hiddenBranch, () => undefined);
-    if (!hidden) console.warn(`[economy] hidden branch "${this.cfg.hiddenBranch}" missing: only recipes on ${this.main} exist (run: npm run lorebase:seed)`);
-    const src = hidden ?? this.main;
+    const read = async (kind: string, scope?: string) => (await this.knowledge.readAll(kind, { scope })).items.map((r) => r.values);
+    const hidden = (await this.knowledge.hasScope(this.cfg.hiddenBranch)) ? this.cfg.hiddenBranch : undefined;
+    if (!hidden) console.warn(`[economy] hidden catalog "${this.cfg.hiddenBranch}" missing: only the recipes of the live world exist (seed the knowledge first)`);
     const [resources, recipes, techs, mainTechs] = await Promise.all([
-      read(k.resource, this.main), read(k.recipe, src), read(k.technology, src), read(k.technology, this.main),
+      read(k.resource), read(k.recipe, hidden), read(k.technology, hidden), read(k.technology),
     ]);
     const catalog: Catalog = {
       resources: byCode(resources.map(resourceFrom)),
@@ -66,7 +61,7 @@ export class EconomyBook {
     return { catalog, discovered };
   }
 
-  /** Records a discovery on main (queued, retried until it lands). */
+  /** Records a discovery in the live world (queued, retried until it lands). */
   record(tech: TechDef, recipes: RecipeDef[], d: Discovery, session: string): void {
     this.queue.push({ tech, recipes, d, session });
     void this.drain();
@@ -101,38 +96,48 @@ export class EconomyBook {
 
   private async write(tech: TechDef, recipes: RecipeDef[], d: Discovery, session: string): Promise<void> {
     const r = this.cfg.relations;
-    const branch = `${this.cfg.discoveryBranchPrefix}${tech.code}-${Date.now().toString(36)}`;
-    const records = [
+    const changes: Change[] = [
       {
-        kind: this.cfg.kinds.technology, code: tech.code, name: tech.name, description: tech.description, prerequisites: tech.prerequisites,
-        discovered: true, discovered_by: d.by, discovered_role: d.role, discovered_day: d.day, discovered_minute: Math.floor(d.minute), session,
+        action: 'upsert', kind: this.cfg.kinds.technology, key: tech.code,
+        values: {
+          code: tech.code, name: tech.name, description: tech.description, prerequisites: tech.prerequisites,
+          discovered: true, discovered_by: d.by, discovered_role: d.role, discovered_day: d.day, discovered_minute: Math.floor(d.minute), session,
+        },
         ...(tech.prerequisites.length ? { links: { [r.requires]: tech.prerequisites } } : {}),
       },
-      ...recipes.map((x) => recipeRow(this.cfg, x)),
+      ...recipes.map((x) => recipeChange(this.cfg, x)),
     ];
-    await this.client.createBranch(branch, this.main);
+    const p = await this.knowledge.propose({
+      draft: `${this.cfg.discoveryBranchPrefix}${tech.code}-${Date.now().toString(36)}`,
+      title: `Discovery: ${tech.name}`,
+      description: `${d.by} (${d.role}) discovered ${tech.code} on day ${d.day}.`,
+      message: `Discovery: ${tech.name} by ${d.by}`,
+      changes,
+    });
     try {
-      await this.client.execute(this.cfg.importOperation, { records }, { branch, message: `Discovery: ${tech.name} by ${d.by}`, idempotencyKey: randomUUID() });
-      const p = await this.client.createProposal(branch, this.main, `Discovery: ${tech.name}`, `${d.by} (${d.role}) discovered ${tech.code} on day ${d.day}.`);
-      await this.client.review(p.id, 'approve', 'Recorded by the world');
-      await this.client.merge(p.id, `Discovery: ${tech.name} by ${d.by}`);
-    } finally {
-      await this.client.deleteBranch(branch).catch(() => undefined);
+      await this.knowledge.review(p.id, 'approve', 'Recorded by the world');
+      await this.knowledge.accept(p.id, `Discovery: ${tech.name} by ${d.by}`);
+    } catch (err) {
+      await this.knowledge.reject(p.id).catch(() => this.knowledge.discardDraft(p.draft).catch(() => undefined));
+      throw err;
     }
   }
 }
 
-/** A Recipe row for import_batch, with its Links (role, technology, inputs, outputs). */
-export function recipeRow(cfg: Pick<EconomyConfig, 'kinds' | 'relations'>, x: RecipeDef): Record<string, unknown> {
+/** A Recipe record with its links (role, technology, inputs, outputs). */
+export function recipeChange(cfg: Pick<EconomyConfig, 'kinds' | 'relations'>, x: RecipeDef): Change {
   const r = cfg.relations;
-  const links: Record<string, unknown> = {
+  const links: Record<string, string | string[]> = {
     [r.consumes]: Object.keys(x.inputs),
     [r.produces]: Object.keys(x.outputs),
   };
   if (x.role) links[r.knownBy] = x.role;
   if (x.tech) links[r.unlockedBy] = x.tech;
   return {
-    kind: cfg.kinds.recipe, code: x.code, name: x.name, description: x.description, inputs: x.inputs, outputs: x.outputs, tools: x.tools,
-    ...(x.role ? { role: x.role } : {}), ...(x.tech ? { tech: x.tech } : {}), ...(x.station ? { station: x.station } : {}), minutes: x.minutes, links,
+    action: 'upsert', kind: cfg.kinds.recipe, key: x.code, links,
+    values: {
+      code: x.code, name: x.name, description: x.description, inputs: x.inputs, outputs: x.outputs, tools: x.tools,
+      ...(x.role ? { role: x.role } : {}), ...(x.tech ? { tech: x.tech } : {}), ...(x.station ? { station: x.station } : {}), minutes: x.minutes,
+    },
   };
 }

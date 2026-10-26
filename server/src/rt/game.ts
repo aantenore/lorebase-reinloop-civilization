@@ -1,20 +1,20 @@
 // The real-time game: runs the world loop, schedules decisions on events (never per second),
-// runs group decisions, follows the laws in Lorebase, writes the Chronicle and speaks the
+// runs group decisions, follows the laws of the shared knowledge, writes the Chronicle and speaks the
 // WebSocket protocol (game/src/net/protocol.ts) to clients.
 import type { RosterEntry, SimConfig } from '../config.ts';
 import { ROOT } from '../config.ts';
 import type { Conn } from '../http/ws.ts';
 import { tokenMatches } from '../http/security.ts';
 import { loadTemplates, type Translate, translator } from '../i18n.ts';
-import { LorebaseClient } from '../lorebase/client.ts';
-import { diffRules, type Role, type RoleChange, type Rule, type RuleChange, ruleValues } from '../lorebase/rules.ts';
-import { RuleWatcher } from '../lorebase/watcher.ts';
+import { diffRules, type Role, type RoleChange, type Rule, type RuleChange, ruleValues } from '../laws/laws.ts';
+import { LawWatcher } from '../laws/watcher.ts';
+import type { Knowledge } from '../ports/knowledge.ts';
+import { type Memory, type MemoryEvent, type MemoryItem, memoryKey } from '../ports/memory.ts';
 import { cleanEntry, loadRosterFile, saveRosterFile, validateEntry, validateRoster } from '../roster.ts';
 import type { Rules } from '../world/types.ts';
 import { Brain } from './brain.ts';
 import { type Catalog, Flows, unlocksOf } from './economy.ts';
 import { EconomyBook } from './economy-book.ts';
-import { type MemoryEvent, memoryKey, Mnemo } from './mnemo.ts';
 import { Observatory, UsageLedger } from './observatory.ts';
 import { Chronicle, type ChronicleEvent } from './chronicle.ts';
 import { type Insight, InsightBook } from './insights.ts';
@@ -47,23 +47,24 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 export class Game {
   readonly cfg: SimConfig;
   readonly game: GameConfig;
-  readonly client: LorebaseClient;
+  /** The shared knowledge of the world and the private memory of its people (see composition.ts). */
+  readonly knowledge: Knowledge;
+  readonly memory: Memory;
   readonly t: Translate;
   readonly mock: boolean;
   world: RtWorld;
   roster: RosterEntry[] = [];
   private groups: GroupManager;
-  private readonly watcher: RuleWatcher;
+  private readonly watcher: LawWatcher;
   private readonly chronicle: Chronicle;
   readonly brain: Brain;
   readonly insights: InsightBook;
-  readonly mnemo: Mnemo;
   readonly economy: EconomyBook;
   private catalog: Catalog = { resources: new Map(), recipes: new Map(), techs: new Map() };
   private discovered = new Map<string, import('./economy.ts').Discovery>();
   private readonly flows = new Flows();
   readonly usage = new UsageLedger();
-  /** Recent thoughts (plan reasons) and Lorebase consultations per agent, for god mode. */
+  /** Recent thoughts (plan reasons) and consultations of the shared knowledge per agent, for god mode. */
   private readonly thoughts = new Map<string, Array<{ at: { day: number; minute: number }; text: string }>>();
   private readonly consults = new Map<string, Array<{ at: { day: number; minute: number }; tool: string; query: string }>>();
   readonly observatoryView: Observatory;
@@ -106,7 +107,7 @@ export class Game {
   /** Plans a reflex interrupted, by person id (resumed when the reflex ends, dropped by a new plan). */
   private readonly suspended = new Map<string, Plan>();
   private persistBusy = false;
-  /** Opinions formed since the society was last saved to mnemo. */
+  /** Opinions formed since the society was last saved. */
   private unsavedOpinions: Opinion[] = [];
   private readonly testimonies: Testimonies;
   /** Laws the engine reads; any other law is a social law, kept or broken only in the eyes of witnesses. */
@@ -114,25 +115,25 @@ export class Game {
   /** Set when the model cost reached budget.maxUsd: no mind runs any more. */
   private budgetPaused = false;
 
-  constructor(cfg: SimConfig, game: GameConfig) {
+  constructor(cfg: SimConfig, game: GameConfig, deps: { knowledge: Knowledge; memory: Memory }) {
     this.cfg = cfg;
     this.game = game;
     this.t = translator(loadTemplates(ROOT, cfg.language));
     this.mock = cfg.forceMock || !process.env.ANTHROPIC_API_KEY;
-    this.client = new LorebaseClient(cfg.lorebase.url, cfg.lorebase.domain);
+    this.knowledge = deps.knowledge;
+    this.memory = deps.memory;
     this.limiter = new Limiter(game.decisions.maxConcurrent);
-    this.mnemo = new Mnemo(game.memory);
-    this.brain = new Brain(game.brain, this.t, this.mnemo, cfg.lorebase.branch);
-    this.economy = new EconomyBook(this.client, cfg.lorebase.branch, game.economy);
+    this.brain = new Brain(game.brain, this.t, this.memory, this.knowledge.consult);
+    this.economy = new EconomyBook(this.knowledge, game.economy);
     this.observatoryView = new Observatory({
-      client: this.client, mnemo: this.mnemo, branch: cfg.lorebase.branch, revision: () => this.revision, usage: this.usage,
+      knowledge: this.knowledge, memory: this.memory, revision: () => this.revision, usage: this.usage,
       agents: () => this.world.living().filter((e) => e.kind === 'agent').map((e) => ({ id: e.id, name: e.name, key: memoryKey(e.name) })),
       stats: () => ({ ...this.stats, running: this.limiter.running, budgetMaxUsd: game.budget.maxUsd, budgetPaused: this.budgetPaused ? 1 : 0 }),
     }, game.observatory);
     this.world = this.newWorld();
     this.groups = this.newGroups();
-    this.chronicle = new Chronicle(this.client, cfg.lorebase.branch, game.chronicle);
-    this.familyLog = new Chronicle(this.client, cfg.lorebase.branch, { ...game.chronicle, kind: game.society.families.kind, flushMs: game.society.families.flushMs }, this.chronicle.session);
+    this.chronicle = new Chronicle(this.knowledge, game.chronicle);
+    this.familyLog = new Chronicle(this.knowledge, { ...game.chronicle, kind: game.society.families.kind, flushMs: game.society.families.flushMs }, this.chronicle.session);
     this.society = new Society((k) => this.world.r(k), { maxOpinions: game.society.maxOpinions, hearsayKept: game.society.hearsay.maxKept, familyColors: game.society.families.colors });
     const tm = game.society.testimony;
     this.testimonies = new Testimonies({ windowMinutes: tm.windowMinutes, minWitnesses: tm.chronicleMinWitnesses, maxKept: tm.maxKept });
@@ -140,10 +141,10 @@ export class Game {
       const e = this.world.entities.get(id);
       return e && e.alive ? e.stage : undefined;
     };
-    this.laws_ = new LawDesk(this.client, cfg.lorebase.branch, game.society.lawProposals, { create: cfg.lorebase.createOperation, update: cfg.lorebase.updateOperation, ruleKind: cfg.lorebase.ruleKind }, {
+    this.laws_ = new LawDesk(this.knowledge, game.society.lawProposals, cfg.knowledge.ruleKind, {
       changed: (p) => this.onLawProposal(p),
     });
-    this.insights = new InsightBook(this.client, cfg.lorebase.branch, game.insights, {
+    this.insights = new InsightBook(this.knowledge, game.insights, {
       changed: (insight, action, reviewer) => {
         if (action === 'accepted') {
           this.brain.invalidate();
@@ -159,12 +160,11 @@ export class Game {
         return esteem >= this.world.r('insight_solo_approve_esteem') ? Infinity : esteem * this.world.r('insight_review_esteem_factor');
       },
     });
-    const lb = cfg.lorebase;
-    this.watcher = new RuleWatcher(this.client, { ruleKind: lb.ruleKind, roleKind: lb.roleKind, branch: lb.branch, pollMs: lb.pollMs, reconnectMs: lb.reconnectMs }, {
-      onChange: (snap, changes, roleChanges, event) => this.applyRules(snap.rules, snap.roles, snap.revision, changes, roleChanges, event?.message),
+    this.watcher = new LawWatcher(this.knowledge, { ruleKind: cfg.knowledge.ruleKind, roleKind: cfg.knowledge.roleKind }, {
+      onChange: (snap, changes, roleChanges, rev) => this.applyRules(snap.rules, snap.roles, snap.revision, changes, roleChanges, rev?.message),
       onStatus: (connected, detail) => {
-        console.log(`[lorebase] ${connected ? 'connected' : 'disconnected'}: ${detail}`);
-        this.broadcast(this.lorebaseMsg());
+        console.log(`[knowledge] ${connected ? 'connected' : 'disconnected'}: ${detail}`);
+        this.broadcastKnowledge();
       },
     });
   }
@@ -256,16 +256,16 @@ export class Game {
         const err = await this.insights.judge(code, { name: e.name, role: e.role }, verdict, reason);
         return err ? { ok: false, text: this.t('rt.act.insightJudgeFailed', { reason: this.insightReason(err) }) } : { ok: true, text: this.t('rt.act.insightJudged') };
       },
-      runSinks: () => this.mnemo.runSinks(),
+      runSinks: () => this.memory.runSinks(),
       ranModel: (who, res) => this.usage.track(who, res),
       deliberated: (g, memberId, role, text) => {
         const name = this.world.entities.get(memberId)?.name ?? memberId;
         this.broadcastPrivileged({ type: 'deliberation', groupId: g.id, pattern: g.pattern, member: memberId, role, text });
-        this.mnemo.converse({ from: name, to: this.groups.groups.get(g.id)?.name ?? g.id, text, kind: 'deliberation', at: this.now(), groupId: g.id });
+        this.memory.converse({ from: name, to: this.groups.groups.get(g.id)?.name ?? g.id, text, kind: 'deliberation', at: this.now(), groupId: g.id });
       },
       recall: async (e, query) => {
         if (e.kind !== 'agent') return [];
-        const hits = await this.mnemo.recall(memoryKey(e.name), query);
+        const hits = await this.memory.recall(memoryKey(e.name), query);
         return (hits ?? []).map((m) => this.t('rt.act.recallLine', { day: m.createdAt.day, text: m.text, vivid: this.t(m.fidelity >= 0.5 ? 'rt.act.vivid' : 'rt.act.faded') }).replace(/^- /, ''));
       },
       reasoned: (e, text) => {
@@ -588,12 +588,12 @@ export class Game {
     }
   }
 
-  /** World id of the saved society (config, or the Lorebase domain and branch). */
+  /** World id of the saved society (config, or the space and live world of the shared knowledge). */
   private get societyWorld(): string {
-    return this.game.society.persist.world || `${this.cfg.lorebase.domain}/${this.cfg.lorebase.branch}`;
+    return this.game.society.persist.world || `${this.knowledge.info.space}/${this.knowledge.info.live}`;
   }
 
-  /** Saves people's standing and skills and the opinions formed since the last save (mnemo). */
+  /** Saves people's standing and skills and the opinions formed since the last save (private memory store). */
   private async saveSociety(): Promise<{ people: number; opinions: number } | undefined> {
     if (this.persistBusy || !this.game.society.enabled) return undefined;
     this.persistBusy = true;
@@ -603,7 +603,7 @@ export class Game {
     const name = (id: string) => this.society.people.get(id)?.name;
     const opinions = pending.flatMap((o) => (name(o.from) && name(o.to) ? [{ from: name(o.from)!, to: name(o.to)!, score: o.score, reason: o.reason, at: o.at }] : []));
     try {
-      if (await this.mnemo.saveSociety(this.societyWorld, { clock: snap.clock, people: snap.people, opinions }, this.game.society.maxOpinions)) return { people: snap.people.length, opinions: opinions.length };
+      if (await this.memory.saveSociety(this.societyWorld, { clock: snap.clock, people: snap.people, opinions }, this.game.society.maxOpinions)) return { people: snap.people.length, opinions: opinions.length };
       this.unsavedOpinions.unshift(...pending);
       return undefined;
     } finally {
@@ -614,7 +614,7 @@ export class Game {
   /** Brings back opinions, esteem, fame and skills saved by an earlier run of this world. */
   private async restoreSociety(): Promise<void> {
     if (!this.game.society.enabled || !this.game.society.persist.enabled) return;
-    const saved = await this.mnemo.loadSociety(this.societyWorld);
+    const saved = await this.memory.loadSociety(this.societyWorld);
     if (!saved) return;
     const skills = this.society.restore(saved, this.world.clock);
     for (const [id, sk] of skills) {
@@ -662,26 +662,28 @@ export class Game {
     return text === key ? code : text;
   }
 
-  /** Connects to Lorebase (retrying until the laws load), populates the world, starts the loop. */
+  /** Connects to the shared knowledge (retrying until the laws load), populates the world, starts the loop. */
   async init(): Promise<void> {
+    const k = this.knowledge.info;
+    console.log(`[knowledge] ${k.adapter} at ${k.location} (${k.space}/${k.live}); private memory: ${this.memory.info.adapter}${this.memory.enabled ? '' : ' (disabled)'}`);
     for (;;) {
       try {
         const snap = await this.watcher.start();
         this.applyRules(snap.rules, snap.roles, snap.revision, [], [], undefined, true);
-        console.log(`[lorebase] ${snap.rules.length} rules and ${snap.roles.length} roles @ ${snap.revision.slice(0, 12)}`);
+        console.log(`[knowledge] ${snap.rules.length} rules and ${snap.roles.length} roles @ ${snap.revision.slice(0, 12)}`);
         const missing = missingRtRules(this.values);
-        if (missing.length) throw new Error(`rules missing for the real-time world: ${missing.join(', ')} (run: npm run lorebase:seed)`);
+        if (missing.length) throw new Error(`rules missing for the real-time world: ${missing.join(', ')} (seed the knowledge first)`);
         break;
       } catch (err) {
-        console.error(`[lorebase] ${err instanceof Error ? err.message : err}; retrying in ${this.cfg.lorebase.pollMs} ms`);
+        console.error(`[knowledge] ${err instanceof Error ? err.message : err}; retrying in ${this.cfg.knowledge.pollMs} ms`);
         this.watcher.stop();
-        await new Promise((r) => setTimeout(r, this.cfg.lorebase.pollMs));
+        await new Promise((r) => setTimeout(r, this.cfg.knowledge.pollMs));
       }
     }
     if (this.game.economy.enabled) await this.loadEconomy();
     await this.reconcile();
     this.world.clock = this.world.epoch = this.values.dawn_minute ?? 0;
-    this.mnemo.follow((ev) => this.onMemory(ev));
+    this.memory.watch((ev) => this.onMemory(ev));
     this.roster = loadRosterFile(this.cfg, this.roles.map((r) => r.key));
     this.populate();
     await this.restoreSociety();
@@ -691,23 +693,23 @@ export class Game {
     this.start();
   }
 
-  /** Startup reconciliation: pending insights and agents' law proposals left in Lorebase by an earlier run. */
+  /** Startup reconciliation: pending insights and agents' law proposals left in the shared knowledge by an earlier run. */
   private async reconcile(): Promise<void> {
     try {
       const ins = await this.insights.reconcile(this.world.clock);
-      const laws = await this.laws_.reconcile(this.cfg.lorebase.proposalBranchPrefix);
-      console.log(`[reconcile] insights: ${ins.reloaded} reloaded, ${ins.closed} closed, ${ins.branchesDeleted} stale role/ branches deleted; law proposals: ${laws.reloaded} followed, ${laws.branchesDeleted} stale law/ branches deleted`);
+      const laws = await this.laws_.reconcile(this.cfg.knowledge.proposalPrefix);
+      console.log(`[reconcile] insights: ${ins.reloaded} reloaded, ${ins.closed} closed, ${ins.branchesDeleted} stale drafts discarded; law proposals: ${laws.reloaded} followed, ${laws.branchesDeleted} stale drafts discarded`);
     } catch (err) {
       console.warn(`[reconcile] skipped: ${err instanceof Error ? err.message : err}`);
     }
   }
 
-  /** Loads the economy catalog (retrying until Lorebase has it). */
+  /** Loads the economy catalog (retrying until the shared knowledge has it). */
   private async loadEconomy(): Promise<void> {
     for (;;) {
       try {
         const eco = await this.economy.load();
-        if (!eco.catalog.resources.size) throw new Error('no Resource records (run: npm run lorebase:seed)');
+        if (!eco.catalog.resources.size) throw new Error('no Resource records (seed the knowledge first)');
         this.catalog = eco.catalog;
         this.discovered = eco.discovered;
         this.world.catalog = this.catalog;
@@ -715,18 +717,18 @@ export class Game {
         console.log(`[economy] ${this.catalog.resources.size} resources, ${this.catalog.recipes.size} recipes, ${this.catalog.techs.size} technologies (${this.discovered.size} discovered)`);
         return;
       } catch (err) {
-        console.error(`[economy] ${err instanceof Error ? err.message : err}; retrying in ${this.cfg.lorebase.pollMs} ms`);
-        await new Promise((r) => setTimeout(r, this.cfg.lorebase.pollMs));
+        console.error(`[economy] ${err instanceof Error ? err.message : err}; retrying in ${this.cfg.knowledge.pollMs} ms`);
+        await new Promise((r) => setTimeout(r, this.cfg.knowledge.pollMs));
       }
     }
   }
 
-  /** Something a person lived: kept in its short-term memory and sent to its private memory (mnemo). */
+  /** Something a person lived: kept in its short-term memory and sent to its private memory. */
   private live(e: RtEntity | undefined, key: string, text: string): void {
     if (!e || e.kind === 'player') return;
     this.world.remember(e, text);
     const ingest = this.game.memory.ingest[key];
-    if (ingest && e.kind === 'agent') void this.mnemo.add(memoryKey(e.name), text, { ...ingest, at: { day: this.world.day, minute: this.world.minute }, source: key });
+    if (ingest && e.kind === 'agent') void this.memory.remember(memoryKey(e.name), text, { ...ingest, at: { day: this.world.day, minute: this.world.minute }, source: key });
   }
 
   private onMemory(ev: MemoryEvent): void {
@@ -807,11 +809,12 @@ export class Game {
       for (let i = 0; this.persistBusy && i < 50; i++) await new Promise((r) => setTimeout(r, 100));
       const saved = await this.saveSociety().catch(() => undefined);
       if (saved) console.log(`[society] saved ${saved.people} people and ${saved.opinions} new opinions of ${this.societyWorld} on shutdown`);
-      else console.warn(`[society] could not save the society of ${this.societyWorld} on shutdown (mnemo unavailable?)`);
+      else console.warn(`[society] could not save the society of ${this.societyWorld} on shutdown (private memory unavailable?)`);
     }
     this.watcher.stop();
     await this.brain.close();
-    this.mnemo.stop();
+    await this.knowledge.close().catch(() => undefined);
+    this.memory.stop();
     await this.chronicle.stop();
     await this.familyLog.stop();
   }
@@ -828,14 +831,14 @@ export class Game {
     this.revision = revision;
     if (initial) return;
     this.brain.invalidate();
-    console.log(`[lorebase] rules_changed @ ${revision.slice(0, 12)}${message ? ` "${message}"` : ''}: ${changes.map((c) => `${c.key} ${c.old} -> ${c.new}`).join(', ') || 'no rule value change'}${roleChanges.length ? `; roles: ${roleChanges.map((r) => r.key).join(', ')}` : ''}`);
+    console.log(`[knowledge] rules_changed @ ${revision.slice(0, 12)}${message ? ` "${message}"` : ''}: ${changes.map((c) => `${c.key} ${c.old} -> ${c.new}`).join(', ') || 'no rule value change'}${roleChanges.length ? `; roles: ${roleChanges.map((r) => r.key).join(', ')}` : ''}`);
     this.broadcast({
       type: 'rules_changed', revision, changes: changes.map((c) => {
         const r = rules.find((x) => x.key === c.key) ?? before.get(c.key);
         return { key: c.key, old: c.old, new: c.new, text: c.text, ...(c.new === null ? { removed: true } : {}), ...(r ? { category: r.category, unit: r.unit } : {}) };
       }),
     });
-    this.broadcast(this.lorebaseMsg());
+    this.broadcastKnowledge();
     if (changes.length) {
       const list = changes.map((c) => `${c.key} ${c.old ?? '-'} → ${c.new ?? '-'}`).join(', ');
       const text = this.t('rt.events.rules', { changes: list });
@@ -847,7 +850,7 @@ export class Game {
   }
 
   /**
-   * Every living person hears the new laws, with their full text from Lorebase: the proclamation
+   * Every living person hears the new laws, with their full text from the shared knowledge: the proclamation
    * reaches each one's inbox and stays in its private memory (where it fades like any memory).
    */
   private proclaim(changes: RuleChange[]): void {
@@ -858,8 +861,8 @@ export class Game {
       const text = proclamation(this.t, c);
       for (const e of w.living()) {
         if (e.kind === 'player') continue;
-        w.deliver(e, { from: 'lorebase', fromName: from, to: e.id, text, day: w.day, minute: w.minute });
-        if (ingest && e.kind === 'agent') void this.mnemo.add(memoryKey(e.name), text, { ...ingest, at: { day: w.day, minute: w.minute }, source: 'law' });
+        w.deliver(e, { from: 'knowledge', fromName: from, to: e.id, text, day: w.day, minute: w.minute });
+        if (ingest && e.kind === 'agent') void this.memory.remember(memoryKey(e.name), text, { ...ingest, at: { day: w.day, minute: w.minute }, source: 'law' });
       }
     }
   }
@@ -909,7 +912,7 @@ export class Game {
         void this.insights.autoAccept(this.world.clock, living).finally(() => (this.autoAcceptBusy = false));
       }
       const living = this.world.living();
-      console.log(`[game] day ${this.world.day} ${this.world.clockText()} ${this.world.season()} pop ${living.length} groups ${this.groups.list().length} decisions ${this.stats.decisions}+${this.stats.groupDecisions}g replies ${this.stats.replies} failures ${this.stats.failures} running ${this.limiter.running} lorebase-mcp ${this.brain.calls} calls/${this.brain.cacheHits} cached chronicle ${this.chronicle.written} written/${this.chronicle.pending} pending`);
+      console.log(`[game] day ${this.world.day} ${this.world.clockText()} ${this.world.season()} pop ${living.length} groups ${this.groups.list().length} decisions ${this.stats.decisions}+${this.stats.groupDecisions}g replies ${this.stats.replies} failures ${this.stats.failures} running ${this.limiter.running} consults ${this.brain.calls} calls/${this.brain.cacheHits} cached chronicle ${this.chronicle.written} written/${this.chronicle.pending} pending`);
     }
   }
 
@@ -1020,7 +1023,7 @@ export class Game {
         this.chron('death', text, [e.name]);
         this.society.died(e.id, w.clock);
         this.unsavedOpinions = this.unsavedOpinions.filter((o) => o.from !== e.id);
-        if (this.game.society.persist.enabled && e.kind !== 'player') void this.mnemo.forgetPerson(this.societyWorld, e.name);
+        if (this.game.society.persist.enabled && e.kind !== 'player') void this.memory.forgetPerson(this.societyWorld, e.name);
         const fam = e.family ? this.society.families.get(e.family) : undefined;
         if (fam) this.broadcastFamily(fam);
         void this.release(e);
@@ -1081,7 +1084,7 @@ export class Game {
     // The speaking player already knows what it said: never echo it back.
     const exclude = from.kind === 'player' ? fromId : undefined;
     this.broadcast({ type: 'say', from: fromId, to, text, kind: 'speech' }, exclude);
-    this.mnemo.converse({ from: from.name, to: w.entities.get(to)?.name ?? 'all', text, kind: 'speech', at: this.now() });
+    this.memory.converse({ from: from.name, to: w.entities.get(to)?.name ?? 'all', text, kind: 'speech', at: this.now() });
     if (from.kind !== 'player') w.remember(from, this.t('rt.memory.said', { to: w.entities.get(to)?.name ?? this.t('rt.memory.everyone'), text }));
     for (const id of hearers) {
       const h = w.entities.get(id);
@@ -1112,7 +1115,7 @@ export class Game {
         if (d.reason) {
           this.broadcastPrivileged({ type: 'say', from: e.id, to: 'all', text: d.reason, kind: 'thought' });
           this.recent(this.thoughts, e.id, { at: this.now(), text: d.reason });
-          this.mnemo.converse({ from: e.name, to: e.name, text: d.reason, kind: 'thought', at: this.now() });
+          this.memory.converse({ from: e.name, to: e.name, text: d.reason, kind: 'thought', at: this.now() });
         }
       },
       thinking: (id, on) => this.broadcast({ type: 'thinking', id, on }),
@@ -1138,7 +1141,7 @@ export class Game {
     };
   }
 
-  /** An experiment: maybe a discovery, which becomes knowledge of the whole civilization in Lorebase. */
+  /** An experiment: maybe a discovery, which becomes knowledge of the whole civilization. */
   private onExperiment(id: string, items: string[], found: { tech: import('./economy.ts').TechDef } | undefined): void {
     const t = this.t;
     const w = this.world;
@@ -1489,8 +1492,16 @@ export class Game {
     }
   }
 
-  private lorebaseMsg(): Msg {
-    return { type: 'lorebase', connected: this.watcher.connected, branch: this.cfg.lorebase.branch, revision: this.revision };
+  /** Status of the shared knowledge as clients see it. */
+  private knowledgeStatus() {
+    return { connected: this.watcher.connected, adapter: this.knowledge.info.adapter, branch: this.knowledge.info.live, revision: this.revision };
+  }
+
+  /** The `knowledge` message, plus the deprecated `lorebase` one (kept for one version). */
+  private broadcastKnowledge(): void {
+    const status = this.knowledgeStatus();
+    this.broadcast({ type: 'knowledge', ...status });
+    this.broadcast({ type: 'lorebase', ...status });
   }
 
   hello(you: string | null, full = true): Msg {
@@ -1504,7 +1515,9 @@ export class Game {
       rules: this.laws.map((r) => ({ key: r.key, value: r.value, text: r.text, category: r.category, unit: r.unit })),
       time: this.timeDto(),
       roles: this.roles.map((r) => r.key),
-      lorebase: { connected: this.watcher.connected, branch: this.cfg.lorebase.branch, revision: this.revision },
+      knowledge: this.knowledgeStatus(),
+      /** @deprecated alias of `knowledge`, kept for one version. */
+      lorebase: this.knowledgeStatus(),
       economy: this.economyDto(),
       society: this.societyView(full),
     };
@@ -1557,7 +1570,7 @@ export class Game {
     if (other) query.with = other;
     for (const k of ['group', 'since', 'limit']) if (q.get(k)) query[k] = q.get(k)!;
     const idOf = (name: string) => this.world.living().find((e) => e.name === name)?.id ?? name;
-    const rows = await this.mnemo.conversations(query).catch(() => []);
+    const rows = await this.memory.conversations(query).catch(() => []);
     return rows.map((r) => ({ ...r, from: idOf(r.from), to: r.kind === 'deliberation' ? r.to : r.to === 'all' ? 'all' : idOf(r.to), fromName: r.from, toName: r.to }));
   }
 
@@ -1566,7 +1579,7 @@ export class Game {
     const e = this.world.entities.get(id) ?? this.world.find(id);
     if (!e || e.kind === 'player') return undefined;
     const g = this.groups.of(e);
-    const mems = await this.mnemo.list(memoryKey(e.name)).catch(() => []);
+    const mems = await this.memory.list(memoryKey(e.name)).catch(() => []);
     const avg = mems.length ? mems.reduce((s, m) => s + m.fidelity, 0) / mems.length : 0;
     return {
       id: e.id, name: e.name, role: e.role, tier: e.tier, effectiveTier: this.effectiveTier(e.tier, e.model), model: e.model, alive: e.alive,
@@ -1598,7 +1611,7 @@ export class Game {
   async memories(id: string): Promise<unknown[] | undefined> {
     const e = this.world.entities.get(id) ?? this.world.find(id);
     if (!e || e.kind === 'player') return undefined;
-    return (await this.mnemo.list(memoryKey(e.name)).catch(() => [])).map(memoryDto);
+    return (await this.memory.list(memoryKey(e.name)).catch(() => [])).map(memoryDto);
   }
 
   private broadcastEntity(e: RtEntity): void {
@@ -1684,8 +1697,16 @@ export class Game {
       brain: { connected: this.brain.connected, calls: this.brain.calls, cacheHits: this.brain.cacheHits },
       insights: { pending: this.insights.allPending().length },
       chronicle: { session: this.chronicle.session, written: this.chronicle.written, pending: this.chronicle.pending, lastError: this.chronicle.lastError ?? null },
-      lorebase: { connected: this.watcher.connected, url: this.cfg.lorebase.url, domain: this.cfg.lorebase.domain, branch: this.cfg.lorebase.branch, revision: this.revision },
+      knowledge: this.statusKnowledge(),
+      /** @deprecated alias of `knowledge`, kept for one version. */
+      lorebase: this.statusKnowledge(),
+      memory: { adapter: this.memory.info.adapter, enabled: this.memory.enabled, connected: this.memory.connected },
     };
+  }
+
+  private statusKnowledge() {
+    const k = this.knowledge.info;
+    return { ...this.knowledgeStatus(), url: k.location, domain: k.space };
   }
 
   rosterView() {
@@ -1727,7 +1748,7 @@ export class Game {
   /**
    * A death frees what the person held: its in-flight model run is aborted and its mind stops,
    * it leaves its group, the per-person caches go, and (config `death`) its private memory and
-   * the lines it spoke are deleted from mnemo, leaving at most a one-line epitaph in the Chronicle.
+   * the lines it spoke are deleted, leaving at most a one-line epitaph in the Chronicle.
    */
   async release(e: RtEntity): Promise<void> {
     this.sleep(e.id);
@@ -1739,12 +1760,12 @@ export class Game {
     if (e.kind !== 'agent' || !this.game.death.forgetMemories) return;
     const key = memoryKey(e.name);
     if (this.game.death.epitaph) {
-      const mems = await this.mnemo.list(key).catch(() => []);
+      const mems = await this.memory.list(key).catch(() => []);
       const best = [...mems].sort((a, b) => b.importance * b.fidelity - a.importance * a.fidelity)[0];
       // Recorded as a death event: the Chronicle schema has no separate kind for it.
       if (best) this.chron('death', this.t('rt.events.epitaph', { name: e.name, memory: best.text }), [e.name]);
     }
-    const out = await this.mnemo.forget(key, { speaker: e.name, runAgent: e.id });
+    const out = await this.memory.deleteOwner(key, { speaker: e.name, runAgent: e.id });
     if (out) console.log(`[death ${e.name}] forgot ${out.memories} memories, ${out.conversations} lines, ${out.runs} runs`);
   }
 
@@ -1790,6 +1811,6 @@ export class Game {
 }
 
 /** Memory as clients see it: emotion as intensity 0-1. */
-function memoryDto(m: import('./mnemo.ts').Memory) {
+function memoryDto(m: MemoryItem) {
   return { id: m.id, text: m.text, fidelity: m.fidelity, importance: m.importance, emotion: Math.round(Math.min(1, Math.abs(Number(m.emotion) || 0)) * 1000) / 1000, kind: m.kind, createdAt: m.createdAt, recalls: m.recalls };
 }

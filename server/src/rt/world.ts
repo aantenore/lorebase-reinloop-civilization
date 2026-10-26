@@ -1,7 +1,7 @@
 // Real-time world: a tile map with elevation, people with float positions executing plans at
-// their own speed, a clock in game minutes, and the laws (Lorebase Rule values) applied per
+// their own speed, a clock in game minutes, and the laws (law values of the shared knowledge) applied per
 // game minute. No IO: everything that happens is reported through `onEvent`.
-import type { Role } from '../lorebase/rules.ts';
+import type { Role } from '../laws/laws.ts';
 import { seasonOf } from '../world/engine.ts';
 import { createRng, type Rng, valueNoise } from '../world/rng.ts';
 import type { Rules, Season } from '../world/types.ts';
@@ -16,10 +16,10 @@ export type Biome = 'grass' | 'forest' | 'water' | 'rock' | 'sand';
 export type EntityTier = 'opus' | 'sonnet' | 'haiku' | 'human';
 export type EntityKind = 'agent' | 'player' | 'crowd';
 export type AgeStage = 'child' | 'adult' | 'elder';
-/** Item code (Lorebase Resource). `food` and `wood` are the tile stocks. */
+/** Item code (a Resource record). `food` and `wood` are the tile stocks. */
 export type Resource = string;
 
-/** Rule keys the real-time world reads (values only in Lorebase). */
+/** Rule keys the real-time world reads (values only in the shared knowledge). */
 export const RT_RULE_KEYS = [
   'max_hp', 'food_per_tick', 'starvation_threshold', 'starvation_damage', 'rest_heal', 'gather_food_yield', 'gather_wood_yield',
   'regrowth_per_tick', 'shelter_wood_cost', 'winter_every_ticks', 'winter_length_ticks', 'winter_food_yield_multiplier',
@@ -76,7 +76,7 @@ export interface MapConfig {
   spawnFood?: { radius: number; fill: number; minFood: number };
   /**
    * Where the gathered materials are found. Outside a core of `coreRadius` tiles (Chebyshev, from the map
-   * centre) the map is cut into angular sectors, each yielding only its `items` (on the biomes their Lorebase
+   * centre) the map is cut into angular sectors, each yielding only its `items` (on the biomes their
    * Resource names); the core yields none of the listed items. Items listed in no sector are found wherever
    * their biome is. The rotation of the sectors is seeded: of `rotations` candidates the first where every
    * sector has at least `minTiles` tiles for each of its items is kept (else the best one).
@@ -208,7 +208,7 @@ export class RtWorld {
   epoch: number;
   rules: Rules = {};
   roleOf: (code: string) => Role | undefined = () => undefined;
-  /** The economy (Lorebase Resource/Recipe/Technology) and what the civilization has discovered. */
+  /** The economy (Resource/Recipe/Technology records) and what the civilization has discovered. */
   catalog: Catalog = { resources: new Map(), recipes: new Map(), techs: new Map() };
   discovered = new Map<string, Discovery>();
   /** Multiplies game time per real second (engine knob, config `loop.timeScale`). */

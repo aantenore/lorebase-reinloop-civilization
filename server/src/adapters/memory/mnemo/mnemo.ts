@@ -1,47 +1,39 @@
-// Client of mnemo, the private memory service (services/mnemo). Agents never reach it
+// Private memory kept by mnemo, the memory service (services/mnemo). People never reach it
 // directly: their remember/recall tools and the world's own memories of what they lived go
 // through here. Failures never stop the world: a memory that cannot be stored is lost.
 import type { RunEvent, Sink } from 'reinloop';
-import type { MemoryConfig } from './config.ts';
-import type { SocietySnapshot } from './society.ts';
+import type {
+  ConversationLine, ConversationRow, GameTime, Memory, MemoryEvent, MemoryInfo, MemoryItem, MemoryStats,
+} from '../../../ports/memory.ts';
+import type { SocietySnapshot } from '../../../rt/society.ts';
 
-export interface Memory {
-  id: string;
-  text: string;
-  fidelity: number;
-  importance: number;
-  emotion: number;
-  kind: 'episodic' | 'gist';
-  createdAt: { day: number; minute: number };
-  recalls: number;
+export interface MnemoConfig {
+  /** MNEMO_URL overrides. */
+  url: string;
+  timeoutMs: number;
+  /** Polling period of the event log (fading, merging, forgetting). */
+  pollMs: number;
+  /** Keep reinloop run logs in mnemo (best effort). */
+  runStore: boolean;
+  /** Run event types not kept (streamed deltas: many and redundant with the final messages). */
+  runSkipEvents: string[];
+  /** Batching delay of conversation lines and run events. */
+  runFlushMs: number;
+  /** Retries of a request that found nothing listening, with exponential backoff from retryBaseMs. */
+  retries: number;
+  retryBaseMs: number;
 }
 
-export interface MemoryEvent {
-  seq: number;
-  agentId: string;
-  action: 'added' | 'blurred' | 'merged' | 'forgotten' | 'recalled';
-  memory: Memory;
-  mergedFrom?: string[];
+export interface MnemoSettings {
+  enabled: boolean;
+  recallLimit: number;
+  textMaxChars: number;
+  mnemo: MnemoConfig;
 }
 
-export interface ConversationLine {
-  from: string;
-  to: string;
-  text: string;
-  kind: 'speech' | 'thought' | 'deliberation';
-  at: { day: number; minute: number };
-  groupId?: string;
-}
-
-export interface ConversationRow extends ConversationLine {
-  id: string;
-}
-
-/** The key of a person's memory: its name, so a memory survives world resets. */
-export const memoryKey = (name: string) => name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
-
-export class Mnemo {
-  private readonly cfg: MemoryConfig;
+export class Mnemo implements Memory {
+  readonly info: MemoryInfo;
+  private readonly cfg: MnemoConfig & { enabled: boolean; recallLimit: number; textMaxChars: number };
   private last = 0;
   private timer: NodeJS.Timeout | undefined;
   private polling = false;
@@ -49,8 +41,9 @@ export class Mnemo {
   connected = false;
   failures = 0;
 
-  constructor(cfg: MemoryConfig) {
-    this.cfg = cfg;
+  constructor(settings: MnemoSettings) {
+    this.cfg = { ...settings.mnemo, enabled: settings.enabled, recallLimit: settings.recallLimit, textMaxChars: settings.textMaxChars };
+    this.info = { adapter: 'mnemo', location: this.cfg.url };
   }
 
   get enabled(): boolean {
@@ -86,20 +79,20 @@ export class Mnemo {
     return (await res.json()) as T;
   }
 
-  async add(agent: string, text: string, opts: { importance: number; emotion: number; at: { day: number; minute: number }; source?: string }): Promise<Memory | undefined> {
+  async remember(agent: string, text: string, opts: { importance: number; emotion: number; at: GameTime; source?: string }): Promise<MemoryItem | undefined> {
     if (!this.enabled) return undefined;
     try {
-      return await this.req<Memory>('POST', '/memories', { agent, text: text.slice(0, this.cfg.textMaxChars), ns: 'mind', ...opts });
+      return await this.req<MemoryItem>('POST', '/memories', { agent, text: text.slice(0, this.cfg.textMaxChars), ns: 'mind', ...opts });
     } catch (err) {
       this.fail(err);
       return undefined;
     }
   }
 
-  async recall(agent: string, query: string, limit = this.cfg.recallLimit): Promise<Array<Memory & { score: number }> | undefined> {
+  async recall(agent: string, query: string, limit = this.cfg.recallLimit): Promise<Array<MemoryItem & { score: number }> | undefined> {
     if (!this.enabled) return undefined;
     try {
-      return (await this.req<{ memories: Array<Memory & { score: number }> }>('POST', '/recall', { agent, query, ns: 'mind', limit })).memories;
+      return (await this.req<{ memories: Array<MemoryItem & { score: number }> }>('POST', '/recall', { agent, query, ns: 'mind', limit })).memories;
     } catch (err) {
       this.fail(err);
       return undefined;
@@ -107,7 +100,7 @@ export class Mnemo {
   }
 
   /** Forgets a whole person (it died): its memories, the lines it spoke and its runs. */
-  async forget(agent: string, opts: { speaker?: string; runAgent?: string } = {}): Promise<{ memories: number; conversations: number; runs: number } | undefined> {
+  async deleteOwner(agent: string, opts: { speaker?: string; runAgent?: string } = {}): Promise<{ memories: number; conversations: number; runs: number } | undefined> {
     if (!this.enabled) return undefined;
     await this.flushLines();
     const q = new URLSearchParams(Object.entries(opts).filter(([, v]) => v) as Array<[string, string]>);
@@ -148,12 +141,12 @@ export class Mnemo {
     await this.req('DELETE', `/society/${encodeURIComponent(world)}/people/${encodeURIComponent(name)}`).catch((err) => this.fail(err));
   }
 
-  async list(agent: string): Promise<Memory[]> {
+  async list(agent: string): Promise<MemoryItem[]> {
     if (!this.enabled) return [];
-    return this.req<Memory[]>('GET', `/agents/${encodeURIComponent(agent)}/memories?ns=mind`);
+    return this.req<MemoryItem[]>('GET', `/agents/${encodeURIComponent(agent)}/memories?ns=mind`);
   }
 
-  async health(): Promise<{ memories: number; dbBytes: number; lastCompaction?: unknown; embedder?: unknown }> {
+  async stats(): Promise<MemoryStats> {
     return this.req('GET', '/health');
   }
 
@@ -204,7 +197,7 @@ export class Mnemo {
   }
 
   /** Follows mnemo's event log (added, blurred, merged, forgotten, recalled). */
-  follow(onEvent: (ev: MemoryEvent) => void): void {
+  watch(onEvent: (ev: MemoryEvent) => void): void {
     if (!this.enabled || this.timer) return;
     const poll = async () => {
       if (this.polling) return;

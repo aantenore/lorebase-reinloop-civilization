@@ -1,19 +1,19 @@
-// HTTP API: SSE event stream, simulation controls, roster, rules (written to Lorebase) and scenarios.
+// HTTP API: SSE event stream, simulation controls, roster, rules (written to the shared knowledge) and scenarios.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 import { ROOT, type RosterEntry, type SimConfig } from '../config.ts';
-import type { LorebaseClient } from '../lorebase/client.ts';
-import type { Rule } from '../lorebase/rules.ts';
-import { loadScenarios } from '../lorebase/scenarios.ts';
-import { amendRule, createRule, repealRule, writeRules } from '../lorebase/writer.ts';
+import type { Rule } from '../laws/laws.ts';
+import { loadScenarios } from '../laws/scenarios.ts';
+import { amendRule, createRule, repealRule, writeRules } from '../laws/writer.ts';
+import type { Knowledge } from '../ports/knowledge.ts';
 import { allowedOrigins, bearer, checkMutation, hostAllowed, isMutation, tokenMatches } from './security.ts';
 
 /** What the HTTP API needs from a world: the tick simulation (v1) or the real-time game (v2). */
 export interface HttpHost {
   readonly cfg: SimConfig;
-  readonly client: LorebaseClient;
-  status(): { lorebase: { revision: string } };
+  readonly knowledge: Knowledge;
+  status(): { knowledge: { revision: string } };
   rules(): Rule[];
   snapshot(): unknown;
   subscribe(fn: (ev: unknown) => void): () => void;
@@ -64,7 +64,8 @@ async function readJson(req: IncomingMessage, max: number): Promise<unknown> {
 export function createHttpServer(sim: HttpHost): Server {
   const cfg = sim.cfg;
   const staticRoot = resolve(ROOT, cfg.http.staticDir);
-  const writerCfg = cfg.lorebase;
+  const writerCfg = { ruleKind: cfg.knowledge.ruleKind, proposalPrefix: cfg.knowledge.proposalPrefix };
+  const scenarios = () => loadScenarios(cfg.knowledge.seed.rules);
   const guard = { port: cfg.http.port, corsOrigins: cfg.http.corsOrigins, apiToken: cfg.apiToken, allowedHosts: cfg.http.allowedHosts };
   const origins = allowedOrigins(guard);
   const readBody = (req: IncomingMessage) => readJson(req, cfg.http.maxBodyBytes);
@@ -137,7 +138,7 @@ export function createHttpServer(sim: HttpHost): Server {
         if (method === 'DELETE') {
           if (sim.engineKeys?.().includes(key)) return send(res, 409, { ok: false, error: `"${key}" is a law the world's physics needs: change its value instead` });
           const mode = url.searchParams.get('mode') === 'proposal' ? 'proposal' : 'direct';
-          const out = await repealRule(sim.client, writerCfg, key, mode, url.searchParams.get('message')?.slice(0, 200) || `Repeal ${key}`);
+          const out = await repealRule(sim.knowledge, writerCfg, key, mode, url.searchParams.get('message')?.slice(0, 200) || `Repeal ${key}`);
           return send(res, out.ok ? 200 : 502, out);
         }
         const body = (await readBody(req)) as { text?: string; category?: string; unit?: string; mode?: string; message?: string };
@@ -145,7 +146,7 @@ export function createHttpServer(sim: HttpHost): Server {
         if (!CATEGORIES.includes(String(category))) return send(res, 400, { ok: false, error: `category must be one of ${CATEGORIES.join(', ')}` });
         const text = typeof body.text === 'string' && body.text.trim() ? body.text.trim().slice(0, 1000) : rule.text;
         const unit = typeof body.unit === 'string' ? body.unit.slice(0, 40) : rule.unit || undefined;
-        const out = await amendRule(sim.client, writerCfg, { key, text, category: String(category), unit }, body.mode === 'proposal' ? 'proposal' : 'direct', body.message?.trim() || `Amend ${key}`);
+        const out = await amendRule(sim.knowledge, writerCfg, { key, text, category: String(category), unit }, body.mode === 'proposal' ? 'proposal' : 'direct', body.message?.trim() || `Amend ${key}`);
         return send(res, out.ok ? 200 : 502, out);
       }
       const unsupported = () => send(res, 404, { ok: false, error: 'not supported in this mode' });
@@ -184,7 +185,7 @@ export function createHttpServer(sim: HttpHost): Server {
         const ok = sim.removeAgent(decodeURIComponent(del[1]!));
         return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'no living agent with that id' });
       }
-      if (method === 'GET' && path === '/api/rules') return send(res, 200, { revision: sim.status().lorebase.revision, rules: sim.rules() });
+      if (method === 'GET' && path === '/api/rules') return send(res, 200, { revision: sim.status().knowledge.revision, rules: sim.rules() });
       if (method === 'GET' && path === '/api/insights') return sim.insightList ? send(res, 200, await sim.insightList(url.searchParams.get('role') ?? undefined)) : unsupported();
       if (method === 'GET' && path.startsWith('/api/observatory/')) {
         const out = sim.observatory ? await sim.observatory(path, url.searchParams) : undefined;
@@ -219,20 +220,20 @@ export function createHttpServer(sim: HttpHost): Server {
           if (!CATEGORIES.includes(String(body.category))) return send(res, 400, { ok: false, error: `category must be one of ${CATEGORIES.join(', ')}` });
           const value = body.value === undefined || body.value === null || body.value === '' ? 1 : Number(body.value);
           const message = body.message?.trim() || `New law ${body.key}`;
-          const out = await createRule(sim.client, writerCfg, { key: body.key, value, text: body.text.slice(0, 1000), category: String(body.category), unit: typeof body.unit === 'string' ? body.unit.slice(0, 40) : undefined }, mode, message);
+          const out = await createRule(sim.knowledge, writerCfg, { key: body.key, value, text: body.text.slice(0, 1000), category: String(body.category), unit: typeof body.unit === 'string' ? body.unit.slice(0, 40) : undefined }, mode, message);
           return send(res, out.ok ? 201 : 502, out);
         }
         if (!body.key || !sim.rules().some((r) => r.key === body.key)) return send(res, 400, { ok: false, error: `unknown rule "${body.key}" (to create a law, send text and category)` });
         const message = body.message?.trim() || `Set ${body.key} to ${body.value}`;
-        const out = await writeRules(sim.client, writerCfg, [{ key: body.key, value: Number(body.value) }], mode, message);
+        const out = await writeRules(sim.knowledge, writerCfg, [{ key: body.key, value: Number(body.value) }], mode, message);
         return send(res, out.ok ? 200 : 502, out);
       }
-      if (method === 'GET' && path === '/api/scenarios') return send(res, 200, { scenarios: loadScenarios() });
+      if (method === 'GET' && path === '/api/scenarios') return send(res, 200, { scenarios: scenarios() });
       const sc = /^\/api\/scenarios\/([^/]+)\/apply$/.exec(path);
       if (method === 'POST' && sc) {
-        const scenario = loadScenarios().find((s) => s.name === decodeURIComponent(sc[1]!));
+        const scenario = scenarios().find((s) => s.name === decodeURIComponent(sc[1]!));
         if (!scenario) return send(res, 404, { ok: false, error: 'unknown scenario' });
-        const out = await writeRules(sim.client, writerCfg, scenario.changes, 'proposal', `Scenario: ${scenario.title}`, scenario.title);
+        const out = await writeRules(sim.knowledge, writerCfg, scenario.changes, 'proposal', `Scenario: ${scenario.title}`, scenario.title);
         return send(res, out.ok ? 200 : 502, out);
       }
       if (path.startsWith('/api/')) return send(res, 404, { ok: false, error: 'not found' });

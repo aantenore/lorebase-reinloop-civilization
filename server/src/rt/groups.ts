@@ -23,6 +23,7 @@ import {
 import type { Translate } from '../i18n.ts';
 import type { GameConfig, GroupPattern } from './config.ts';
 import { AGENT_PATTERNS, cacheParams } from './config.ts';
+import { CONSULT_SEARCH } from '../ports/knowledge.ts';
 import { type DecideHost, decisionTier, decisionTimeoutMs, type Failure, faculties, limitsOf, modelRef, normalizeSteps, planSchema } from './decide.ts';
 import type { Tier } from '../world/types.ts';
 import { flatSteps, mockGroupPlan, mockSteps } from './mock.ts';
@@ -360,13 +361,13 @@ export class GroupManager {
     });
   }
 
-  /** Offline only: members writing a joint plan sometimes consult Lorebase first. */
+  /** Offline only: members writing a joint plan sometimes consult the shared knowledge first. */
   private mockWithConsult(g: Group, m: RtEntity, json: boolean, mock: (req: ModelRequest, i: number) => MockTurn): (req: ModelRequest, i: number) => MockTurn {
     return (req, i) => {
       const consulted = req.messages.some((x) => x.role === 'tool');
       const seed = [...`${m.id}${this.host.world().minute}`].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
       if (json && g.pattern !== 'orchestrator' && !consulted && this.host.brain.connected && seed % 2 === 0) {
-        return { toolCalls: [{ name: 'lorebase_search', args: { query: this.t('rt.mock.consult'), kinds: ['Rule'], limit: 3 } }] };
+        return { toolCalls: [{ name: CONSULT_SEARCH, args: { query: this.t('rt.mock.consult'), kinds: ['Rule'], limit: 3 } }] };
       }
       return mock(req, i);
     };

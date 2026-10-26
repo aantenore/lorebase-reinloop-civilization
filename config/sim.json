@@ -8,27 +8,109 @@
     "port": 4400,
     "maxBodyBytes": 65536,
     "corsOrigins": [],
-    "devOriginPorts": [5173, 5179],
+    "devOriginPorts": [
+      5173,
+      5179
+    ],
     "staticDir": "web/dist"
   },
-  "lorebase": {
-    "url": "http://127.0.0.1:8180",
-    "domain": "world",
-    "branch": "main",
+  "knowledge": {
+    "adapter": "lorebase",
     "ruleKind": "Rule",
     "roleKind": "Role",
-    "directOperation": "set_rule",
-    "updateOperation": "update_rule",
-    "enactOperation": "enact_rule",
-    "createOperation": "create_rule",
-    "proposalBranchPrefix": "law/",
+    "proposalPrefix": "law/",
     "pollMs": 5000,
-    "reconnectMs": 3000,
-    "repealOperation": "repeal_rule",
-    "amendOperation": "amend_rule",
-    "deleteOperation": "delete_rule",
-    "bulkDeleteOperation": "delete_records",
-    "maxBulkDeleteKeys": 1000
+    "seed": {
+      "schema": "lorebase/schema.yaml",
+      "rules": "lorebase/rules.seed.yaml",
+      "economy": "lorebase/economy.seed.yaml"
+    },
+    "lorebase": {
+      "url": "http://127.0.0.1:8180",
+      "domain": "world",
+      "branch": "main",
+      "reconnectMs": 3000,
+      "importOperation": "import_records",
+      "importLinkedOperation": "import_batch",
+      "bulkDeleteOperation": "delete_records",
+      "maxBulkDeleteKeys": 1000,
+      "operations": {
+        "live": {
+          "Rule": {
+            "create": [
+              {
+                "op": "enact_rule"
+              }
+            ],
+            "update": [
+              {
+                "op": "set_rule",
+                "target": "rule",
+                "fields": [
+                  "value"
+                ]
+              },
+              {
+                "op": "amend_rule",
+                "target": "rule",
+                "fields": [
+                  "text",
+                  "category",
+                  "unit"
+                ]
+              }
+            ],
+            "delete": [
+              {
+                "op": "repeal_rule",
+                "target": "rule"
+              }
+            ]
+          }
+        },
+        "draft": {
+          "Insight": {
+            "create": [
+              {
+                "op": "share_insight",
+                "copy": {
+                  "role_code": "role"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "schema": {
+        "file": "lorebase/schema.yaml",
+        "draftPrefix": "seed/",
+        "displayName": "World laws",
+        "description": "The rules a small colony of agents must live by."
+      },
+      "herald": {
+        "url": "http://127.0.0.1:8190/mcp",
+        "tools": {
+          "conoscenza_cerca": "lorebase_search",
+          "conoscenza_leggi": "lorebase_get",
+          "conoscenza_interroga": "lorebase_query",
+          "conoscenza_storia": "lorebase_history",
+          "conoscenza_differenze": "lorebase_diff",
+          "conoscenza_cambiamenti": "lorebase_changes",
+          "conoscenza_schema": "lorebase_schema",
+          "conoscenza_quadro": "lorebase_context"
+        },
+        "callTimeoutMs": 15000,
+        "connectRetryMs": 10000,
+        "branchArgs": [
+          "branch"
+        ]
+      }
+    },
+    "memory": {
+      "space": "world",
+      "live": "main",
+      "historyMax": 2000
+    }
   },
   "models": {
     "opus": "anthropic/claude-opus-5-5",

@@ -2,7 +2,7 @@
 import { agent, type EasyAgent, memoryNotes, type MemoryStore, memoryStore, mockProvider, windowCompaction } from 'reinloop';
 import type { RosterEntry, SimConfig } from '../config.ts';
 import type { Translate } from '../i18n.ts';
-import type { Role, Rule } from '../lorebase/rules.ts';
+import type { Role, Rule } from '../laws/laws.ts';
 import type { AgentState } from '../world/types.ts';
 import { type MockHost, mockStep } from './mock.ts';
 import { instructions } from './prompt.ts';
@@ -44,7 +44,7 @@ export class AgentRegistry {
     return instructions(this.t, state, this.roles().find((r) => r.key === state.role));
   }
 
-  /** Role descriptions changed in Lorebase: every person reads the new one from the next turn. */
+  /** Role descriptions changed in the shared knowledge: every person reads the new one from the next turn. */
   refreshInstructions(states: (id: string) => AgentState | undefined): void {
     for (const reg of this.agents.values()) {
       const s = states(reg.id);

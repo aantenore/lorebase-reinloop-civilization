@@ -1,11 +1,10 @@
-// Shared consciousness of each social role, kept in Lorebase as `Insight` Records. An insight is
-// written on its own branch `role/<role>/<slug>` and proposed into main; a PEER (another living
-// person of the same role, never the author) approves or rejects it. All agents share one
-// Keeper principal, so the peer rule is enforced here; the reviewer is recorded on the Record,
-// in the review comment and in the merge message. A role with a single living member gets its
-// insights accepted after `autoAcceptMinutes` of game time.
-import { randomUUID } from 'node:crypto';
-import type { LorebaseClient, RecordItem } from '../lorebase/client.ts';
+// Shared consciousness of each social role, kept in the shared knowledge as `Insight` records.
+// An insight is written on its own draft `role/<role>/<slug>` and proposed into the live world; a
+// PEER (another living person of the same role, never the author) approves or rejects it. All
+// people share one identity towards the knowledge, so the peer rule is enforced here; the
+// reviewer is recorded on the record, in the review note and in the accept message. A role with a
+// single living member gets its insights accepted after `autoAcceptMinutes` of game time.
+import type { Knowledge, KnowledgeRecord } from '../ports/knowledge.ts';
 import type { InsightConfig } from './config.ts';
 
 export type InsightStatus = 'proposed' | 'accepted' | 'retired' | 'rejected';
@@ -41,7 +40,7 @@ export interface InsightEvents {
 
 const slug = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'insight';
 
-export function insightFromRecord(r: RecordItem): Insight {
+export function insightFromRecord(r: KnowledgeRecord): Insight {
   const v = r.values;
   return {
     code: String(v.code ?? r.key),
@@ -64,16 +63,14 @@ export function peerCheck(insight: Pick<Insight, 'role' | 'author'>, reviewer: {
 }
 
 export class InsightBook {
-  private readonly client: LorebaseClient;
+  private readonly knowledge: Knowledge;
   private readonly cfg: InsightConfig;
-  private readonly main: string;
   private readonly events: InsightEvents;
   private readonly pending = new Map<string, Pending>();
   private seq = 0;
 
-  constructor(client: LorebaseClient, main: string, cfg: InsightConfig, events: InsightEvents) {
-    this.client = client;
-    this.main = main;
+  constructor(knowledge: Knowledge, cfg: InsightConfig, events: InsightEvents) {
+    this.knowledge = knowledge;
     this.cfg = cfg;
     this.events = events;
   }
@@ -86,9 +83,9 @@ export class InsightBook {
     return [...this.pending.values()].map((p) => p.insight);
   }
 
-  /** Records on main (accepted or retired), optionally of one role. */
+  /** Records of the live world (accepted or retired), optionally of one role. */
   async stored(role?: string): Promise<Insight[]> {
-    const { items } = await this.client.listRecords(this.cfg.kind, this.main).catch(() => ({ items: [] as RecordItem[] }));
+    const { items } = await this.knowledge.readAll(this.cfg.kind).catch(() => ({ items: [] as KnowledgeRecord[] }));
     return items.map(insightFromRecord).filter((i) => !role || i.role === role);
   }
 
@@ -104,17 +101,20 @@ export class InsightBook {
     };
     const branch = `${this.cfg.branchPrefix}${author.role}/${slug(clean)}-${Date.now().toString(36)}`;
     try {
-      await this.client.createBranch(branch, this.main);
-      await this.client.execute(this.cfg.operation, {
-        code, role: author.role, role_code: author.role, text: insight.text, confidence: insight.confidence, author: author.name, day,
-        ...(insight.evidence ? { evidence: insight.evidence } : {}),
-      }, { branch, message: `Insight of ${author.role} by ${author.name}`, idempotencyKey: randomUUID() });
-      const proposal = await this.client.createProposal(branch, this.main, `Insight (${author.role}): ${clean.slice(0, 60)}`, `Shared by ${author.name}. Waiting for a peer of the role ${author.role}.`);
+      const proposal = await this.knowledge.propose({
+        draft: branch,
+        title: `Insight (${author.role}): ${clean.slice(0, 60)}`,
+        description: `Shared by ${author.name}. Waiting for a peer of the role ${author.role}.`,
+        message: `Insight of ${author.role} by ${author.name}`,
+        changes: [{
+          action: 'create', kind: this.cfg.kind, key: code,
+          values: { code, role: author.role, text: insight.text, confidence: insight.confidence, author: author.name, day, ...(insight.evidence ? { evidence: insight.evidence } : {}) },
+        }],
+      });
       this.pending.set(code, { insight, branch, proposalId: proposal.id, sharedAt: clock, approved: 0, approvers: [] });
       this.events.changed(insight, 'proposed');
       return insight;
     } catch (err) {
-      await this.client.deleteBranch(branch).catch(() => undefined);
       return err instanceof Error ? err.message : String(err);
     }
   }
@@ -133,24 +133,22 @@ export class InsightBook {
         // Not enough weight yet: the approval is noted and the insight keeps waiting for others.
         p.approved += w;
         p.approvers.push(reviewer.name);
-        await this.client.review(p.proposalId, 'comment', `${note} (weight ${Math.round(w * 100) / 100})`).catch(() => undefined);
+        await this.knowledge.review(p.proposalId, 'comment', `${note} (weight ${Math.round(w * 100) / 100})`).catch(() => undefined);
         return undefined;
       }
     }
     this.pending.delete(code);
     try {
       if (verdict === 'approve') {
-        await this.client.execute(this.cfg.updateOperation, { key: code, status: 'accepted', reviewer: reviewer.name }, { branch: p.branch, message: note });
-        await this.client.review(p.proposalId, 'approve', note);
-        await this.client.merge(p.proposalId, note);
+        await this.knowledge.write([{ action: 'update', kind: this.cfg.kind, key: code, values: { status: 'accepted', reviewer: reviewer.name } }], { scope: p.branch, message: note });
+        await this.knowledge.review(p.proposalId, 'approve', note);
+        await this.knowledge.accept(p.proposalId, note);
         p.insight.status = 'accepted';
       } else {
-        await this.client.review(p.proposalId, 'request_changes', note);
-        await this.client.closeProposal(p.proposalId);
+        await this.knowledge.reject(p.proposalId, note);
         p.insight.status = 'rejected';
       }
       p.insight.reviewer = reviewer.name;
-      await this.client.deleteBranch(p.branch).catch(() => undefined);
       this.events.changed(p.insight, verdict === 'approve' ? 'accepted' : 'rejected', reviewer.name);
       return undefined;
     } catch (err) {
@@ -160,34 +158,33 @@ export class InsightBook {
   }
 
   /**
-   * After a restart: open insight Proposals (`role/` branches) come back into the review queue, or
-   * are closed when older than `reconcile.maxAgeHours` (or always, with mode `close`); `role/`
-   * branches without an open Proposal are deleted. Returns what was done.
+   * After a restart: open insight proposals (`role/` drafts) come back into the review queue, or
+   * are rejected when older than `reconcile.maxAgeHours` (or always, with mode `close`); `role/`
+   * drafts without an open proposal are discarded. Returns what was done.
    */
   async reconcile(clock: number, now = Date.now()): Promise<{ reloaded: number; closed: number; branchesDeleted: number }> {
     const out = { reloaded: 0, closed: 0, branchesDeleted: 0 };
     if (!this.cfg.enabled) return out;
     const prefix = this.cfg.branchPrefix;
-    const open = (await this.client.listProposals('open')).filter((p) => p.source_ref.startsWith(prefix) && p.target_ref === this.main);
+    const open = (await this.knowledge.proposals('open')).filter((p) => p.draft.startsWith(prefix));
     const maxAge = this.cfg.reconcile.maxAgeHours * 3600_000;
     for (const pr of open) {
-      const records = await this.client.listRecords(this.cfg.kind, pr.source_ref).catch(() => ({ items: [] as RecordItem[] }));
+      const records = await this.knowledge.readAll(this.cfg.kind, { scope: pr.draft }).catch(() => ({ items: [] as KnowledgeRecord[] }));
       const insight = records.items.map(insightFromRecord).find((i) => i.status === 'proposed');
-      const stale = this.cfg.reconcile.mode === 'close' || now - Date.parse(pr.created_at) > maxAge || !insight;
+      const stale = this.cfg.reconcile.mode === 'close' || now - Date.parse(pr.createdAt) > maxAge || !insight;
       if (stale || !insight) {
-        await this.client.closeProposal(pr.id).catch(() => undefined);
-        await this.client.deleteBranch(pr.source_ref).catch(() => undefined);
+        await this.knowledge.reject(pr.id).catch(() => undefined);
         out.closed++;
         continue;
       }
       if (this.pending.has(insight.code)) continue;
-      this.pending.set(insight.code, { insight, branch: pr.source_ref, proposalId: pr.id, sharedAt: clock, approved: 0, approvers: [] });
+      this.pending.set(insight.code, { insight, branch: pr.draft, proposalId: pr.id, sharedAt: clock, approved: 0, approvers: [] });
       out.reloaded++;
     }
     const kept = new Set([...this.pending.values()].map((p) => p.branch));
-    for (const b of await this.client.listBranches()) {
-      if (!b.name.startsWith(prefix) || kept.has(b.name)) continue;
-      await this.client.deleteBranch(b.name).then(() => out.branchesDeleted++, () => undefined);
+    for (const draft of await this.knowledge.drafts(prefix)) {
+      if (kept.has(draft)) continue;
+      await this.knowledge.discardDraft(draft).then(() => out.branchesDeleted++, () => undefined);
     }
     return out;
   }
