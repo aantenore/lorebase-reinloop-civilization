@@ -100,7 +100,7 @@ export class MockServer implements Transport {
   private groups = new Map<string, Group>();
   private rules: Rule[] = RULES.map((r) => ({ ...r }));
   private time: WorldTime = { day: 1, minute: 7 * 60, season: START_SEASON };
-  private lorebase = { connected: true, branch: 'main', revision: 'a3f9c1e' };
+  private knowledge = { connected: true, branch: 'main', revision: 'a3f9c1e', adapter: 'lorebase' };
   private youId: string | null = null;
   private r = rng(42);
   private elapsed = 0;
@@ -148,7 +148,7 @@ export class MockServer implements Transport {
       agent: (id) => this.actors.get(id),
       agentIds: () => [...this.actors.values()].filter((a) => a.kind === 'agent').map((a) => a.id),
       memories: (id) => this.minds.memories(id),
-      revision: () => ({ branch: this.lorebase.branch, revision: this.lorebase.revision }),
+      revision: () => ({ branch: this.knowledge.branch, revision: this.knowledge.revision }),
       counts: () => {
         const ins = this.minds.insightList();
         const eco = this.econ.economy();
@@ -247,7 +247,7 @@ export class MockServer implements Transport {
       if (!out) return Promise.reject(new Error('404'));
     } else if (clean === '/conversations') out = this.god.conversations(q, this.groups);
     else if (clean === '/observatory/summary') out = this.god.summary();
-    else if (clean === '/observatory/log') out = this.god.lorebaseLog(Number(q.get('limit') || 20));
+    else if (clean === '/observatory/log') out = this.god.knowledgeLog(Number(q.get('limit') || 20));
     else if (clean === '/observatory/proposals') out = this.god.proposalList(q.get('status'));
     else if (clean === '/insights') out = this.minds.insightList(q.get('role') || undefined);
     else if (clean === '/consciousness') out = this.minds.consciousness();
@@ -365,7 +365,8 @@ export class MockServer implements Transport {
       rules: this.rules,
       time: this.time,
       roles: ['gatherer', 'woodcutter', 'builder', 'healer', 'scout', 'wanderer'],
-      lorebase: this.lorebase,
+      knowledge: this.knowledge,
+      lorebase: this.knowledge,
       economy: this.econ.economy(),
       society: this.society.society(),
     });
@@ -656,7 +657,9 @@ export class MockServer implements Transport {
     this.emit({ type: 'time', ...this.time, minute: Math.floor(this.time.minute) });
     this.emit({ type: 'world_event', kind: 'season', text: 'È arrivato l’inverno. La neve copre la valle.' });
     this.minds.rememberAll('È arrivato l’inverno e la neve ha coperto la valle.', 'danger', 0.7, 'paura');
-    this.emit({ type: 'lorebase', ...this.lorebase, revision: (this.lorebase.revision = 'b71e0d4') });
+    const kn = { ...this.knowledge, revision: (this.knowledge.revision = 'b71e0d4') };
+    this.emit({ type: 'knowledge', ...kn });
+    this.emit({ type: 'lorebase', ...kn });
     for (const a of this.actors.values()) if (a.kind === 'agent') this.think(a, 'L’inverno è arrivato: servono legna e riparo.', this.r() * 3);
     const exp = this.groups.get('g-exp');
     if (exp) {
@@ -677,7 +680,7 @@ export class MockServer implements Transport {
   private submitRule(key: string, op: RuleOp, mode: RuleMode, message: string): RuleMutationResult {
     if (mode === 'direct') {
       setTimeout(() => this.applyRule(key, op, message || 'Modifica diretta'), 600);
-      return { branch: this.lorebase.branch };
+      return { branch: this.knowledge.branch };
     }
     const verb = op.kind === 'create' ? 'Nuova legge' : op.kind === 'remove' ? 'Ritiro legge' : 'Modifica legge';
     const branch = `proposal/${key.replace(/[._]/g, '-')}-${Math.floor(this.r() * 1e4)}`;
@@ -711,7 +714,7 @@ export class MockServer implements Transport {
       change = { key, old, new: rule.value, text: rule.text, category: rule.category, unit: rule.unit };
     }
     const rev = Math.floor(this.r() * 0xfffffff).toString(16).padStart(7, '0');
-    this.lorebase.revision = rev;
+    this.knowledge.revision = rev;
     this.emit({ type: 'rules_changed', revision: rev, changes: [change] });
     const what = change.removed ? `Legge ritirata: ${change.text}` : op.kind === 'create' ? `Nuova legge: ${change.text} = ${change.new}` : `Legge cambiata: ${change.text} ${change.old} → ${change.new}`;
     this.god.commit(rev, `${what} (${why})`, ['rule']);
@@ -1072,7 +1075,7 @@ export class MockServer implements Transport {
     this.emit({ type: 'thinking', id: a.id, on: true });
     const pool = REPLIES[a.role] ?? DEFAULT_REPLY;
     let answer = pool[Math.floor(this.r() * pool.length)];
-    if (/legg|regol|law/i.test(text)) answer = `Le leggi le custodisce Lorebase. Oggi ogni albero dà ${this.rule('wood.per_chop')} legna, e d’inverno il freddo toglie ${this.rule('cold.damage_per_hour')} vita all’ora.`;
+    if (/legg|regol|law/i.test(text)) answer = `Le leggi le custodisce la conoscenza condivisa. Oggi ogni albero dà ${this.rule('wood.per_chop')} legna, e d’inverno il freddo toglie ${this.rule('cold.damage_per_hour')} vita all’ora.`;
     else if (/ciao|salve|hello/i.test(text)) answer = `Ciao, ${p.name}! Sono ${a.name}. ${answer}`;
     const chunks = answer.match(/.{1,4}/gsu) ?? [answer];
     setTimeout(() => {

@@ -24,7 +24,7 @@ export const config = {
   /** Speed slider bounds (tick duration). */
   minTickMs: 250,
   maxTickMs: 6000,
-  /** Pending rule writes revert with an error if Lorebase does not confirm in time. */
+  /** Pending rule writes revert with an error if the shared knowledge does not confirm in time. */
   pendingTimeoutMs: Number(import.meta.env.VITE_PENDING_TIMEOUT_MS || 30000),
   /** Map rendering: berry flecks appear only above this share of the richest tile, up to N per tile. */
   map: { berryMinShare: 0.35, berryMaxDots: 3 },

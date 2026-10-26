@@ -68,7 +68,7 @@ const INSIGHT_POOL: Record<string, string[]> = {
     'La carne si divide tra chi ha lavorato e chi ha fame, senza scordare l’anziano.',
   ],
   elder: [
-    'Le leggi cambiano, i bisogni restano: ascolta Lorebase prima di decidere.',
+    'Le leggi cambiano, i bisogni restano: ascolta la conoscenza condivisa prima di decidere.',
     'Un vaso di argilla cotta vale più di dieci ceste per conservare il cibo.',
     'Ogni ruolo ha bisogno di un altro: nessuno è autosufficiente.',
     'Il fuoco non va mai lasciato spegnere: è il cuore dei mestieri più importanti.',
@@ -175,7 +175,7 @@ interface Mem {
 
 const MAX_MEMS = 14;
 
-/** Private memories (reinloop) and shared role insights (Lorebase), driven by the world clock. */
+/** Private memories (reinloop) and shared role insights (shared knowledge), driven by the world clock. */
 export class Minds {
   private mems = new Map<string, Mem[]>();
   private seq = 1;
@@ -445,16 +445,16 @@ export class Minds {
 }
 
 const CONSULT: Record<string, string[]> = {
-  lorebase_search: ['leggi inverno', 'ricette ceramica', 'come conservare le bacche', 'leggi sul freddo', 'tecnologie scoperte', 'regole sugli scambi'],
-  lorebase_get_record: ['legge wood.per_chop', 'legge food.per_gather', 'ricetta ascia di pietra', 'ricetta impiastro'],
-  lorebase_list_records: ['ricette scoperte', 'leggi della categoria clima', 'intuizioni accettate'],
+  conoscenza_cerca: ['leggi inverno', 'ricette ceramica', 'come conservare le bacche', 'leggi sul freddo', 'tecnologie scoperte', 'regole sugli scambi'],
+  conoscenza_leggi: ['legge wood.per_chop', 'legge food.per_gather', 'ricetta ascia di pietra', 'ricetta impiastro'],
+  conoscenza_interroga: ['ricette scoperte', 'leggi della categoria clima', 'intuizioni accettate'],
 };
 
-/** A plausible Lorebase lookup for an agent that starts thinking. */
+/** A plausible knowledge lookup for an agent that starts thinking. */
 export function consultFor(role: string, r: () => number): { tool: string; query: string } {
   const tools = Object.keys(CONSULT);
   const tool = tools[Math.floor(r() * tools.length)];
-  if (r() < 0.3) return { tool: 'lorebase_get_record', query: `coscienza del ruolo ${ROLE_IT[role] ?? role}` };
+  if (r() < 0.3) return { tool: 'conoscenza_leggi', query: `coscienza del ruolo ${ROLE_IT[role] ?? role}` };
   const qs = CONSULT[tool];
   return { tool, query: qs[Math.floor(r() * qs.length)] };
 }

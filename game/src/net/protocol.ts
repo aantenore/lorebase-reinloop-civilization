@@ -135,11 +135,16 @@ export interface WorldTime {
   season: Season;
 }
 
-export interface LorebaseStatus {
+/** State of the shared knowledge backend. `adapter` names the implementation (e.g. 'lorebase', 'memory'). */
+export interface KnowledgeStatus {
   connected: boolean;
   branch: string;
   revision: string;
+  adapter?: string;
 }
+
+/** @deprecated Use KnowledgeStatus. */
+export type LorebaseStatus = KnowledgeStatus;
 
 export interface PlanStep {
   action: string;
@@ -271,7 +276,7 @@ export interface FlowEdge {
 
 export type InsightStatus = 'proposed' | 'accepted' | 'retired' | 'rejected';
 
-/** A piece of a role's shared consciousness, versioned in Lorebase. `author`/`reviewer` are names. */
+/** A piece of a role's shared consciousness, versioned in the shared knowledge. `author`/`reviewer` are names. */
 export interface Insight {
   code: string;
   role: string;
@@ -287,7 +292,7 @@ export interface Insight {
 export type MemoryKind = 'episodic' | 'gist';
 export type MemoryAction = 'added' | 'blurred' | 'merged' | 'forgotten' | 'recalled';
 
-/** One private memory of an agent (never written to Lorebase). Fidelity fades with time. */
+/** One private memory of an agent (never written to the shared knowledge). Fidelity fades with time. */
 export interface Memory {
   id: string;
   text: string;
@@ -325,7 +330,9 @@ export interface HelloMsg {
   rules: Rule[];
   time: WorldTime;
   roles: string[];
-  lorebase: LorebaseStatus;
+  knowledge?: KnowledgeStatus;
+  /** @deprecated Alias of `knowledge`, sent by older servers. */
+  lorebase?: KnowledgeStatus;
   /** Absent on servers without the economy. */
   economy?: Economy;
   /** Absent on servers without the society layer. */
@@ -355,9 +362,11 @@ export interface TileMsg { type: 'tile'; x: number; y: number; food: number; woo
 export interface TimeMsg { type: 'time'; day: number; minute: number; season: Season }
 export interface WorldEventMsg { type: 'world_event'; kind: WorldEventKind; text: string; at?: { x: number; y: number } }
 export interface RulesChangedMsg { type: 'rules_changed'; revision: string; changes: RuleChange[] }
-export interface LorebaseMsg { type: 'lorebase'; connected: boolean; branch: string; revision: string }
+export interface KnowledgeMsg { type: 'knowledge'; connected: boolean; branch: string; revision: string; adapter?: string }
+/** @deprecated Older servers send `knowledge` as `lorebase`. */
+export interface LorebaseMsg { type: 'lorebase'; connected: boolean; branch: string; revision: string; adapter?: string }
 export interface InsightMsg { type: 'insight'; insight: Insight; action: 'proposed' | 'accepted' | 'rejected' | 'retired'; reviewer?: string }
-/** An agent consulted Lorebase; `query` is a short summary of what it asked. */
+/** An agent consulted the shared knowledge; `query` is a short summary of what it asked. */
 export interface ConsultMsg { type: 'consult'; agentId: string; tool: string; query: string }
 export interface CraftMsg { type: 'craft'; by: string; recipe: string; inputs: ItemBag; outputs: ItemBag; at: TilePos }
 export interface TradeMsg { type: 'trade'; from: string; to: string; give: ItemBag; get: ItemBag; kind: 'gift' | 'barter' }
@@ -399,7 +408,7 @@ export interface OpinionMsg { type: 'opinion'; from: string; to: string; score: 
 export interface AgedMsg { type: 'aged'; id: string; stage: AgeStage }
 export interface SkillMsg { type: 'skill'; id: string; recipe: string; level: number }
 export interface FamilyMsg { type: 'family'; family: Family }
-/** A law change proposed by an agent; it is reviewed (merged/rejected) in Lorebase. */
+/** A law change proposed by an agent; it is reviewed (merged/rejected) in the external review. */
 export interface LawProposalMsg {
   type: 'law_proposal';
   id: string;
@@ -442,6 +451,7 @@ export type ServerMsg =
   | TimeMsg
   | WorldEventMsg
   | RulesChangedMsg
+  | KnowledgeMsg
   | LorebaseMsg
   | InsightMsg
   | ConsultMsg
@@ -552,15 +562,30 @@ export interface AgentMind {
   groupId?: string | null;
 }
 
+export interface KnowledgeSummary {
+  url?: string;
+  domain?: string;
+  branch?: string;
+  revision?: string;
+  adapter?: string;
+  counts?: Record<string, number>;
+}
+
+export interface MemorySummary {
+  memories?: number;
+  perAgent?: { agentId: string; name: string; count: number; avgFidelity: number; gists: number }[];
+  dbBytes?: number;
+  lastCompaction?: string | null;
+}
+
 /** GET /api/observatory/summary. Nested values may vary by server version: render generically. */
 export interface ObservatorySummary {
-  lorebase?: { url?: string; domain?: string; branch?: string; revision?: string; counts?: Record<string, number> };
-  mnemo?: {
-    memories?: number;
-    perAgent?: { agentId: string; name: string; count: number; avgFidelity: number; gists: number }[];
-    dbBytes?: number;
-    lastCompaction?: string | null;
-  };
+  knowledge?: KnowledgeSummary;
+  memory?: MemorySummary;
+  /** @deprecated Alias of `knowledge`. */
+  lorebase?: KnowledgeSummary;
+  /** @deprecated Alias of `memory`. */
+  mnemo?: MemorySummary;
   reinloop?: {
     runs?: number;
     decisions?: number;
@@ -572,12 +597,16 @@ export interface ObservatorySummary {
 }
 
 /** GET /api/observatory/log?limit= */
-export interface LorebaseLogEntry {
+export interface KnowledgeLogEntry {
   revision: string;
   message: string;
   time: string;
+  author: string;
   kinds: string[];
 }
+
+/** @deprecated Use KnowledgeLogEntry. */
+export type LorebaseLogEntry = KnowledgeLogEntry;
 
 /** GET /api/observatory/proposals?status= */
 export interface ProposalInfo {

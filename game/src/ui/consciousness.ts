@@ -8,7 +8,7 @@ import { panels } from './panels';
 import { getPref, setPref } from './prefs';
 
 /**
- * Shared consciousness of each social role (Lorebase): accepted insights, proposals waiting for a
+ * Shared consciousness of each social role (shared knowledge): accepted insights, proposals waiting for a
  * peer's review, and the archive. Live `insight` events reveal themselves with an animation.
  */
 export function mountConsciousness(): void {

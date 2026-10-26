@@ -42,7 +42,7 @@ export function mountHud(onJoinClick: () => void): void {
 
   // ---- top-right: status pills + toolbar
   const conn = h('span', { class: 'px pill' }, h('span', { class: 'dot' }), h('span'));
-  const lore = h('span', { class: 'px pill', title: 'Lorebase' }, h('span', { class: 'dot' }), h('span'));
+  const lore = h('span', { class: 'px pill', title: t('hud.knowledge') }, h('span', { class: 'dot' }), h('span'));
   const follow = h('button', { class: 'btn', title: 'F', onclick: () => bus.emit('follow', {}) });
   const toolbar = h('div', { class: 'toolbar' });
   for (const tb of TOOLBAR) {
@@ -105,9 +105,9 @@ export function mountHud(onJoinClick: () => void): void {
     conn.lastElementChild!.textContent = t(`status.${s}` as I18nKey);
   };
   const renderLore = (flash: boolean) => {
-    const l = store.lorebase;
+    const l = store.knowledge;
     lore.className = `px pill ${l.connected ? 'ok' : 'bad'}`;
-    lore.lastElementChild!.textContent = l.connected ? `⎇ ${l.branch} @ ${l.revision.slice(0, 7)}` : t('hud.lorebaseOff');
+    lore.lastElementChild!.textContent = l.connected ? `⎇ ${l.branch} @ ${l.revision.slice(0, 7)}` : t('hud.knowledgeOff');
     if (flash) {
       void lore.offsetWidth;
       lore.classList.add('flash');
@@ -126,7 +126,7 @@ export function mountHud(onJoinClick: () => void): void {
   });
   store.on('entity_delta', ({ e }) => e.id === store.youId && renderStats());
   store.on('status', renderConn);
-  store.on('lorebase', (l) => renderLore(l.changed));
+  store.on('knowledge', (l) => renderLore(l.changed));
   bus.on('followChanged', ({ on }) => renderFollow(on));
   renderClock();
   renderConn();

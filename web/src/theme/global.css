@@ -128,10 +128,10 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .pill em { font-style: normal; color: var(--ink); }
 .pill code { color: var(--gold-2); }
 .pill.provider.is-mock { border-style: dashed; }
-.pill.lorebase .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); }
-.pill.lorebase.down .dot { background: var(--bad); box-shadow: 0 0 10px var(--bad); }
-.pill.lorebase .branch-alt { color: var(--frost); }
-.pill.lorebase.pulse { animation: lbPulse 1.6s ease; }
+.pill.knowledge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.pill.knowledge.down .dot { background: var(--bad); box-shadow: 0 0 10px var(--bad); }
+.pill.knowledge .branch-alt { color: var(--frost); }
+.pill.knowledge.pulse { animation: lbPulse 1.6s ease; }
 @keyframes lbPulse {
   0% { box-shadow: 0 0 0 0 rgba(246, 207, 110, 0.7); border-color: var(--gold-2); background: rgba(246, 207, 110, 0.18); }
   100% { box-shadow: 0 0 0 14px rgba(246, 207, 110, 0); }

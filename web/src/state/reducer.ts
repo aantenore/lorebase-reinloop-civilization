@@ -50,7 +50,7 @@ export interface State {
   rules: Rule[];
   ruleFlash: Record<string, { old: number; new: number; at: number }>;
   pending: Record<string, PendingRule>;
-  /** Last write error per rule key (e.g. Lorebase never confirmed). */
+  /** Last write error per rule key (e.g. the shared knowledge never confirmed). */
   ruleErrors: Record<string, string>;
   history: Stats[];
   markers: RuleMarker[];
@@ -263,7 +263,11 @@ function onEvent(s: State, ev: ServerEvent): State {
         }
       }
       const marker: RuleMarker = { tick: s.tick, revision: ev.revision, changes: ev.changes };
-      const status = s.status ? { ...s.status, lorebase: { ...s.status.lorebase, revision: ev.revision } } : s.status;
+      const cur = s.status && (s.status.knowledge ?? s.status.lorebase);
+      const status =
+        s.status && cur
+          ? { ...s.status, knowledge: { ...cur, revision: ev.revision }, ...(s.status.lorebase ? { lorebase: { ...s.status.lorebase, revision: ev.revision } } : {}) }
+          : s.status;
       return {
         ...s,
         rules,
@@ -277,9 +281,9 @@ function onEvent(s: State, ev: ServerEvent): State {
       };
     }
     case 'status': {
-      const prev = s.status?.lorebase;
-      const next = ev.status.lorebase;
-      const changed = !!prev && (prev.revision !== next.revision || prev.branch !== next.branch);
+      const prev = s.status && (s.status.knowledge ?? s.status.lorebase);
+      const next = ev.status.knowledge ?? ev.status.lorebase;
+      const changed = !!prev && !!next && (prev.revision !== next.revision || prev.branch !== next.branch);
       return { ...s, status: ev.status, revisionPulse: changed ? s.revisionPulse + 1 : s.revisionPulse };
     }
   }

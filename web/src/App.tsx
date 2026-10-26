@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { lang, t } from './i18n';
 import { SimProvider, useSim } from './state/store';
 import { UiProvider, useUi } from './state/ui';
-import { LorebasePill, PlayButton, SeasonClock, TopBar } from './components/TopBar';
+import { KnowledgePill, PlayButton, SeasonClock, TopBar } from './components/TopBar';
 import { WorldMap } from './components/WorldMap';
 import { Roster } from './components/Roster';
 import { AgentDrawer } from './components/AgentDrawer';
@@ -22,7 +22,7 @@ function FocusHud() {
         <PlayButton />
       </div>
       <div className="focus-hud right">
-        <LorebasePill />
+        <KnowledgePill />
         <button className="ctl" onClick={() => setFocus(false)}>{t.layout.exitFocus}</button>
       </div>
     </>

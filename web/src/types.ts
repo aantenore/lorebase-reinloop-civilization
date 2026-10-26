@@ -64,13 +64,17 @@ export interface Stats {
   byTier?: Partial<Record<Tier, TierStats>>;
 }
 
-export interface LorebaseStatus {
+export interface KnowledgeStatus {
   connected: boolean;
   url: string;
   domain: string;
   branch: string;
   revision: string;
+  adapter?: string;
 }
+
+/** @deprecated Use KnowledgeStatus. */
+export type LorebaseStatus = KnowledgeStatus;
 
 export interface SimStatus {
   running: boolean;
@@ -78,7 +82,9 @@ export interface SimStatus {
   tickMs: number;
   provider: 'anthropic' | 'mock' | string;
   model: string;
-  lorebase: LorebaseStatus;
+  knowledge?: KnowledgeStatus;
+  /** @deprecated Alias of `knowledge`, sent by older servers. */
+  lorebase?: KnowledgeStatus;
 }
 
 export interface RuleChange {
@@ -109,7 +115,7 @@ export type ServerEvent =
   | { type: 'message'; tick: number; from: string; to: string; text: string }
   | { type: 'world_event'; tick: number; kind: WorldEventKind; text: string }
   | { type: 'tile_update'; x: number; y: number; food: number; wood: number; shelter: boolean }
-  | { type: 'rules_changed'; revision: string; source: 'lorebase' | string; changes: RuleChange[] }
+  | { type: 'rules_changed'; revision: string; source: 'knowledge' | 'lorebase' | string; changes: RuleChange[] }
   | { type: 'status'; status: SimStatus };
 
 export interface Scenario {

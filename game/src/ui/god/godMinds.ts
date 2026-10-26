@@ -18,7 +18,7 @@ interface MindState {
 
 const now = (): GameTime => ({ day: store.time.day, minute: store.time.minute });
 
-/** Any agent's mind: plan, thoughts, Lorebase consults, private memories (fading) and group. */
+/** Any agent's mind: plan, thoughts, knowledge consults, private memories (fading) and group. */
 export function mountGodMinds(): GodTab {
   let agentId: string | null = null;
   let visible = false;

@@ -5,7 +5,7 @@ import type {
   GameTime,
   Group,
   GroupPattern,
-  LorebaseLogEntry,
+  KnowledgeLogEntry,
   Memory,
   ObservatorySummary,
   PlanStep,
@@ -52,7 +52,7 @@ const VOICE: Record<DecisionTraceEntry['role'], string[]> = {
 
 /**
  * Mock bookkeeping behind god mode: global conversation log, per-agent thoughts and consults,
- * decision-loop counters, Lorebase log and open proposals.
+ * decision-loop counters, knowledge log and open proposals.
  */
 export class GodLedger {
   private lines: ConversationLine[] = [];
@@ -67,7 +67,7 @@ export class GodLedger {
   private tokens = { input: 0, output: 0 };
   private costByModel: Record<string, number> = {};
   private costByTier: Record<string, number> = {};
-  private log: LorebaseLogEntry[] = [];
+  private log: KnowledgeLogEntry[] = [];
   private proposals: ProposalInfo[] = [];
   private propSeq = 1;
   private deliberatedAt = new Map<string, number>();
@@ -94,7 +94,7 @@ export class GodLedger {
       ['7f30c55', 'Economia: risorse e ricette di base', ['resource', 'recipe', 'tech']],
       ['a3f9c1e', 'Legge aggiornata: durata delle stagioni', ['rule']],
     ];
-    seedLog.forEach(([revision, message, kinds], i) => this.log.unshift({ revision, message, kinds, time: new Date(t0 - (seedLog.length - i) * 9 * 60_000).toISOString() }));
+    seedLog.forEach(([revision, message, kinds], i) => this.log.unshift({ revision, message, kinds, author: 'mock', time: new Date(t0 - (seedLog.length - i) * 9 * 60_000).toISOString() }));
     this.proposals.push({ id: `p-${this.propSeq++}`, title: 'Più cibo per ogni cespuglio (food.per_gather 2 → 3)', branch: 'proposal/food-per-gather', status: 'open', author: 'Elsa' });
   }
 
@@ -155,9 +155,9 @@ export class GodLedger {
     }
   }
 
-  /** Lorebase commit (direct change or merged proposal). */
+  /** Knowledge commit (direct change or merged proposal). */
   commit(revision: string, message: string, kinds: string[]) {
-    this.log.unshift({ revision, message, kinds, time: new Date().toISOString() });
+    this.log.unshift({ revision, message, kinds, author: 'mock', time: new Date().toISOString() });
     if (this.log.length > 100) this.log.pop();
   }
 
@@ -234,9 +234,13 @@ export class GodLedger {
     const memories = perAgent.reduce((s, a) => s + a.count, 0);
     const round = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, +v.toFixed(4)]));
     const total = Object.values(this.costByModel).reduce((s, v) => s + v, 0);
+    const knowledge = { url: 'http://localhost:5180', domain: 'world', branch, revision, adapter: 'lorebase', counts: { ...this.host.counts(), proposals: this.proposals.filter((p) => p.status === 'open').length } };
+    const memory = { memories, perAgent, dbBytes: memories * 640 + 48_000, lastCompaction: this.lastCompaction };
     return {
-      lorebase: { url: 'http://localhost:5180', domain: 'world', branch, revision, counts: { ...this.host.counts(), proposals: this.proposals.filter((p) => p.status === 'open').length } },
-      mnemo: { memories, perAgent, dbBytes: memories * 640 + 48_000, lastCompaction: this.lastCompaction },
+      knowledge,
+      lorebase: knowledge,
+      memory,
+      mnemo: memory,
       reinloop: {
         runs: this.runs,
         decisions: this.decisions,
@@ -248,7 +252,7 @@ export class GodLedger {
     };
   }
 
-  lorebaseLog(limit: number): LorebaseLogEntry[] {
+  knowledgeLog(limit: number): KnowledgeLogEntry[] {
     return this.log.slice(0, limit);
   }
 

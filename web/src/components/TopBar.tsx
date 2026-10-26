@@ -32,17 +32,17 @@ export function PlayButton() {
   );
 }
 
-export function LorebasePill() {
+export function KnowledgePill() {
   const { state } = useSim();
-  const lb = state.status?.lorebase;
+  const lb = state.status?.knowledge ?? state.status?.lorebase;
   return (
     <span
       key={state.revisionPulse}
-      className={`pill lorebase ${lb?.connected ? 'ok' : 'down'} ${state.revisionPulse ? 'pulse' : ''}`}
-      title={lb ? t.top.lorebaseTitle(lb.url, lb.domain) : t.top.lorebase}
+      className={`pill knowledge ${lb?.connected ? 'ok' : 'down'} ${state.revisionPulse ? 'pulse' : ''}`}
+      title={lb ? t.top.knowledgeTitle(lb.url, lb.domain) : t.top.knowledge}
     >
       <span className="dot" />
-      {t.top.lorebase}
+      {t.top.knowledge}
       {lb && (
         <>
           <em className={lb.branch !== 'main' ? 'branch-alt' : ''}>⎇ {lb.branch}</em>
@@ -102,7 +102,7 @@ export function TopBar({ onOpenSetup }: { onOpenSetup(): void }) {
           {transportKind === 'mock' ? t.top.mockStream : st?.provider ?? '—'}
           {st?.model && <em>{st.model}</em>}
         </span>
-        <LorebasePill />
+        <KnowledgePill />
         <span className={`pill conn conn-${state.conn}`}>{t.top.conn[state.conn] ?? state.conn}</span>
       </div>
     </header>

@@ -1,6 +1,6 @@
 import { config } from '../../config';
 import { t } from '../../i18n';
-import type { LorebaseLogEntry, ObservatorySummary, ProposalInfo } from '../../net/protocol';
+import type { KnowledgeLogEntry, ObservatorySummary, ProposalInfo } from '../../net/protocol';
 import { session } from '../../net/session';
 import { store } from '../../state/store';
 import { h } from '../dom';
@@ -9,7 +9,7 @@ import { fmtBytes, focusEntity, kvTable, lorebaseLink } from './godShared';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Overview of the three systems: Lorebase (world truth), private memory, agent decision loop. */
+/** Overview of the three systems: shared knowledge (world truth), private memory, agent decision loop. */
 export function mountGodObservatory(): GodTab {
   let timer: number | null = null;
   const cards = h('div', { class: 'god-cards' });
@@ -26,10 +26,10 @@ export function mountGodObservatory(): GodTab {
   const unavailable = (e: unknown) => h('div', { class: 'note err' }, t('god.obs.unavailable', { err: errText(e) }));
 
   const renderSummary = (s: ObservatorySummary) => {
-    const { perAgent, dbBytes, ...mnemoRest } = s.mnemo ?? {};
+    const { perAgent, dbBytes, ...mnemoRest } = (s.memory ?? s.mnemo) ?? {};
     const agents = [...(perAgent ?? [])].sort((a, b) => b.count - a.count);
     cards.replaceChildren(
-      card(t('god.obs.lorebase'), kvTable(s.lorebase as Record<string, unknown>)),
+      card(t('god.obs.knowledge'), kvTable((s.knowledge ?? s.lorebase) as Record<string, unknown>)),
       card(
         t('god.obs.mnemo'),
         kvTable({ ...mnemoRest, ...(dbBytes !== undefined ? { db: fmtBytes(dbBytes) } : {}) }),
@@ -55,11 +55,11 @@ export function mountGodObservatory(): GodTab {
     );
   };
 
-  const renderLog = (entries: LorebaseLogEntry[]) =>
+  const renderLog = (entries: KnowledgeLogEntry[]) =>
     logBox.replaceChildren(
       ...(entries.length
         ? entries.map((e) =>
-            h('div', { class: 'god-logrow' }, h('code', {}, e.revision.slice(0, 7)), h('span', {}, e.message), h('span', { class: 'muted' }, [e.kinds.join(', '), e.time ? new Date(e.time).toLocaleTimeString() : ''].filter(Boolean).join(' · '))),
+            h('div', { class: 'god-logrow' }, h('code', {}, e.revision.slice(0, 7)), h('span', {}, e.message), h('span', { class: 'muted' }, [(e.kinds ?? []).join(', '), e.time ? new Date(e.time).toLocaleTimeString() : ''].filter(Boolean).join(' · '))),
           )
         : [h('div', { class: 'note' }, t('god.obs.noLog'))]),
     );
@@ -76,7 +76,7 @@ export function mountGodObservatory(): GodTab {
     if (!tr) return;
     const [sum, log, props] = await Promise.allSettled([
       tr.getJson<ObservatorySummary>('/observatory/summary'),
-      tr.getJson<LorebaseLogEntry[]>(`/observatory/log?limit=${config.god.observatoryLogLimit}`),
+      tr.getJson<KnowledgeLogEntry[]>(`/observatory/log?limit=${config.god.observatoryLogLimit}`),
       tr.getJson<ProposalInfo[]>('/observatory/proposals?status=open'),
     ]);
     if (sum.status === 'fulfilled') renderSummary(sum.value);
@@ -87,7 +87,7 @@ export function mountGodObservatory(): GodTab {
     else propBox.replaceChildren(unavailable(props.reason));
   };
 
-  // a law change is a new Lorebase revision: refresh right away when visible
+  // a law change is a new knowledge revision: refresh right away when visible
   store.on('rules_changed', () => timer !== null && void refresh());
 
   return {

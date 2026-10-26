@@ -261,13 +261,15 @@ export class MockEngine {
   }
 
   private status(): SimStatus {
+    const knowledge = { connected: true, url: 'mock://knowledge', domain: 'civilization', branch: this.branch, revision: this.revision, adapter: 'memory' };
     return {
       running: this.running,
       tick: this.tick,
       tickMs: this.tickMs,
       provider: 'mock',
       model: t.mock.model,
-      lorebase: { connected: true, url: 'mock://lorebase', domain: 'civilization', branch: this.branch, revision: this.revision },
+      knowledge,
+      lorebase: knowledge,
     };
   }
 
@@ -319,7 +321,7 @@ export class MockEngine {
     }
     if (!out.length) return;
     this.revision = rev;
-    this.emit({ type: 'rules_changed', revision: rev, source: 'lorebase', changes: out });
+    this.emit({ type: 'rules_changed', revision: rev, source: 'knowledge', changes: out });
     this.emit({
       type: 'world_event',
       tick: this.tick,

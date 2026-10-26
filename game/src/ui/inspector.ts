@@ -153,7 +153,7 @@ export function mountInspector(): void {
         h(
           'div',
           { class: `consult${i === 0 && freshConsult > Date.now() - 1500 ? ' fresh' : ''}` },
-          h('span', { class: 'c-tool' }, c.tool.replace(/^lorebase_/, '')),
+          h('span', { class: 'c-tool' }, c.tool.replace(/^(conoscenza|lorebase)_/, '')),
           h('span', { class: 'c-q' }, c.query),
           h('span', { class: 'muted c-when' }, fmtClock(c.minute)),
         ),

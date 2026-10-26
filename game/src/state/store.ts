@@ -21,7 +21,7 @@ import type {
   Resource,
   Tech,
   TradeMsg,
-  LorebaseStatus,
+  KnowledgeStatus,
   PlanMsg,
   Rule,
   RuleChange,
@@ -114,7 +114,7 @@ export interface StoreEvents {
   time: WorldTime & { seasonChanged: boolean };
   world_event: Chronicle;
   rules_changed: { revision: string; changes: RuleChange[] };
-  lorebase: LorebaseStatus & { changed: boolean };
+  knowledge: KnowledgeStatus & { changed: boolean };
   select: { id: string | null };
   economy: EconomyState;
   insight: InsightMsg;
@@ -156,7 +156,7 @@ export class Store {
   rules = new Map<string, Rule>();
   time: WorldTime = { day: 1, minute: 480, season: 'spring' };
   roles: string[] = [...config.defaultRoles];
-  lorebase: LorebaseStatus = { connected: false, branch: '-', revision: '-' };
+  knowledge: KnowledgeStatus = { connected: false, branch: '-', revision: '-' };
   logs = new Map<string, LogLine[]>();
   streams = new Map<string, string>();
   chronicle: Chronicle[] = [];
@@ -373,7 +373,7 @@ export class Store {
         this.rules = new Map(msg.rules.map((r) => [r.key, r]));
         this.time = msg.time;
         if (msg.roles?.length) this.roles = msg.roles;
-        this.lorebase = msg.lorebase;
+        this.knowledge = msg.knowledge ?? msg.lorebase ?? this.knowledge;
         if (msg.economy) this.setEconomy(msg.economy);
         if (msg.society) this.setSociety(msg.society);
         this.emit('hello', msg);
@@ -538,9 +538,9 @@ export class Store {
           else if (r) Object.assign(r, { value: c.new, text: c.text ?? r.text, category: c.category ?? r.category, unit: c.unit ?? r.unit });
           else this.rules.set(c.key, { key: c.key, value: c.new, text: c.text, category: c.category ?? 'other', unit: c.unit ?? '' });
         }
-        this.lorebase = { ...this.lorebase, revision: msg.revision };
+        this.knowledge = { ...this.knowledge, revision: msg.revision };
         this.emit('rules_changed', { revision: msg.revision, changes: msg.changes });
-        this.emit('lorebase', { ...this.lorebase, changed: true });
+        this.emit('knowledge', { ...this.knowledge, changed: true });
         break;
       case 'insight': {
         const ins = { ...msg.insight, status: msg.action, ...(msg.reviewer ? { reviewer: msg.reviewer } : {}) };
@@ -597,10 +597,12 @@ export class Store {
       case 'deliberation':
         this.emit('deliberation', msg);
         break;
+      case 'knowledge':
       case 'lorebase': {
-        const changed = msg.revision !== this.lorebase.revision || msg.branch !== this.lorebase.branch;
-        this.lorebase = { connected: msg.connected, branch: msg.branch, revision: msg.revision };
-        this.emit('lorebase', { ...this.lorebase, changed });
+        // 'lorebase' is the deprecated alias of 'knowledge'
+        const changed = msg.revision !== this.knowledge.revision || msg.branch !== this.knowledge.branch;
+        this.knowledge = { connected: msg.connected, branch: msg.branch, revision: msg.revision, adapter: msg.adapter };
+        this.emit('knowledge', { ...this.knowledge, changed });
         break;
       }
     }
