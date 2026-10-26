@@ -94,7 +94,7 @@ deterministic heuristic instead of a model, so the demo runs offline; status rep
 ## Run
 
 Requirements: Node ≥ 22.18, Docker and the `lorebase` checkout (0.2.3 or later: `world:reset` uses its
-`delete_records`) next to this one (Keeper is built from it). reinloop is pinned (0.2.0):
+`delete_records`) next to this one (Keeper is built from it). reinloop is pinned (0.2.0 + `96601b2`: hosted tools, prompt caching):
 `vendor/reinloop-<sha>.tgz`, a packed build of one reinloop commit, is
 the dependency, so `npm ci` works anywhere (CI included).
 
@@ -128,7 +128,7 @@ workspace). Server flags: `--mock`, `--start`, `--ticks N` (run N ticks and exit
 Env overrides: `PORT`, `SIM_TICK_MS`, `SIM_SEED`, `SIM_LANGUAGE`, `SIM_MAX_TURNS`,
 `SIM_MODEL_OVERRIDE` (a tier or a model id for every agent, for cheap runs), `SIM_MODEL_OPUS|SONNET|HAIKU`,
 `LOREBASE_URL`, `LOREBASE_DOMAIN`, `LOREBASE_BRANCH`, `SIM_ROSTER_FILE`, `SIM_HOST`, `SIM_API_TOKEN`.
-Real-time world: `GAME_CONFIG` (default `config/game.json`), `GAME_CROWD` (extras), `GAME_GROUPS=0`
+Real-time world: `GAME_CONFIG` (default `config/game.json`), `GAME_PROFILE` (cost profile, `config/profiles/<name>.json`), `GAME_CROWD` (extras), `GAME_GROUPS=0`
 (no seeded groups), `GAME_CHRONICLE=0`, `HERALD_URL` (empty: no Lorebase tools), `HERALD_API_KEY` (sent as bearer
 when set; locally Herald forwards credential-less calls);
 `--seconds N` stops the server after N seconds; `GAME_TIME_SCALE` (game time multiplier, config
@@ -243,6 +243,22 @@ See [docs/upstream-issues.md](docs/upstream-issues.md) for friction found in Lor
   structured output and no tools. Joint plans are checked against the plan schema: a step without a
   valid `who` goes to its writer, near-miss action names are mapped (`plan.ts` `ACTION_NEAR_MISSES`),
   steps that still fail are dropped and logged.
+- **Prompt caching.** On Anthropic models reinloop caches the prompt prefix (tool catalog, instructions,
+  then the latest message). Every call puts what does not change between decisions first: tools, then the
+  person's instructions (identity, role, horizon); the perception of the moment is the message, last. Config
+  `promptCache` (`enabled`, `ttl`, `groupTtl`: `5m` or `1h`). A cache entry lives per person and kind of call
+  and every read renews it, so `1h` (writes at 2x input instead of 1.25x) only pays off when the same
+  person's calls are more than 5 real minutes apart. With the default cadence they are seconds to a minute
+  apart at any time scale above 1, hence `5m`. `/api/observatory/summary` reports `reinloop.cache`
+  (`readTokens`, `writeTokens`, `hitRatio` = read share of all input tokens, `savedUsd` against the same calls
+  uncached, also `byModel` and `byTier`).
+- **Cost profiles.** `GAME_PROFILE=<name>` applies `config/profiles/<name>.json` over the config files:
+  `game` is merged into `config/game.json`, `sim` into `config/sim.json`, `rosterTiers` sets roster tiers
+  by name (`"*"` for the rest). `economy`: every agent on haiku except the elder Ilse on sonnet (no opus, so
+  the council decides on sonnet at most; proposers and voters on haiku), no crowd extras, the same 8 agents
+  and 2 seeded groups, plan horizons x4 and replan cooldowns x6 in game time (sonnet x6 and x9), one Lorebase
+  consultation per haiku decision, a group decides at most every 240 game minutes, replies capped at 500
+  tokens, newborns on haiku. Example: `GAME_PROFILE=economy GAME_BUDGET_USD=10 GAME_TIME_SCALE=6 npm run game`.
 - **Plans, not per-second calls.** One call returns a plan of steps (`move_to`, `approach`, `gather`,
   `eat`, `build`, `give`, `say`, `rest`, `sleep`, `wait`) through the `commit_plan` tool; the run ends
   as soon as a plan is committed. Step counts and horizon per tier are in `config/game.json`
@@ -432,8 +448,8 @@ Economy and memory (phase 2):
 - `act` (players) also accepts `gather {item?}`, `craft {recipe}`, `experiment {items}`, `use {item}`, `give {to, item, amount}`.
 - REST: `GET /api/economy` (economy + last `flows`), `GET /api/agents/:id/memories` (bare `Memory[]`).
 - Observatory (read-only proxies, cached `observatory.cacheMs`): `GET /api/observatory/summary` (Lorebase counts per Kind
-  and revision; mnemo totals and per-agent count/avg fidelity/gists; reinloop runs, decisions, failures, tokens `{input, output}` and
-  `costUsd {total, byModel, byTier}`, `budgetMaxUsd`, `budgetPaused`; a group's run is booked per member under that
+  and revision; mnemo totals and per-agent count/avg fidelity/gists; reinloop runs, decisions, failures, tokens `{input, output}`,
+  `costUsd {total, byModel, byTier}`, prompt `cache {readTokens, writeTokens, write1hTokens, hitRatio, savedUsd, byModel, byTier}`, `budgetMaxUsd`, `budgetPaused`; a group's run is booked per member under that
   member's model, the team's remainder under the group; per-agent usage is in `/api/agents/:id/mind`), `/log?limit=` (main's revisions), `/proposals?status=`,
   `/records/:kind?limit=` (Kinds in `observatory.kinds`), `/memories?offset=&limit=` (all agents, paged).
 

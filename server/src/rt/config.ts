@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ModelParams } from 'reinloop';
 import { ROOT } from '../config.ts';
+import { deepMerge, loadProfile } from '../profile.ts';
 import type { Tier } from '../world/types.ts';
 import type { EconomyConfig } from './economy-book.ts';
 import type { MapConfig, MovementConfig } from './world.ts';
@@ -188,11 +189,25 @@ export interface GameConfig {
   reflex: import('./reflex.ts').ReflexConfig;
   /** Spending cap: when the model cost of this run reaches `maxUsd` (0: none) every mind is paused. */
   budget: { maxUsd: number };
+  /**
+   * Provider prompt caching (reinloop `params.cache` / `params.cacheTtl`): the stable prefix (tools, instructions)
+   * is cached and the volatile perception comes last. `groupTtl` applies to group members' runs (default `ttl`).
+   */
+  promptCache: { enabled: boolean; ttl: CacheTtl; groupTtl?: CacheTtl };
+}
+
+export type CacheTtl = '5m' | '1h';
+
+/** Model params that turn prompt caching on or off for one call (`group`: a group member's run). */
+export function cacheParams(cfg: Pick<GameConfig, 'promptCache'>, group = false): Pick<ModelParams, 'cache' | 'cacheTtl'> {
+  const c = cfg.promptCache;
+  if (!c?.enabled) return { cache: false };
+  return { cache: true, cacheTtl: (group ? c.groupTtl : undefined) ?? c.ttl };
 }
 
 export function loadGameConfig(env: NodeJS.ProcessEnv = process.env): GameConfig {
   const path = resolve(ROOT, env.GAME_CONFIG ?? 'config/game.json');
-  const cfg = JSON.parse(readFileSync(path, 'utf8')) as GameConfig;
+  const cfg = deepMerge(JSON.parse(readFileSync(path, 'utf8')) as GameConfig, loadProfile(env).game ?? {});
   const n = Number(env.GAME_CROWD);
   if (env.GAME_CROWD !== undefined && Number.isInteger(n) && n >= 0) cfg.crowd.count = n;
   if (env.GAME_GROUPS === '0') cfg.groups.seeded = [];

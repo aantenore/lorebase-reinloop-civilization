@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- reinloop pinned at `96601b2` (`vendor/reinloop-96601b26.tgz`): hosted tools, web tools, Anthropic prompt caching.
+- Prompt caching configured by `promptCache` (`ttl`, `groupTtl`); cache reads, writes, hit ratio and savings in
+  `/api/observatory/summary` (`reinloop.cache`).
+- Cost profiles (`GAME_PROFILE`, `config/profiles/<name>.json`) and the `economy` profile.
+
 ## 0.1.0 - 2026-10-24
 
 First release. Requires Lorebase 0.2.3 or later (checkout next to this one) and pins reinloop 0.2.0

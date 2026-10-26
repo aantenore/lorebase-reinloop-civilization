@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { checkModel, type RosterEntry, type SimConfig } from './config.ts';
+import { applyRosterTiers } from './profile.ts';
 import { TIERS } from './world/types.ts';
 
 export const NAME_MAX = 40;
@@ -43,7 +44,7 @@ export function loadRosterFile(cfg: SimConfig, roles: string[]): RosterEntry[] {
   try {
     if (existsSync(cfg.rosterFile)) {
       const saved = JSON.parse(readFileSync(cfg.rosterFile, 'utf8')) as RosterEntry[];
-      if (!validateRoster(saved, roles, cfg)) return saved;
+      if (!validateRoster(saved, roles, cfg)) return applyRosterTiers(saved, cfg.rosterTiers);
       console.warn(`ignoring invalid ${cfg.rosterFile}`);
     }
   } catch (err) {

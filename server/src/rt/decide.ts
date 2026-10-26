@@ -8,8 +8,9 @@ import type { Translate } from '../i18n.ts';
 import type { Role, RuleChange } from '../lorebase/rules.ts';
 import type { Brain, ConsultEvent } from './brain.ts';
 import type { Tier } from '../world/types.ts';
-import { AGENT_PATTERNS, type GameConfig, type TierDecision } from './config.ts';
+import { AGENT_PATTERNS, cacheParams, type GameConfig, type TierDecision } from './config.ts';
 import { flatSteps, mockSteps, needsOf } from './mock.ts';
+import type { TokenUsage } from './observatory.ts';
 import { MODEL_ACTIONS, normalizeStep, type PlanStep } from './plan.ts';
 import {
   doingLine, type GroupView, groupLine, inboxBlock, look, memoryBlock, type PromptLimits, recalledBlock, rtInstructions, rtObservation, selfLine, timeLine,
@@ -45,7 +46,7 @@ export interface DecideHost {
   /** Sinks every model run reports to (run logs kept in mnemo). */
   runSinks(): Sink[];
   /** A model run ended (usage and cost per agent, for the Observatory). */
-  ranModel(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number }): void;
+  ranModel(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: TokenUsage; costUsd?: number }): void;
   /** A person consulted Lorebase (shown to clients). */
   consulted(e: RtEntity, ev: ConsultEvent): void;
   /** The model's reasoning summary behind a decision (privileged clients only). */
@@ -342,7 +343,7 @@ export async function decide(host: DecideHost, e: RtEntity, why: string, stop?: 
   const runner = agent({
     name: e.id,
     model: modelRef(host, e.model, (req) => mockDecision(host, e, tc, req), cfg.mock.thinkDelayMs),
-    params: { ...cfg.decisions.modelParams.plan, maxTokens: tc.maxOutputTokens },
+    params: { ...cfg.decisions.modelParams.plan, ...cacheParams(cfg), maxTokens: tc.maxOutputTokens },
     instructions: rtInstructions(t, e, host.roleOf(e.role), { horizon }),
     tools: [commit, ...socialTools(host, e), ...faculties(host, e, tc.maxConsults)],
     budget: { maxTurns: tc.maxTurns, maxToolCalls: tc.maxConsults + tc.maxTurns * 4 },
@@ -398,7 +399,7 @@ export async function reply(host: DecideHost, e: RtEntity, speaker: RtEntity, on
   const runner = agent({
     name: e.id,
     model: modelRef(host, e.model, mockReply, cfg.mock.replyDelayMs),
-    params: { ...cfg.decisions.modelParams.reply, maxTokens: cfg.conversation.replyMaxOutputTokens },
+    params: { ...cfg.decisions.modelParams.reply, ...cacheParams(cfg), maxTokens: cfg.conversation.replyMaxOutputTokens },
     instructions: `${rtInstructions(t, e, host.roleOf(e.role), { horizon: w.r('plan_horizon_minutes') * tc.horizonFactor })}\n${t('rt.replyInstructions')}`,
     tools: [rethinkTool, ...lorebase],
     // Consultations, plus rethink and one refused extra call, then the answer.

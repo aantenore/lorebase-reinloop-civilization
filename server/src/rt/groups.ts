@@ -22,13 +22,13 @@ import {
 } from 'reinloop';
 import type { Translate } from '../i18n.ts';
 import type { GameConfig, GroupPattern } from './config.ts';
-import { AGENT_PATTERNS } from './config.ts';
+import { AGENT_PATTERNS, cacheParams } from './config.ts';
 import { type DecideHost, decisionTier, decisionTimeoutMs, type Failure, faculties, limitsOf, modelRef, normalizeSteps, planSchema } from './decide.ts';
 import type { Tier } from '../world/types.ts';
 import { flatSteps, mockGroupPlan, mockSteps } from './mock.ts';
 import type { PlanStep } from './plan.ts';
 import { inboxBlock, look, memberLine, timeLine } from './prompt.ts';
-import { NestedUsage } from './observatory.ts';
+import { NestedUsage, type TokenUsage } from './observatory.ts';
 import { weightedWinner } from './society.ts';
 import { tally } from './vote.ts';
 import type { RtEntity } from './world.ts';
@@ -352,7 +352,7 @@ export class GroupManager {
       name,
       description: opts.description,
       model: modelRef(this.host, model, this.mockWithConsult(g, m, opts.json === true, opts.mock), this.cfg.mock.thinkDelayMs),
-      params: opts.json ? { ...p.plan, maxTokens: counts.maxTokens } : { ...p.prose, maxTokens: this.cfg.groups.proseMaxOutputTokens },
+      params: { ...(opts.json ? p.plan : p.prose), ...cacheParams(this.cfg, true), maxTokens: opts.json ? counts.maxTokens : this.cfg.groups.proseMaxOutputTokens },
       ...(opts.output ? { output: opts.output } : {}),
       instructions: [this.instructionsOf(m, g, !bare), opts.extra, format].filter(Boolean).join('\n'),
       tools,
@@ -479,7 +479,7 @@ export class GroupManager {
         const mind = agent({
           name: `${g.id}${SEP}leader`,
           model: modelRef(this.host, model, planCall, this.cfg.mock.thinkDelayMs),
-          params: { ...this.cfg.decisions.modelParams.plan, maxTokens: this.counts(members).maxTokens },
+          params: { ...this.cfg.decisions.modelParams.plan, ...cacheParams(this.cfg, true), maxTokens: this.counts(members).maxTokens },
           instructions: [t('rt.group.crowdHeader', { horizon: Math.round(this.counts(members).horizon) }), this.formatText(members)].join('\n'),
           tools: [this.planTool(this.counts(members).max)],
           budget: { maxTurns: this.cfg.groups.maxTurns },
@@ -602,7 +602,7 @@ export class GroupManager {
     const nested = new NestedUsage();
     let costUsd = 0;
     let calls = 0;
-    const book = (who: { id: string; name: string; model: string; tier: string }, res: { status: string; costUsd?: number; usage?: { inputTokens?: number; outputTokens?: number } }) => {
+    const book = (who: { id: string; name: string; model: string; tier: string }, res: { status: string; costUsd?: number; usage?: TokenUsage }) => {
       costUsd += res.costUsd ?? 0;
       this.host.ranModel(who, res);
     };

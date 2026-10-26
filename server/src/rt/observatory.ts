@@ -1,6 +1,7 @@
 // Read-only overview of the three systems behind the world (Lorebase, mnemo, reinloop), for the
 // Observatory view. Server-side proxies only, each answer cached for `cacheMs` so a busy view
 // never multiplies calls to Keeper or mnemo.
+import { pricingFor } from 'reinloop';
 import type { LorebaseClient } from '../lorebase/client.ts';
 import type { Mnemo } from './mnemo.ts';
 
@@ -11,28 +12,80 @@ export interface ObservatoryConfig {
   kinds: string[];
 }
 
+/** Token counts of one model run as reinloop reports them (`inputTokens` includes cache reads and writes). */
+export interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  /** Part of `cacheWriteTokens` written with the 1-hour lifetime. */
+  cacheWrite1hTokens?: number;
+}
+
+const TOKEN_KEYS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'cacheWrite1hTokens'] as const;
+type TokenCounts = Record<(typeof TOKEN_KEYS)[number], number>;
+const zeroTokens = (): TokenCounts => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheWrite1hTokens: 0 });
+const tokensOf = (u: TokenUsage | undefined): TokenCounts => Object.fromEntries(TOKEN_KEYS.map((k) => [k, u?.[k] ?? 0])) as TokenCounts;
+/** Usage as reinloop shapes it: input and output always, cache counts only when present. */
+const usageOf = (c: TokenCounts): TokenUsage => ({
+  inputTokens: c.inputTokens, outputTokens: c.outputTokens,
+  ...(c.cacheReadTokens && { cacheReadTokens: c.cacheReadTokens }),
+  ...(c.cacheWriteTokens && { cacheWriteTokens: c.cacheWriteTokens }),
+  ...(c.cacheWrite1hTokens && { cacheWrite1hTokens: c.cacheWrite1hTokens }),
+});
+
+/**
+ * What prompt caching saved on one run, in USD, against the same tokens sent uncached: reads priced at the
+ * cache-read rate instead of the input rate, minus the premium paid on cache writes. Unknown model: 0.
+ */
+export function cacheSavingsUsd(model: string, u: TokenUsage): number {
+  const p = pricingFor(model.slice(model.indexOf('/') + 1));
+  if (!p) return 0;
+  const read = u.cacheReadTokens ?? 0;
+  const written = u.cacheWriteTokens ?? 0;
+  const written1h = Math.min(u.cacheWrite1hTokens ?? 0, written);
+  const w5 = p.cacheWriteMultiplier ?? 1;
+  const w1 = p.cacheWrite1hMultiplier ?? w5;
+  const saved = read * (p.inputPerMTok - (p.cacheReadPerMTok ?? p.inputPerMTok)) - ((written - written1h) * (w5 - 1) + written1h * (w1 - 1)) * p.inputPerMTok;
+  return saved / 1_000_000;
+}
+
 /** Model usage per agent, from the end of each reinloop run. */
-export interface UsageRow {
+export interface UsageRow extends TokenCounts {
   agentId: string;
   name: string;
   model: string;
   tier: string;
   runs: number;
   failures: number;
-  inputTokens: number;
-  outputTokens: number;
   costUsd: number;
+  /** USD prompt caching saved (negative while writes have not been read back yet). */
+  cacheSavedUsd: number;
 }
+
+type RunUsage = { status: string; usage?: TokenUsage; costUsd?: number };
+
+export interface CacheStats {
+  readTokens: number;
+  writeTokens: number;
+  write1hTokens: number;
+  /** Share of all input tokens served from the cache. */
+  hitRatio: number;
+  savedUsd: number;
+}
+
+const round = (n: number, digits = 6) => Math.round(n * 10 ** digits) / 10 ** digits;
 
 export class UsageLedger {
   readonly rows = new Map<string, UsageRow>();
-  track(who: { id: string; name: string; model: string; tier: string }, res: { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number }): void {
-    const row = this.rows.get(who.id) ?? { agentId: who.id, name: who.name, model: who.model, tier: who.tier, runs: 0, failures: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  track(who: { id: string; name: string; model: string; tier: string }, res: RunUsage): void {
+    const row = this.rows.get(who.id) ?? { agentId: who.id, name: who.name, model: who.model, tier: who.tier, runs: 0, failures: 0, ...zeroTokens(), costUsd: 0, cacheSavedUsd: 0 };
     row.runs++;
     if (!['completed', 'stopped', 'interrupted'].includes(res.status)) row.failures++;
-    row.inputTokens += res.usage?.inputTokens ?? 0;
-    row.outputTokens += res.usage?.outputTokens ?? 0;
+    const t = tokensOf(res.usage);
+    for (const k of TOKEN_KEYS) row[k] += t[k];
     row.costUsd += res.costUsd ?? 0;
+    row.cacheSavedUsd += cacheSavingsUsd(who.model, t);
     this.rows.set(who.id, row);
   }
   totalUsd(): number {
@@ -48,13 +101,29 @@ export class UsageLedger {
       o.runs += r.runs;
       o.inputTokens += r.inputTokens;
       o.outputTokens += r.outputTokens;
-      o.costUsd = Math.round((o.costUsd + r.costUsd) * 1e6) / 1e6;
+      o.costUsd = round(o.costUsd + r.costUsd);
     }
     return out;
   }
+  /** Prompt-cache totals over the given rows (default: all). */
+  cache(rows: Iterable<UsageRow> = this.rows.values()): CacheStats {
+    let input = 0, read = 0, write = 0, write1h = 0, saved = 0;
+    for (const r of rows) {
+      input += r.inputTokens;
+      read += r.cacheReadTokens;
+      write += r.cacheWriteTokens;
+      write1h += r.cacheWrite1hTokens;
+      saved += r.cacheSavedUsd;
+    }
+    return { readTokens: read, writeTokens: write, write1hTokens: write1h, hitRatio: input ? round(read / input, 4) : 0, savedUsd: round(saved) };
+  }
+  /** Prompt-cache totals grouped by a key (model or tier). */
+  cacheBy(key: 'model' | 'tier'): Record<string, CacheStats> {
+    const groups = new Map<string, UsageRow[]>();
+    for (const r of this.rows.values()) groups.set(r[key], [...(groups.get(r[key]) ?? []), r]);
+    return Object.fromEntries([...groups].map(([k, rows]) => [k, this.cache(rows)]));
+  }
 }
-
-type RunUsage = { status: string; usage?: { inputTokens?: number; outputTokens?: number }; costUsd?: number };
 
 /**
  * Splits the usage of a team run among the model runs nested in it, so each member's model is
@@ -63,7 +132,8 @@ type RunUsage = { status: string; usage?: { inputTokens?: number; outputTokens?:
  */
 export class NestedUsage {
   private readonly modelRuns = new Set<string>();
-  private readonly last = new Map<string, { costUsd: number; inputTokens: number; outputTokens: number }>();
+  private readonly last = new Map<string, { costUsd: number; tokens: TokenCounts }>();
+  private readonly bookedTokens = zeroTokens();
   readonly booked = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
 
   /** Feeds one run event; returns the usage to book when a nested model run ends. */
@@ -71,23 +141,27 @@ export class NestedUsage {
     if (ev.type === 'model_request') this.modelRuns.add(ev.runId);
     if (ev.type !== 'run_end' || !ev.parentRunId || !this.modelRuns.has(ev.runId)) return undefined;
     const end = ev.data as RunUsage;
-    const now = { costUsd: end.costUsd ?? 0, inputTokens: end.usage?.inputTokens ?? 0, outputTokens: end.usage?.outputTokens ?? 0 };
-    const prev = this.last.get(ev.runId) ?? { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    const now = { costUsd: end.costUsd ?? 0, tokens: tokensOf(end.usage) };
+    const prev = this.last.get(ev.runId) ?? { costUsd: 0, tokens: zeroTokens() };
     this.last.set(ev.runId, now);
-    const d = { costUsd: Math.max(0, now.costUsd - prev.costUsd), inputTokens: Math.max(0, now.inputTokens - prev.inputTokens), outputTokens: Math.max(0, now.outputTokens - prev.outputTokens) };
-    this.booked.costUsd += d.costUsd;
-    this.booked.inputTokens += d.inputTokens;
-    this.booked.outputTokens += d.outputTokens;
-    return { status: end.status, usage: { inputTokens: d.inputTokens, outputTokens: d.outputTokens }, costUsd: d.costUsd };
+    const d = zeroTokens();
+    for (const k of TOKEN_KEYS) {
+      d[k] = Math.max(0, now.tokens[k] - prev.tokens[k]);
+      this.bookedTokens[k] += d[k];
+    }
+    const cost = Math.max(0, now.costUsd - prev.costUsd);
+    this.booked.costUsd += cost;
+    this.booked.inputTokens = this.bookedTokens.inputTokens;
+    this.booked.outputTokens = this.bookedTokens.outputTokens;
+    return { status: end.status, usage: usageOf(d), costUsd: cost };
   }
 
   /** What the whole run cost beyond the nested runs already booked. */
   remainder(res: RunUsage): RunUsage {
-    return {
-      status: res.status,
-      usage: { inputTokens: Math.max(0, (res.usage?.inputTokens ?? 0) - this.booked.inputTokens), outputTokens: Math.max(0, (res.usage?.outputTokens ?? 0) - this.booked.outputTokens) },
-      costUsd: Math.max(0, (res.costUsd ?? 0) - this.booked.costUsd),
-    };
+    const all = tokensOf(res.usage);
+    const d = zeroTokens();
+    for (const k of TOKEN_KEYS) d[k] = Math.max(0, all[k] - this.bookedTokens[k]);
+    return { status: res.status, usage: usageOf(d), costUsd: Math.max(0, (res.costUsd ?? 0) - this.booked.costUsd) };
   }
 }
 
@@ -193,6 +267,7 @@ export class Observatory {
         runs: rows.reduce((s, r) => s + r.runs, 0),
         tokens: { input: rows.reduce((s, r) => s + r.inputTokens, 0), output: rows.reduce((s, r) => s + r.outputTokens, 0) },
         costUsd: { total: Math.round(rows.reduce((s, r) => s + r.costUsd, 0) * 1e6) / 1e6, byModel: usd(u.by('model')), byTier: usd(u.by('tier')) },
+        cache: { ...u.cache(), byModel: u.cacheBy('model'), byTier: u.cacheBy('tier') },
       },
     };
   }

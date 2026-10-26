@@ -517,5 +517,10 @@
   },
   "budget": {
     "maxUsd": 0
+  },
+  "promptCache": {
+    "enabled": true,
+    "ttl": "5m",
+    "groupTtl": "5m"
   }
 }

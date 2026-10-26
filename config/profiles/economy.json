@@ -1,0 +1,57 @@
+{
+  "description": "Low-cost long runs: every agent on haiku except the elder on sonnet, no crowd extras, longer plans and replan cooldowns in game time, fewer group convocations, shorter replies.",
+  "rosterTiers": {
+    "*": "haiku",
+    "Ilse": "sonnet"
+  },
+  "game": {
+    "decisions": {
+      "tiers": {
+        "haiku": {
+          "maxSteps": 35,
+          "horizonFactor": 4,
+          "cooldownFactor": 6,
+          "maxTurns": 4,
+          "maxOutputTokens": 2500,
+          "maxConsults": 1
+        },
+        "sonnet": {
+          "maxSteps": 50,
+          "horizonFactor": 6,
+          "cooldownFactor": 9,
+          "maxTurns": 5,
+          "maxOutputTokens": 4000,
+          "maxConsults": 2
+        }
+      },
+      "modelParams": {
+        "reply": {
+          "retryMaxTokens": 800
+        },
+        "prose": {
+          "retryMaxTokens": 1200
+        }
+      }
+    },
+    "conversation": {
+      "replyMaxOutputTokens": 500
+    },
+    "groups": {
+      "memberTier": "haiku",
+      "maxProposers": 2,
+      "proseMaxOutputTokens": 1000,
+      "minGameMinutesBetweenDecisions": 240
+    },
+    "crowd": {
+      "count": 0
+    },
+    "births": {
+      "childTier": "haiku"
+    },
+    "promptCache": {
+      "enabled": true,
+      "ttl": "5m",
+      "groupTtl": "5m"
+    }
+  }
+}

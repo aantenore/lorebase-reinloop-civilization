@@ -2,6 +2,7 @@
 // the environment; nothing here prints them).
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { applyRosterTiers, deepMerge, loadProfile } from './profile.ts';
 import type { Tier, WorldGenConfig } from './world/types.ts';
 
 export const ROOT = resolve(import.meta.dirname, '../..');
@@ -71,6 +72,8 @@ export interface SimConfig {
   modelOverride?: string;
   forceMock: boolean;
   rosterFile: string;
+  /** Tiers set by the cost profile (GAME_PROFILE), applied to the configured and to the saved roster. */
+  rosterTiers?: Record<string, Tier>;
   /** SIM_API_TOKEN: when set, mutating routes and the WebSocket join require it. */
   apiToken?: string;
 }
@@ -108,7 +111,10 @@ export function devOrigins(range: [number, number] | undefined): string[] {
 export function loadConfig(argv: string[] = process.argv.slice(2), env: NodeJS.ProcessEnv = process.env): SimConfig {
   loadEnvFile();
   const path = resolve(ROOT, env.SIM_CONFIG ?? 'config/sim.json');
-  const cfg = JSON.parse(readFileSync(path, 'utf8')) as SimConfig;
+  const profile = loadProfile(env);
+  const cfg = deepMerge(JSON.parse(readFileSync(path, 'utf8')) as SimConfig, profile.sim ?? {});
+  cfg.rosterTiers = profile.rosterTiers;
+  cfg.roster = applyRosterTiers(cfg.roster, cfg.rosterTiers);
   cfg.language = env.SIM_LANGUAGE ?? cfg.language;
   cfg.seed = num(env.SIM_SEED) ?? cfg.seed;
   cfg.tickMs = num(env.SIM_TICK_MS) ?? cfg.tickMs;
