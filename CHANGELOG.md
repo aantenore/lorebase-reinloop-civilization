@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `npm run world:reset` keeps its archive as a Lorebase tag (`archive/<stamp>`) instead of a full branch, so it no
+  longer fills the Keeper's materialized-branch cap; `npm run lorebase:archive-to-tags` converts existing
+  `archive/` branches (dry run, `--apply` to execute).
 - reinloop pinned at `96601b2` (`vendor/reinloop-96601b26.tgz`): hosted tools, web tools, Anthropic prompt caching.
 - Prompt caching configured by `promptCache` (`ttl`, `groupTtl`); cache reads, writes, hit ratio and savings in
   `/api/observatory/summary` (`reinloop.cache`).

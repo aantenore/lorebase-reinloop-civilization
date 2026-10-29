@@ -471,10 +471,15 @@ a `reset/<stamp>` branch, one Proposal, approved and merged; records leave `main
 `delete_records` Operation, one call per Kind and batch of `knowledge.lorebase.maxBulkDeleteKeys` keys): laws not in `lorebase/rules.seed.yaml` are
 repealed, seed laws and roles get their seed values back, discovered technologies and their recipes
 leave `main` (the seed then rebuilds `nature/hidden`), Chronicle, Insight and Family records are kept on
-`archive/<stamp>` and removed from `main`, and stale `role/`, `law/`, `tech/`, `seed/`, `reset/` branches
+the tag `archive/<stamp>` (a Lorebase tag does not count against the Keeper's cap on materialized branches,
+`keeper.branches.max_materialized_per_domain`; tags are immutable and cannot be deleted) and removed from `main`, and stale `role/`, `law/`, `tech/`, `seed/`, `reset/` branches
 and their open Proposals are closed. Then mnemo's database (`config/mnemo.json` `db.path`) is deleted
 (`data/models` is kept). `--dry-run` lists the actions; `--keep-memory` keeps mnemo; it refuses while
 mnemo answers (`--force` to override).
+
+Older resets left `archive/<stamp>` as full branches, which fill the cap. `npm run lorebase:archive-to-tags`
+lists them (dry run) and `-- --apply` turns each into a tag of the same name at the same head (the branch is
+deleted, then the tag is created at its recorded revision; re-running skips what is already tagged).
 
 ### Private memory: mnemo (`services/mnemo`)
 

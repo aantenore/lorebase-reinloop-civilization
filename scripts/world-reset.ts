@@ -4,7 +4,7 @@
 //   - laws not in the seed (knowledge.seed.rules) are repealed, seed laws get their seed value and
 //     wording back (missing ones are re-created), roles get their seed values back;
 //   - discovered technologies and their recipes leave the live world (back to the hidden catalog, rebuilt by the seed);
-//   - Chronicle, Insight and Family records are archived on `archive/<timestamp>` and removed from the live world;
+//   - Chronicle, Insight and Family records are archived on the tag `archive/<timestamp>` and removed from the live world;
 //   - stale drafts (role/, law/, tech/, seed/, reset/, probe/) and their open proposals are closed.
 // Then the private memory database of mnemo (config/mnemo.json db.path, MNEMO_DB) is deleted
 // (the downloaded embedding model in data/models is kept). Stop the game and mnemo first.
@@ -124,12 +124,12 @@ for (const p of open) await knowledge.reject(p.id).catch((err) => console.warn(`
 for (const d of stale) await knowledge.discardDraft(d).catch(() => undefined);
 const changes = actions.length + removals.length;
 if (changes) {
-  if (Object.values(archived).some((n) => n > 0)) await knowledge.snapshot(`archive/${stamp}`);
+  if (Object.values(archived).some((n) => n > 0)) await knowledge.archive(`archive/${stamp}`);
   const work = `reset/${stamp}`;
   await knowledge.snapshot(work);
   for (const a of actions) await knowledge.write([a.change], { scope: work, message: `World reset: ${a.what}` });
   for (const b of batches) await knowledge.removeMany(b.kind, b.keys, { scope: work, message: `World reset: remove ${b.keys.length} ${b.kind} record(s)` });
-  const pr = await knowledge.propose({ draft: work, title: 'World reset', description: `Back to the seed state: ${changes} change(s). History archived on archive/${stamp}.`, message: 'World reset', changes: [] });
+  const pr = await knowledge.propose({ draft: work, title: 'World reset', description: `Back to the seed state: ${changes} change(s). History archived on tag archive/${stamp}.`, message: 'World reset', changes: [] });
   await knowledge.review(pr.id, 'approve', 'World reset');
   const revision = await knowledge.accept(pr.id, 'World reset');
   console.log(`accepted ${pr.id} into ${main} @ ${revision.slice(0, 12)} (${actions.length} change(s), ${batches.length} bulk removal(s))`);

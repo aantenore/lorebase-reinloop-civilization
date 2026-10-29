@@ -241,6 +241,12 @@ export class LorebaseKnowledge implements Knowledge {
     await this.client.createBranch(scope, this.cfg.branch);
   }
 
+  /** A tag of the live head: tags are immutable and do not count against the Domain's materialized-branch cap, so the name must be new. */
+  async archive(name: string): Promise<void> {
+    if (name === this.cfg.branch) throw new Error('the live world cannot be an archive');
+    await this.client.createTag(name, { source: this.cfg.branch });
+  }
+
   async ensureSchema(): Promise<number> {
     const s = this.cfg.schema;
     try {

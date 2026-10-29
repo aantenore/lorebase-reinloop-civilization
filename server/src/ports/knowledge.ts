@@ -164,8 +164,10 @@ export interface Knowledge {
   discardDraft(draft: string): Promise<void>;
   /** Deletes many records of one kind (missing ones skipped). Returns how many keys were sent. */
   removeMany(kind: string, keys: string[], opts: WriteOptions): Promise<number>;
-  /** Keeps a named copy of the live world (replacing an earlier one with the same name); usable as a draft. */
+  /** Keeps a named copy of the live world (replacing an earlier one with the same name); usable as a draft (a full branch on Lorebase). */
   snapshot(scope: string): Promise<void>;
+  /** Keeps a read-only, permanent copy of the live world under `name` (readable by ref; not usable as a draft). */
+  archive(name: string): Promise<void>;
   /** Makes sure the space and its schema exist. Returns the number of schema changes. */
   ensureSchema(): Promise<number>;
   close(): Promise<void>;

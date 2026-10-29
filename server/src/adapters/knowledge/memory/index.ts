@@ -275,6 +275,10 @@ export class MemoryKnowledge implements Knowledge {
     this.logs.set(scope, []);
   }
 
+  async archive(name: string): Promise<void> {
+    await this.snapshot(name);
+  }
+
   async ensureSchema(): Promise<number> {
     return 0;
   }

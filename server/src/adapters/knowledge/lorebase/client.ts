@@ -58,6 +58,12 @@ export interface ProposalInfo {
   merged_revision?: string | null;
 }
 
+export interface TagInfo {
+  name: string;
+  revision: string;
+  created_at?: string;
+}
+
 export interface ExecuteOptions {
   branch: string;
   message?: string;
@@ -120,6 +126,25 @@ export class LorebaseClient {
 
   deleteBranch(name: string): Promise<unknown> {
     return this.request('DELETE', `${this.base}/branches/${encodeURIComponent(name)}`);
+  }
+
+  /** A tag never moves and is not a branch: it does not count against the materialized-branch cap. Tagged by `source` head or by `revision`. */
+  createTag(name: string, target: { source?: string; revision?: string }): Promise<TagInfo> {
+    return this.request('POST', `${this.base}/tags`, { name, ...target }, { 'Idempotency-Key': randomUUID() });
+  }
+
+  /** Every tag of the Domain (follows cursors). */
+  async listTags(): Promise<TagInfo[]> {
+    const out: TagInfo[] = [];
+    let cursor: string | undefined;
+    do {
+      const q = new URLSearchParams({ limit: '200' });
+      if (cursor) q.set('cursor', cursor);
+      const page = await this.request<{ items: TagInfo[]; next_cursor?: string | null }>('GET', `${this.base}/tags?${q}`);
+      out.push(...page.items);
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor);
+    return out;
   }
 
   applySchema(branch: string, yaml: string, message: string): Promise<{ status: string; revision: string | null; change_count: number }> {

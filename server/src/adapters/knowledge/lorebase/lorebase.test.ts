@@ -4,6 +4,7 @@ import { loadConfig } from '../../../config.ts';
 import { KnowledgeError } from '../../../ports/knowledge.ts';
 import { LorebaseError } from './client.ts';
 import { pinnedSchema } from './herald.ts';
+import { planArchiveToTags } from './archive.ts';
 import { LorebaseKnowledge } from './index.ts';
 
 type Call = { op: string; params: Record<string, unknown>; branch: string };
@@ -23,6 +24,7 @@ function stubbed(): { k: LorebaseKnowledge; calls: Call[]; log: string[] } {
     return { name, head: 'h', protected: false };
   };
   c.createBranch = async (name: string, source: string) => (log.push(`branch ${name} from ${source}`), { name, head: 'h' });
+  c.createTag = async (name: string, target: { source?: string; revision?: string }) => (log.push(`tag ${name} from ${target.source ?? target.revision}`), { name, revision: 'h' });
   c.deleteBranch = async (name: string) => log.push(`delete ${name}`);
   c.createProposal = async (source: string, target: string, title: string) => (log.push(`proposal ${source} -> ${target}: ${title}`), { id: 'P1', status: 'open' });
   c.getProposal = async (id: string) => ({ id, title: 't', source_ref: 'law/x', target_ref: 'main', status: 'open', created_at: '' });
@@ -96,4 +98,30 @@ test('pinnedSchema drops branch arguments and backend names from descriptions', 
     required: ['query', 'branch'],
   }, ['branch']);
   assert.deepEqual(out, { type: 'object', properties: { query: { type: 'string' }, kinds: { type: 'array', description: 'record kinds' } }, required: ['query'] });
+});
+
+test('lorebase knowledge: archive is a tag of the live head, never a branch; snapshot stays a branch', async () => {
+  const { k, log } = stubbed();
+  await k.archive('archive/20260101');
+  await k.snapshot('reset/20260101');
+  assert.deepEqual(log, ['tag archive/20260101 from main', 'delete reset/20260101', 'branch reset/20260101 from main']);
+  await assert.rejects(k.archive('main'));
+});
+
+test('archive to tags: plans one tag per archive branch, skips tagged or protected ones, nothing once migrated', () => {
+  const branches = [
+    { name: 'main', head: 'm', protected: true },
+    { name: 'archive/b', head: 'hb' },
+    { name: 'archive/a', head: 'ha' },
+    { name: 'archive/c', head: 'hc' },
+    { name: 'archive/p', head: 'hp', protected: true },
+    { name: 'reset/x', head: 'hx' },
+  ];
+  assert.deepEqual(planArchiveToTags(branches, [{ name: 'archive/c', revision: 'hc' }], 'archive/'), [
+    { action: 'tag', name: 'archive/a', head: 'ha' },
+    { action: 'tag', name: 'archive/b', head: 'hb' },
+    { action: 'skip', name: 'archive/c', reason: 'a tag with this name exists' },
+    { action: 'skip', name: 'archive/p', reason: 'protected branch' },
+  ]);
+  assert.deepEqual(planArchiveToTags([{ name: 'main', head: 'm' }], [{ name: 'archive/a', revision: 'ha' }], 'archive/'), []);
 });

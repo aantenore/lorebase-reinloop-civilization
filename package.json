@@ -11,6 +11,7 @@
     "lorebase:up": "bash scripts/lorebase-up.sh up",
     "lorebase:down": "bash scripts/lorebase-up.sh down",
     "lorebase:seed": "node scripts/lorebase-seed.ts",
+    "lorebase:archive-to-tags": "node scripts/archive-to-tags.ts",
     "dev": "node server/src/main.ts",
     "sim:mock": "node server/src/main.ts --mock",
     "rule": "node scripts/change-rule.ts",
