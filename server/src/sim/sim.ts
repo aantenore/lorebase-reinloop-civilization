@@ -15,7 +15,7 @@ export interface SimStatus {
   running: boolean;
   tick: number;
   tickMs: number;
-  provider: 'anthropic' | 'mock';
+  provider: string;
   model: string;
   knowledge: KnowledgeStatus;
   /** @deprecated alias of `knowledge`, kept for one version. */

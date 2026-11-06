@@ -136,7 +136,7 @@ export function modelRef(host: Pick<DecideHost, 'mock' | 'world'>, model: string
   if (host.mock) {
     return { provider: mockProvider([(req, i) => ({ delayMs: delayMs / Math.max(1, host.world().timeScale), ...script(req, i) })], { loop: true, name: 'mock' }), model: `mock/${model}` };
   }
-  // `anthropic/<model>` resolves through reinloop's preset (ANTHROPIC_WORKSPACE_ID becomes the workspace header).
+  // `<provider>/<model>` resolves through reinloop's presets (ANTHROPIC_WORKSPACE_ID becomes the Anthropic workspace header).
   return model;
 }
 

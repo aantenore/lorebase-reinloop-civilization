@@ -1,0 +1,38 @@
+{
+  "description": "Free runs on a local model (Ollama by default): every tier on ollama/qwen3:4b (SIM_MODEL_OVERRIDE picks another), one mind thinking at a time, long timeouts, fewer turns and consultations, room for the reasoning of thinking models (8000 output tokens per decision), no crowd extras, no prompt caching.",
+  "sim": {
+    "models": {
+      "opus": "ollama/qwen3:4b",
+      "sonnet": "ollama/qwen3:4b",
+      "haiku": "ollama/qwen3:4b"
+    }
+  },
+  "game": {
+    "decisions": {
+      "maxConcurrent": 1,
+      "timeoutMinMs": 180000,
+      "timeoutMs": 300000,
+      "tiers": {
+        "haiku": { "maxSteps": 20, "horizonFactor": 4, "cooldownFactor": 6, "maxTurns": 3, "maxOutputTokens": 8000, "maxConsults": 1 },
+        "sonnet": { "maxSteps": 20, "horizonFactor": 4, "cooldownFactor": 6, "maxTurns": 3, "maxOutputTokens": 8000, "maxConsults": 1 },
+        "opus": { "maxSteps": 20, "horizonFactor": 4, "cooldownFactor": 6, "maxTurns": 3, "maxOutputTokens": 8000, "maxConsults": 1 }
+      }
+    },
+    "conversation": {
+      "replyMaxOutputTokens": 3000,
+      "replyTimeoutMs": 120000,
+      "replyMaxConsults": 0
+    },
+    "groups": {
+      "maxProposers": 2,
+      "proseMaxOutputTokens": 3000,
+      "minGameMinutesBetweenDecisions": 240
+    },
+    "crowd": {
+      "count": 0
+    },
+    "promptCache": {
+      "enabled": false
+    }
+  }
+}

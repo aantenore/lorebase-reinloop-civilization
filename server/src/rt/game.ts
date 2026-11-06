@@ -20,6 +20,7 @@ import { Chronicle, type ChronicleEvent } from './chronicle.ts';
 import { type Insight, InsightBook } from './insights.ts';
 import { AGENT_PATTERNS, type GameConfig, type GroupPattern } from './config.ts';
 import { type DecideHost, decide, reply, type ToolOutcome } from './decide.ts';
+import { modelRefs, providerMode, type ProviderMode } from './providers.ts';
 import { type Group, GroupManager, type JointPlan } from './groups.ts';
 import { AgentMind, GroupMind, Limiter, type MindHost, type Perception } from './mind.ts';
 import { type Plan, type PlanStep, tileOf } from './plan.ts';
@@ -52,6 +53,8 @@ export class Game {
   readonly memory: Memory;
   readonly t: Translate;
   readonly mock: boolean;
+  /** Live providers, or why the mock runs (see providers.ts). */
+  readonly providerMode: ProviderMode;
   world: RtWorld;
   roster: RosterEntry[] = [];
   private groups: GroupManager;
@@ -119,7 +122,8 @@ export class Game {
     this.cfg = cfg;
     this.game = game;
     this.t = translator(loadTemplates(ROOT, cfg.language));
-    this.mock = cfg.forceMock || !process.env.ANTHROPIC_API_KEY;
+    this.providerMode = providerMode(modelRefs(cfg), cfg.forceMock);
+    this.mock = this.providerMode.mock;
     this.knowledge = deps.knowledge;
     this.memory = deps.memory;
     this.limiter = new Limiter(game.decisions.maxConcurrent);
@@ -1688,7 +1692,7 @@ export class Game {
   status() {
     return {
       mode: 'realtime',
-      provider: this.mock ? 'mock' : 'anthropic',
+      provider: this.mock ? 'mock' : this.providerMode.providers.join(', '),
       model: this.cfg.modelOverride ?? [...new Set(this.world.living().filter((e) => e.kind !== 'player').map((e) => e.model))].join(', '),
       time: this.timeDto(),
       population: this.world.living().length,

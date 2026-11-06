@@ -6,6 +6,7 @@ import { createHttpServer } from './http/server.ts';
 import { attachWebSocket } from './http/ws.ts';
 import { loadGameConfig } from './rt/config.ts';
 import { Game } from './rt/game.ts';
+import { providerLabel } from './rt/providers.ts';
 
 const argv = process.argv.slice(2);
 const flag = (name: string) => {
@@ -25,7 +26,7 @@ const wss = attachWebSocket(server, { path: gameCfg.ws.path, maxPayloadBytes: ga
 });
 
 server.listen(cfg.http.port, cfg.http.host, () => {
-  console.log(`real-time world on http://${cfg.http.host}:${cfg.http.port} (ws ${gameCfg.ws.path}, provider ${game.mock ? 'mock (offline fallback)' : 'anthropic'}${cfg.modelOverride ? `, all agents on ${cfg.modelOverride}` : ''}${cfg.apiToken ? ', token required' : ''})`);
+  console.log(`real-time world on http://${cfg.http.host}:${cfg.http.port} (ws ${gameCfg.ws.path}, provider ${providerLabel(game.providerMode)}${cfg.modelOverride ? `, all agents on ${cfg.modelOverride}` : ''}${cfg.apiToken ? ', token required' : ''})`);
 });
 
 let stopping = false;

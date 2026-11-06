@@ -7,8 +7,10 @@ import type { AgentState } from '../world/types.ts';
 import { type MockHost, mockStep } from './mock.ts';
 import { instructions } from './prompt.ts';
 import { notebookTools, type ToolHost, worldTools } from './tools.ts';
+import { providerMode } from '../rt/providers.ts';
 
-export type ProviderKind = 'anthropic' | 'mock';
+/** `mock`, or the reinloop provider of the model (`anthropic`, `ollama`, ...). */
+export type ProviderKind = string;
 
 export interface RegisteredAgent {
   id: string;
@@ -58,10 +60,9 @@ export class AgentRegistry {
   }
 
   providerFor(model: string): ProviderKind {
-    // The mock provider is only an offline fallback: --mock / SIM_MOCK=1, or no API key.
-    if (this.cfg.forceMock) return 'mock';
-    if (model.startsWith('anthropic/') && !process.env.ANTHROPIC_API_KEY) return 'mock';
-    return 'anthropic';
+    // The mock provider is only an offline fallback: --mock / SIM_MOCK=1, or a missing API key (providers.ts).
+    const mode = providerMode([model], this.cfg.forceMock);
+    return mode.mock ? 'mock' : mode.providers[0];
   }
 
   get provider(): ProviderKind {
@@ -78,7 +79,7 @@ export class AgentRegistry {
       name: state.id,
       model: provider === 'mock'
         ? { provider: mockProvider([(req) => ({ ...mockStep(this.mockHost, state.id)(req), delayMs: this.cfg.mock.thinkDelayMs })], { loop: true }), model }
-        // `anthropic/<model>` through reinloop's preset (ANTHROPIC_WORKSPACE_ID becomes the workspace header).
+        // `<provider>/<model>` through reinloop's presets (ANTHROPIC_WORKSPACE_ID becomes the Anthropic workspace header).
         : model,
       params: { maxTokens: a.maxOutputTokens },
       instructions: this.instructionsFor(state),
