@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-11-06
 
 Runs on reinloop 0.3.2 (npm) and Lorebase 0.3.1 (published images); no sibling checkout is needed.
 
