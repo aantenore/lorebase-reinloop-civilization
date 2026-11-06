@@ -18,6 +18,14 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Workaround:** `scripts/lorebase-up.sh` uses its own tag (`LOREBASE_TAG=civ-demo`), builds it once
   from the checkout (`REBUILD=1` to rebuild) and its own compose project/volume (`-p civ-lorebase`).
 - **Status:** Resolved upstream in Lorebase 0.2.2 (`666cd18`): compose rebuilds images on every `up` and migrations refuse a database ahead of the code. `scripts/lorebase-up.sh` no longer builds once; it keeps its own tag and compose project only to isolate the demo volume.
+  It came back in another form: the demo's `civ-demo` image, built from a 2026-10-29 checkout, kept running
+  (Docker restarts it, `restart: unless-stopped`, without a rebuild) while the bind-mounted
+  `../lorebase/config/lorebase.example.yaml` moved to 0.3.0 keys; Keeper crash-looped with the same
+  `Extra inputs are not permitted`. The demo no longer reads anything from a checkout: `scripts/lorebase-up.sh`
+  runs the published images of the release pinned in `deploy/lorebase.settings.env` (`LOREBASE_VERSION=0.3.1`,
+  `ghcr.io/aantenore/lorebase*`, pull policy `missing`) with that release's compose file and configuration,
+  copied into `deploy/compose/` and `deploy/lorebase.yaml`. Building from a checkout is opt-in
+  (`LOREBASE_FROM_SOURCE=1`).
 
 ## 2. lorebase: demo-friendly Keeper settings are not reachable through the compose env file
 
@@ -135,7 +143,7 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Workaround:** `deploy/compose.override.yaml` sets `LOREBASE__KEEPER__CORS__ALLOW_ORIGINS` / `__ALLOW_HEADERS` (JSON lists); no conditional reads.
 - **Status:** Resolved upstream in Lorebase 0.2.2 (`ecc2f14`). Only `LOREBASE__KEEPER__CORS__ALLOW_ORIGINS` is set; `If-None-Match` and the exposed `ETag` are defaults.
 
-## 10. reinloop: `MemoryStore` has no search hook; `recall` always ranks by keyword overlap
+## 11. reinloop: `MemoryStore` has no search hook; `recall` always ranks by keyword overlap
 
 - **Severity:** dx
 - **Repro:** back `memoryTools({ store })` with a semantic store; `recall` calls `store.all(ns)` and ranks with `rank()`.
@@ -144,7 +152,7 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Workaround:** the game defines its own `remember`/`recall` tools that call mnemo (`server/src/rt/brain.ts`).
 - **Status:** Resolved upstream in reinloop `00934f6`. Not adopted: mnemo's `remember` takes importance and emotion and stores game time, `recall` answers with day and fidelity (vivid/faded); reinloop's `memoryTools` (`text`, `tags`, `- text [tags]` lines) would drop that game semantics, so the game keeps its own tools.
 
-## 11. reinloop: `parallel` pattern reports only "all workers failed"
+## 12. reinloop: `parallel` pattern reports only "all workers failed"
 
 - **Severity:** dx
 - **Repro:** a `parallel` team whose workers all end with a non-completed status (budget, timeout, provider error).
@@ -153,7 +161,7 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Workaround:** the group decision sink collects every non-completed `run_end` reason, budget stops included (`server/src/rt/groups.ts`); the council uses its own tolerant proposals pattern, where a worker stopped by its budget still contributes what it said and the elder decides alone when nobody proposed.
 - **Status:** Resolved upstream in reinloop `7b23887` and `c8f46ba`. `GroupManager.decide` reports `res.failures`; the custom patterns return `memberFailures(...)`; the sink only builds the trace.
 
-## 12. reinloop: `parseYaml` rejects multi-line flow mappings
+## 13. reinloop: `parseYaml` rejects multi-line flow mappings
 
 - **Severity:** dx
 - **Repro:** `parseYaml('a:\n  - {code: x,\n     name: y}\n')`.
@@ -162,14 +170,14 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Workaround:** `lorebase/economy.seed.yaml` uses block style only.
 - **Status:** Resolved upstream in reinloop `365d0f3`. The seed keeps block style (no change needed).
 
-## 13. lorebase: reserved attribute names also include `kind`
+## 14. lorebase: reserved attribute names also include `kind`
 
 - **Severity:** doc (same as 3)
 - **Repro:** a Kind attribute named `kind` → `schema.api_name_reserved`.
 - **Workaround:** the `Resource` Kind uses `category`.
 - **Status:** Resolved upstream in Lorebase 0.2.2 (`762066b`, same as 3).
 
-## 14. reinloop: thinking-only answers look like "empty responses"
+## 15. reinloop: thinking-only answers look like "empty responses"
 
 - **Severity:** bug
 - **Repro:** a Claude 5.5 model (thinking on by default) with a small `maxTokens` (e.g. 300): the
@@ -183,7 +191,7 @@ Friction found in the projects this demo builds on, worked around here without p
   a reply with no words leaves the person silent instead of counting as a failure.
 - **Status:** Resolved upstream in reinloop `1334393` and `a11c8e4`. `decisions.modelExtra` (raw body fields) is replaced by `decisions.modelParams` (`effort`, `thinking`, `retryMaxTokens`); a reply run that does not complete (e.g. `max_tokens`) now counts as a failure instead of a silence; plan reasoning summaries (`thinking_delta`) reach privileged clients as `thought` events.
 
-## 15. lorebase: no bulk delete, so a governed reset hits the write rate limit
+## 16. lorebase: no bulk delete, so a governed reset hits the write rate limit
 
 - **Severity:** dx
 - **Repro:** remove ~260 Records (Chronicle, Insight) from a branch through Operations: one `delete_{kind}`
@@ -200,7 +208,7 @@ Friction found in the projects this demo builds on, worked around here without p
   `writes` token. `world:reset` sends one call per Kind and batch (`lorebase.bulkDeleteOperation`,
   `lorebase.maxBulkDeleteKeys` in `config/sim.json`) on the `reset/` branch and merges them with one Proposal.
 
-## 16. reinloop: `McpToolInfo` is not exported from the package entry
+## 17. reinloop: `McpToolInfo` is not exported from the package entry
 
 - **Severity:** dx
 - **Repro:** `import { type McpToolInfo } from 'reinloop'` and type-check.
@@ -208,4 +216,4 @@ Friction found in the projects this demo builds on, worked around here without p
 - **Actual:** `TS2305: Module '"reinloop"' has no exported member 'McpToolInfo'` (it is declared in
   `src/mcp/client.ts:178` but not re-exported by `src/index.ts`).
 - **Workaround:** none needed at runtime (type-only import, erased by Node's type stripping).
-- **Status:** Resolved upstream in reinloop `0b8b688` (in 0.2.0, pinned): `McpToolInfo` is exported; `brain.ts` imports it as before.
+- **Status:** Resolved upstream in reinloop `0b8b688` (in 0.2.0 and later): `McpToolInfo` is exported; `brain.ts` imports it as before.

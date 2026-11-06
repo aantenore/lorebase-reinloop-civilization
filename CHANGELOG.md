@@ -2,10 +2,34 @@
 
 ## Unreleased
 
+Runs on reinloop 0.3.2 (npm) and Lorebase 0.3.1 (published images); no sibling checkout is needed.
+
+- reinloop comes from npm (`"reinloop": "^0.3.2"`): `vendor/reinloop-96601b26.tgz`, `scripts/reinloop-pin.sh` and
+  the `reinloop:pin` script are gone.
+- Lorebase is pinned in `deploy/lorebase.settings.env` (`LOREBASE_VERSION=0.3.1`, `LOREBASE_REGISTRY`,
+  `LOREBASE_PULL_POLICY=missing`): `npm run lorebase:up` runs `ghcr.io/aantenore/lorebase:0.3.1` with the compose
+  file and the configuration of the same release, copied into `deploy/compose/` and `deploy/lorebase.yaml`
+  (Apache-2.0, `deploy/compose/LICENSE`). `LOREBASE_FROM_SOURCE=1` builds from a checkout as before (`LOREBASE_REPO`).
+  Image, tag, pull policy, compose and configuration file come from the shell or the settings file; the same names
+  in `deploy/lorebase.env`, written there by the previous script, are ignored with a note. Readiness waits are
+  configurable (`LOREBASE_READY_TRIES`, `HERALD_READY_TRIES`, `LOREBASE_READY_INTERVAL_S`).
+- Fixed: Keeper crash-looped with `Extra inputs are not permitted` when the sibling Lorebase checkout moved ahead
+  of the locally built `civ-demo` image (the configuration was bind-mounted from the checkout).
+- Live or mock is decided from the models in use: the mock runs only with `--mock`/`SIM_MOCK=1` or when a model's
+  provider needs an API key that is not set (reinloop presets), so `SIM_MODEL_OVERRIDE=ollama/qwen3:4b` runs live
+  without any key. The startup line and `/api/status` `provider` name the real provider, or why the mock runs.
+  The legacy tick server (`npm run dev`) follows the same rule.
+- `local` cost profile (`config/profiles/local.json`): every tier on `ollama/qwen3:4b`, one decision at a time,
+  decision timeouts 180-300 s, fewer turns and consultations, 8000 output tokens per decision (room for the
+  reasoning of thinking models), no crowd extras, no prompt caching.
+  `GAME_PROFILE=local npm run game` runs free on a local Ollama.
+- README: the Run section starts with the 30-second offline try, then the full stack on the pinned Lorebase, then
+  live models (hosted key or local Ollama); troubleshooting for `Extra inputs are not permitted`; the scope is
+  stated (reinloop and Lorebase only, no agent-layers or agent-plexus). `docs/upstream-issues.md`: status of issue 1
+  updated, duplicate number 10 fixed (later issues renumbered).
 - `npm run world:reset` keeps its archive as a Lorebase tag (`archive/<stamp>`) instead of a full branch, so it no
   longer fills the Keeper's materialized-branch cap; `npm run lorebase:archive-to-tags` converts existing
   `archive/` branches (dry run, `--apply` to execute).
-- reinloop pinned at `96601b2` (`vendor/reinloop-96601b26.tgz`): hosted tools, web tools, Anthropic prompt caching.
 - Prompt caching configured by `promptCache` (`ttl`, `groupTtl`); cache reads, writes, hit ratio and savings in
   `/api/observatory/summary` (`reinloop.cache`).
 - Cost profiles (`GAME_PROFILE`, `config/profiles/<name>.json`) and the `economy` profile.

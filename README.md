@@ -10,6 +10,10 @@ branch → Proposal → merge, and the colony learns of it from Lorebase's chang
 
 Latest live run (budget-capped, real models): [docs/run-report.md](docs/run-report.md).
 
+Scope: this demo shows reinloop and Lorebase only (reinloop 0.3.2 from npm, Lorebase 0.3.1 from its published
+images). It does not use agent-layers or agent-plexus; the
+[innovation hub stack](https://github.com/aantenore/lorebase-reinloop-innovation-hub-stack) demo shows those.
+
 ## Screenshots
 
 ![Game world](docs/screenshots/game-world.png)
@@ -167,36 +171,63 @@ The diagram below is the v1 tick dashboard:
 Agents have tiers (`opus`, `sonnet`, `haiku`); each tier maps to a model id in `config/sim.json`
 (`models`), a roster entry may name its own `model`.
 
-**Mock provider (offline fallback).** Without `ANTHROPIC_API_KEY`, or with `--mock`, agents use a
-deterministic heuristic instead of a model, so the demo runs offline; status reports
+**Mock provider (offline fallback).** With `--mock`, or when a model in use needs an API key that is not set
+(see "Run", 3), agents use a deterministic heuristic instead of a model, so the demo runs offline; status reports
 `provider: "mock"`. Tiers differ there too (short-sighted, planning, cooperative).
 
 ## Run
 
-Requirements: Node ≥ 22.18, Docker and the `lorebase` checkout (0.2.3 or later: `world:reset` uses its
-`delete_records`) next to this one (Keeper is built from it). reinloop is pinned (0.2.0 + `96601b2`: hosted tools, prompt caching):
-`vendor/reinloop-<sha>.tgz`, a packed build of one reinloop commit, is
-the dependency, so `npm ci` works anywhere (CI included).
+Requirements: Node ≥ 22.18. Docker only for the full stack (2), a model key or a local model server only
+for live models (3). Dependencies come from npm: `reinloop` (^0.3.2) and `ws`; Lorebase runs from its published
+images. No Lorebase or reinloop checkout is needed.
 
-To move to a newer reinloop: `npm run reinloop:pin` (snapshot of `../reinloop` HEAD) or
-`npm run reinloop:pin -- <path-to-reinloop> <sha>`. The script packs the COMMITTED tree only
-(`git archive`, never uncommitted edits), builds it in a temp dir, writes `vendor/reinloop-<sha>.tgz`,
-points `package.json` at it and runs `npm install`; delete the old tgz and commit both.
+**1. Try it in 30 seconds, offline** (no Docker, no key: in-process knowledge and memory, mock minds):
 
 ```bash
 npm install
-npm run lorebase:up        # Postgres + Keeper on 127.0.0.1:8180 (images rebuilt; deploy/lorebase.env secrets generated)
+KNOWLEDGE_ADAPTER=memory MEMORY_ADAPTER=inmem npm run game:mock    # open http://127.0.0.1:4400
+```
+
+**2. Full stack: Lorebase 0.3.1, Herald and mnemo.** `npm run lorebase:up` pulls
+`ghcr.io/aantenore/lorebase:0.3.1` (linux/amd64 and linux/arm64) when missing and starts it with the compose
+file and the configuration of the same release, kept in this repository (`deploy/compose/`,
+`deploy/lorebase.yaml`). The pin is `LOREBASE_VERSION` in `deploy/lorebase.settings.env`.
+
+```bash
+npm install
+npm run lorebase:up        # Postgres + migrations + Keeper on 127.0.0.1:8180 (deploy/lorebase.env secrets generated)
 npm run lorebase:seed      # Domain, schema, laws and roles merged into main via a Proposal
 (cd services/mnemo && npm install)   # mnemo's own dependency (transformers.js), once
-npm run game               # ONE command: Herald (docker, if not up) + mnemo (:4410) + real-time world (:4400)
-npm run game:mock          # same, offline mock provider
+npm run game:mock          # ONE command: Herald (docker, if not up) + mnemo (:4410) + real-time world (:4400), mock minds
+npm run game               # the same with live models (3)
+```
+
+Other commands:
+
+```bash
 npm run game:server        # the game server alone (no Herald/mnemo management)
 npm run herald:up          # Herald alone (compose profile mcp), the Lorebase MCP server, on 127.0.0.1:8190/mcp
 npm run dev                # legacy tick dashboard (v1) on the same port
 npm run sim:mock           # legacy dashboard, offline mock agents
-npm test                   # unit tests (engine, plans, pathfinding, votes, barter, society, request guards)
+npm test                   # unit tests (engine, plans, pathfinding, votes, barter, society, providers, request guards)
 npm run world:reset -- --dry-run   # what a reset to the seed state would do (see "World reset")
 ```
+
+**3. Live models.** The minds run live unless `--mock` (or `SIM_MOCK=1`) is given or one of the models in use
+needs an API key that is not set; the startup line names the provider, or why the mock runs
+(`provider mock (ANTHROPIC_API_KEY not set for anthropic/claude-haiku-5-5, ...)`). Models are reinloop refs
+(`<provider>/<model>`): the tiers in `config/sim.json` (`models`), a roster entry's own `model`, or
+`SIM_MODEL_OVERRIDE` for every agent.
+
+- Hosted: put `ANTHROPIC_API_KEY` in `.env` (and `ANTHROPIC_WORKSPACE_ID` for keys not scoped to a workspace),
+  then `npm run game`. A cap helps: `GAME_PROFILE=economy GAME_BUDGET_USD=10 npm run game`. Other reinloop
+  providers work the same way with their own key (`SIM_MODEL_OVERRIDE=openai/gpt-5-mini` and `OPENAI_API_KEY`).
+- Local, free: with [Ollama](https://ollama.com) on `http://localhost:11434` (`OLLAMA_BASE_URL` to change it) and
+  `ollama pull qwen3:4b`, run `GAME_PROFILE=local npm run game`. The `local` profile
+  (`config/profiles/local.json`) puts every tier on `ollama/qwen3:4b`, lets one mind think at a time and gives
+  each decision up to 5 minutes; `SIM_MODEL_OVERRIDE=ollama/<model>` picks another installed model. `qwen3:4b` is a
+  thinking model: a decision takes one to three minutes on a laptop (hence up to 8000 output tokens each) and plans
+  worse than hosted models; raise `decisions.timeoutMinMs`/`timeoutMs` in the profile on a slower machine.
 
 The first mnemo start downloads the embedding model `Xenova/multilingual-e5-small` (quantized,
 ~120 MB, from Hugging Face) into `data/models`; offline it falls back to concept tags from Haiku
@@ -217,10 +248,32 @@ mind is paused, the world keeps turning; 0 = no cap), `GAME_FLOWS_MS`, `MEMORY_A
 `MNEMO_CONFIG`, `MNEMO_COMPACT_MS`, `MNEMO_EMBEDDER`, `MNEMO_LLM` (`anthropic`|`heuristic`).
 The web UI (in `web/`) is served from `web/dist` when built; in development it runs on :5173.
 
-Lorebase runs from the upstream compose file with two env files: `deploy/lorebase.settings.env` (committed demo
-settings: self approval, direct commits on `main`, CORS origins, Herald port/domain) and `deploy/lorebase.env`
-(git-ignored; ports and secrets, missing secrets such as `LOREBASE_WEBHOOK_KEY` are appended on `up`).
+Lorebase runs with two env files: `deploy/lorebase.settings.env` (committed: the pin `LOREBASE_VERSION`,
+`LOREBASE_REGISTRY`, `LOREBASE_PULL_POLICY`, the compose and configuration files, and the demo settings: self
+approval, direct commits on `main`, CORS origins, Herald port/domain) and `deploy/lorebase.env` (git-ignored;
+ports and secrets, missing secrets such as `LOREBASE_WEBHOOK_KEY` are appended on `up`). Image, tag, pull policy,
+compose and configuration file can be overridden from the shell only (`LOREBASE_TAG=... npm run lorebase:up`).
+`LOREBASE_FROM_SOURCE=1` builds the images from a Lorebase checkout instead (`LOREBASE_REPO`, default
+`../lorebase`, tag `civ-demo`) with that checkout's compose file and configuration. `deploy/compose/` and
+`deploy/lorebase.yaml` are verbatim copies from Lorebase v0.3.1 (Apache-2.0, `deploy/compose/LICENSE`); to move
+to another release, change `LOREBASE_VERSION` and copy the same files from its tag.
 Stop Lorebase: `bash scripts/lorebase-up.sh down` (keeps data, Herald included) or `destroy` (drops the volume).
+Readiness waits: `LOREBASE_READY_TRIES` (default 60), `HERALD_READY_TRIES` (30), `LOREBASE_READY_INTERVAL_S` (2).
+
+### Troubleshooting
+
+- **Keeper restarts in a loop with `invalid configuration: ... Extra inputs are not permitted`.** The image and the
+  configuration file come from different Lorebase releases (a newer config read by an older image). Check
+  `bash scripts/lorebase-up.sh logs` and `docker inspect civ-lorebase-keeper-1 --format '{{.Config.Image}}'`, then
+  run `npm run lorebase:up`: it recreates Keeper on the pinned image with the configuration of the same release, and
+  `migrate` brings the existing volume forward. A `deploy/lorebase.env` written by an older version of this script
+  may still carry `LOREBASE_TAG=civ-demo` and a `LOREBASE_CONFIG_FILE` in a checkout; `lorebase:up` ignores them
+  and says so. With `LOREBASE_FROM_SOURCE=1`, keep the checkout and its image together (`npm run lorebase:up`
+  rebuilds after every `git pull` there).
+- **`migrate` fails on an existing volume** (e.g. `Can't locate revision`): the volume was migrated by a newer
+  Lorebase than the pinned one. Pin that release, or start over with `bash scripts/lorebase-up.sh destroy` (drops
+  the world's data).
+- **The minds run on the mock although a model is set**: the startup line says which key is missing.
 
 ## Try changing the laws
 
